@@ -25,6 +25,8 @@ services:
         sync: false
       - key: KHPAY_WEBHOOK_URL
         sync: false
+      - key: INSTALL_GROUP_URL
+        sync: false
       - key: STOCK_ENCRYPTION_KEY
         sync: false
       - key: SUPPORT_USERNAME

@@ -6,6 +6,17 @@ import httpx
 from app.payments import KHPayClient, aba_mobile_deeplink, aba_mobile_redirect_url
 
 
+def test_client_sends_configured_api_key():
+    async def run_test():
+        client = KHPayClient("sentinel-api-key", "https://khpay.site/api/v1")
+        try:
+            assert "sentinel-api-key" in client._client.headers["Authorization"]
+        finally:
+            await client.close()
+
+    asyncio.run(run_test())
+
+
 def test_qr_payment_uses_qr_endpoint():
     async def run_test():
         client = KHPayClient("api-key", "https://khpay.site/api/v1")

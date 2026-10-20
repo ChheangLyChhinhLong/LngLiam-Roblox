@@ -25,6 +25,8 @@ from app.bot import (
     send_welcome,
     track_payment_message,
     upload_product_image,
+    upload_product_video,
+    welcome_keyboard,
     welcome_text,
 )
 import app.bot as bot_module
@@ -68,7 +70,7 @@ def test_language_helpers_normalize_supported_locale_variants():
     asyncio.run(run_test())
 
 
-def test_start_welcome_sends_menu_and_saves_profile():
+def test_welcome_sends_buy_now_reply_button_and_saves_profile():
     async def run_test():
         bot_module.welcome_message_ids.clear()
         user = SimpleNamespace(id=12345, first_name="Jing", username="jing")
@@ -88,8 +90,36 @@ def test_start_welcome_sends_menu_and_saves_profile():
         sent_text = message.answer.call_args.args[0]
         sent_markup = message.answer.call_args.kwargs["reply_markup"]
         assert "សូមស្វាគមន៍ Jing" in sent_text
-        assert sent_markup.inline_keyboard[0][0].callback_data == "shop"
+        assert sent_markup.keyboard[0][0].text == "🛍 BUY NOW"
         assert bot_module.welcome_message_ids[user.id] == sent_message.message_id
+
+    asyncio.run(run_test())
+
+
+def test_welcome_uses_configured_photo_preview():
+    async def run_test():
+        bot_module.welcome_message_ids.pop(12345, None)
+        user = SimpleNamespace(id=12345, first_name="Jing", username="jing")
+        sent_message = SimpleNamespace(message_id=790)
+        message = SimpleNamespace(
+            from_user=user,
+            answer=AsyncMock(),
+            answer_photo=AsyncMock(return_value=sent_message),
+            bot=SimpleNamespace(),
+        )
+        store = SimpleNamespace(
+            user_language=AsyncMock(return_value="km"),
+            upsert_user=AsyncMock(),
+            categories=AsyncMock(return_value=[]),
+            bot_settings=AsyncMock(return_value={"welcome_photo_url": "https://images.example/welcome.png"}),
+        )
+
+        await send_welcome(message, store, SimpleNamespace(admin_ids=set()))
+
+        message.answer_photo.assert_awaited_once()
+        assert message.answer_photo.await_args.kwargs["photo"] == "https://images.example/welcome.png"
+        assert message.answer_photo.await_args.kwargs["reply_markup"].keyboard[0][0].text == "🛍 BUY NOW"
+        message.answer.assert_not_awaited()
 
     asyncio.run(run_test())
 
@@ -133,19 +163,18 @@ def test_parse_package_photo_caption():
 
 
 def test_parse_stock_add_accepts_comma_and_newline_separated_codes():
-    assert parse_stock_add("addstock product-123 | code1, code2\ncode3") == (
+    assert parse_stock_add("addstock product-123 | FF-KEY-1, FF-KEY-2\nFF-KEY-3") == (
         "product-123",
-        ["code1", "code2", "code3"],
+        ["FF-KEY-1", "FF-KEY-2", "FF-KEY-3"],
     )
 
 
 def test_parse_stock_add_ignores_other_text_and_rejects_missing_credentials():
     assert parse_stock_add("hello there") is None
-    assert parse_stock_add("/addstock product-123 | code1") is None
     try:
         parse_stock_add("addstock product-123 |  ")
     except ValueError as exc:
-        assert "Code" in str(exc)
+        assert "License Key" in str(exc)
     else:
         raise AssertionError("Expected empty stock data to be rejected")
 
@@ -155,6 +184,15 @@ def test_menu_uses_dynamic_tutorial_callback_and_groups_language_support():
 
     assert markup.inline_keyboard[2][0].callback_data == "how_to_buy"
     assert [button.callback_data for button in markup.inline_keyboard[3]] == ["language", "support"]
+
+
+def test_admin_welcome_keyboard_places_buy_now_at_the_bottom():
+    markup = welcome_keyboard(12345, SimpleNamespace(admin_ids={12345}))
+
+    assert [[button.text for button in row] for row in markup.keyboard] == [
+        ["⚙️ ADMIN"],
+        ["🛍 BUY NOW"],
+    ]
 
 
 def test_catalog_pagination_limits_items_and_clamps_page():
@@ -193,6 +231,28 @@ def test_edit_text_message_replaces_photo_with_text_message():
 
         message.delete.assert_awaited_once_with()
         message.answer.assert_awaited_once_with("Choose a package", parse_mode="HTML", reply_markup=None)
+        message.edit_text.assert_not_awaited()
+
+    asyncio.run(run_test())
+
+
+def test_edit_text_message_can_send_reply_for_user_text_input():
+    async def run_test():
+        message = SimpleNamespace(answer=AsyncMock(), edit_text=AsyncMock())
+        markup = SimpleNamespace()
+
+        await edit_text_message(
+            message,
+            "Choose a category",
+            reply_markup=markup,
+            edit_message=False,
+        )
+
+        message.answer.assert_awaited_once_with(
+            "Choose a category",
+            parse_mode=None,
+            reply_markup=markup,
+        )
         message.edit_text.assert_not_awaited()
 
     asyncio.run(run_test())
@@ -394,7 +454,7 @@ def test_product_image_update_targets_product_and_stores_cloudinary_url():
 
         assert updated
         client.table.assert_called_once_with("products")
-        query.update.assert_called_once_with({"image_url": image_url})
+        query.update.assert_called_once_with({"image_url": image_url, "video_url": None})
         query.eq.assert_called_once_with("id", product_id)
 
     asyncio.run(run_test())
@@ -433,7 +493,7 @@ def test_product_creation_inserts_category_and_cloudinary_image_url():
 def test_stock_removal_matches_only_available_stock_for_the_selected_product():
     async def run_test():
         product_id = "product-123"
-        credential = "user:password"
+        credential = "FF-KEY-REMOVE"
         key = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
         query = Mock()
         query.delete.return_value = query
@@ -485,6 +545,72 @@ def test_product_photo_downloads_and_uploads_to_cloudinary(monkeypatch):
     asyncio.run(run_test())
 
 
+def test_product_video_downloads_and_uploads_to_cloudinary(monkeypatch):
+    async def run_test():
+        async def download_video(file_id, destination):
+            destination.write(b"video-bytes")
+
+        telegram_bot = SimpleNamespace(download=AsyncMock(side_effect=download_video))
+        settings = SimpleNamespace(
+            cloudinary_cloud_name="cloud",
+            cloudinary_api_key="key",
+            cloudinary_api_secret="secret",
+        )
+        uploaded = Mock(return_value={"secure_url": "https://res.cloudinary.com/cloud/video/upload/item.mp4"})
+        monkeypatch.setattr(bot_module.cloudinary.uploader, "upload", uploaded)
+
+        video_url = await upload_product_video(telegram_bot, settings, "telegram-video-id")
+
+        assert video_url == "https://res.cloudinary.com/cloud/video/upload/item.mp4"
+        assert uploaded.call_args.args[0].getvalue() == b"video-bytes"
+        assert uploaded.call_args.kwargs["resource_type"] == "video"
+        assert uploaded.call_args.kwargs["folder"] == "products"
+
+    asyncio.run(run_test())
+
+
+def test_product_video_creation_and_update_store_video_url():
+    async def run_test():
+        query = Mock()
+        query.insert.return_value = query
+        query.select.return_value = query
+        query.execute = AsyncMock(return_value=SimpleNamespace(data=[{"id": "product-123"}]))
+        client = SimpleNamespace(table=Mock(return_value=query))
+
+        product_id = await Store(client).create_product(
+            "category-123",
+            "Video package",
+            "0.01",
+            "Description",
+            video_url="https://res.cloudinary.com/example/video/upload/test.mp4",
+        )
+
+        assert product_id == "product-123"
+        assert query.insert.call_args.args[0]["video_url"] == "https://res.cloudinary.com/example/video/upload/test.mp4"
+        assert "image_url" not in query.insert.call_args.args[0]
+
+        update_query = Mock()
+        update_query.update.return_value = update_query
+        update_query.eq.return_value = update_query
+        update_query.select.return_value = update_query
+        update_query.maybe_single.return_value = update_query
+        update_query.execute = AsyncMock(return_value=SimpleNamespace(data={"id": product_id}))
+        updated = await Store(SimpleNamespace(table=Mock(return_value=update_query))).update_product_video(
+            product_id,
+            "https://res.cloudinary.com/example/video/upload/replacement.mp4",
+        )
+
+        assert updated
+        update_query.update.assert_called_once_with(
+            {
+                "image_url": None,
+                "video_url": "https://res.cloudinary.com/example/video/upload/replacement.mp4",
+            }
+        )
+
+    asyncio.run(run_test())
+
+
 def test_delivery_deletes_payment_qr_before_fulfilling_and_sending_credentials():
     async def run_test():
         events = []
@@ -498,7 +624,10 @@ def test_delivery_deletes_payment_qr_before_fulfilling_and_sending_credentials()
 
         async def fulfill_order(order_id):
             events.append("fulfill")
-            return [encrypt_stock("user:password", key)]
+            return [
+                encrypt_stock("FF-1H-KEY-001", key),
+                encrypt_stock("FF-1D-KEY-002", key),
+            ]
 
         async def send_message(*args, **kwargs):
             events.append("send")
@@ -513,16 +642,28 @@ def test_delivery_deletes_payment_qr_before_fulfilling_and_sending_credentials()
         store = SimpleNamespace(
             payment_message=AsyncMock(return_value={"chat_id": 123, "message_id": 456}),
             clear_payment_message=AsyncMock(side_effect=clear_payment_message),
+            bot_settings=AsyncMock(return_value={"channel_install_link": "https://t.me/install_group"}),
             fulfill_order=AsyncMock(side_effect=fulfill_order),
-            user_language=AsyncMock(return_value="en"),
             mark_delivered=AsyncMock(side_effect=mark_delivered),
         )
-        settings = SimpleNamespace(stock_encryption_key=key)
+        settings = SimpleNamespace(stock_encryption_key=key, install_group_url="")
 
         await deliver_order(bot, store, settings, "order-123", 123)
 
         assert events == ["delete", "clear", "fulfill", "send", "mark"]
         bot.delete_message.assert_awaited_once_with(chat_id=123, message_id=456)
+        assert bot.send_message.await_args.args == (
+            123,
+            "✅ ទំនិញបានជោគជ័យ\n\n"
+            "🔑 បញ្ជី Key របស់អ្នក [ សរុប 2 Key ]\n"
+            "- FF-1H-KEY-001\n"
+            "- FF-1D-KEY-002\n\n"
+            "🙏 អរគុណសម្រាប់ការទិញទំនិញ 🙏\n\n"
+            "📲 ចុចលីងខាងក្រោមដើម្បីដំឡើង 📲",
+        )
+        button = bot.send_message.await_args.kwargs["reply_markup"].inline_keyboard[0][0]
+        assert button.text == "👉 ចូលក្រុមដំឡើង"
+        assert button.url == "https://t.me/install_group"
 
     asyncio.run(run_test())
 
@@ -562,7 +703,7 @@ def test_stock_notification_reaches_users_and_configured_chats_once():
         assert "ចំនួនថ្មី៖ 4" in bot.send_message.await_args_list[1].args[1]
         assert "New quantity: 4" in bot.send_message.await_args_list[2].args[1]
         button = bot.send_message.await_args_list[0].kwargs["reply_markup"].inline_keyboard[0][0]
-        assert button.url == "https://t.me/JingRobloxBot?start=stock_product-123"
+        assert button.url == "https://t.me/JingRobloxBot"
         assert button.callback_data is None
         assert bot.send_message.await_args_list[0].kwargs["reply_markup"].inline_keyboard[0][0].text == "🛍 View product"
         assert bot.send_message.await_args_list[1].kwargs["reply_markup"].inline_keyboard[0][0].text == "🛍 មើល Package"

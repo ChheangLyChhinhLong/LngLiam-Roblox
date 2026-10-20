@@ -5,13 +5,23 @@ import io
 import logging
 from decimal import Decimal, InvalidOperation
 from typing import Any
+from urllib.parse import urlsplit
 
 import qrcode
 import cloudinary.uploader
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.filters import CommandStart
-from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, Message
+from aiogram.types import (
+    BufferedInputFile,
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    InputMediaPhoto,
+    InputMediaVideo,
+    KeyboardButton,
+    Message,
+    ReplyKeyboardMarkup,
+)
 
 from app.config import Settings
 from app.payments import KHPayClient, aba_mobile_deeplink, aba_mobile_redirect_url
@@ -66,7 +76,10 @@ async def edit_text_message(
     *,
     parse_mode: str | None = None,
     reply_markup: InlineKeyboardMarkup | None = None,
+    edit_message: bool = True,
 ) -> Message:
+    if not edit_message:
+        return await message.answer(text, parse_mode=parse_mode, reply_markup=reply_markup)
     if message.text is None:
         try:
             await message.delete()
@@ -152,8 +165,6 @@ def quantity_limit(stock: int) -> int:
 
 
 def parse_product_caption(caption: str, language: str = "km") -> tuple[str, str, str]:
-    if caption.lstrip().startswith("/"):
-        raise ValueError(copy(language, "សូមផ្ញើ Caption ដោយមិនដាក់សញ្ញា / នៅខាងមុខ។", "Please send the caption without a leading /."))
     fields = [field.strip() for field in caption.split("|", 2)]
     if len(fields) != 3 or not fields[0] or not fields[1]:
         raise ValueError(copy(language, "សូមប្រើទម្រង់ ឈ្មោះ | តម្លៃ | ព័ត៌មានលម្អិត។", "Use the format Name | Price | Details."))
@@ -172,10 +183,10 @@ def parse_stock_add(text: str, language: str = "km") -> tuple[str, list[str]] | 
     if not parts or parts[0].lower() != "addstock":
         return None
     if len(parts) != 2 or not separator:
-        raise ValueError(copy(language, "សូមប្រើទម្រង់ addstock <product_id> | code1, code2។", "Use the format addstock <product_id> | code1, code2."))
+        raise ValueError(copy(language, "សូមប្រើទម្រង់ addstock <product_id> | key1, key2។", "Use the format addstock <product_id> | key1, key2."))
     credentials = [item.strip() for item in stock_text.replace("\n", ",").split(",") if item.strip()]
     if not credentials:
-        raise ValueError(copy(language, "សូមបញ្ចូល Code យ៉ាងហោចណាស់មួយ។", "Enter at least one code."))
+        raise ValueError(copy(language, "សូមបញ្ចូល License Key យ៉ាងហោចណាស់មួយ។", "Enter at least one license key."))
     return parts[1], credentials
 
 
@@ -220,23 +231,33 @@ def payment_qr(payment: dict[str, Any]) -> BufferedInputFile | str:
 
 
 async def upload_product_image(bot: Bot, settings: Settings, file_id: str) -> str:
+    return await upload_product_media(bot, settings, file_id, "image")
+
+
+async def upload_product_video(bot: Bot, settings: Settings, file_id: str) -> str:
+    return await upload_product_media(bot, settings, file_id, "video")
+
+
+async def upload_product_media(bot: Bot, settings: Settings, file_id: str, media_type: str) -> str:
     if not all((settings.cloudinary_cloud_name, settings.cloudinary_api_key, settings.cloudinary_api_secret)):
         raise RuntimeError("Cloudinary credentials are not configured")
-    image_stream = io.BytesIO()
-    await bot.download(file_id, destination=image_stream)
-    image_stream.seek(0)
+    if media_type not in {"image", "video"}:
+        raise ValueError("Unsupported product media type")
+    media_stream = io.BytesIO()
+    await bot.download(file_id, destination=media_stream)
+    media_stream.seek(0)
     result = await asyncio.to_thread(
         cloudinary.uploader.upload,
-        image_stream,
+        media_stream,
         cloud_name=settings.cloudinary_cloud_name,
         api_key=settings.cloudinary_api_key,
         api_secret=settings.cloudinary_api_secret,
-        resource_type="image",
+        resource_type=media_type,
         folder="products",
     )
     secure_url = result.get("secure_url")
     if not isinstance(secure_url, str) or not secure_url.startswith("https://"):
-        raise ValueError("Cloudinary did not return a secure HTTPS image URL")
+        raise ValueError(f"Cloudinary did not return a secure HTTPS {media_type} URL")
     return secure_url
 
 
@@ -262,6 +283,14 @@ def menu(settings: Settings, user_id: int, language: str = "km") -> InlineKeyboa
             [InlineKeyboardButton(text=copy(language, "⚙️ គ្រប់គ្រងហាង", "⚙️ Store admin"), callback_data="admin")]
         )
     return keyboard(rows)
+
+
+def welcome_keyboard(user_id: int, settings: Settings) -> ReplyKeyboardMarkup:
+    rows = []
+    if user_id in settings.admin_ids:
+        rows.append([KeyboardButton(text="⚙️ ADMIN")])
+    rows.append([KeyboardButton(text="🛍 BUY NOW")])
+    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, is_persistent=True)
 
 
 def back_button(target: str = "home", language: str = "km") -> list[InlineKeyboardButton]:
@@ -380,7 +409,7 @@ async def notify_stock_added(bot: Bot, store: Store, chat_ids: str, product_id: 
                 [
                     InlineKeyboardButton(
                         text=button_text,
-                        url=f"https://t.me/{bot_username.lstrip('@')}?start=stock_{product_id}",
+                        url=f"https://t.me/{bot_username.lstrip('@')}",
                     )
                 ]
             ]
@@ -418,25 +447,71 @@ async def send_welcome(message: Message, store: Store, settings: Settings) -> No
             await message.bot.delete_message(chat_id=user.id, message_id=previous_message_id)
         except TelegramBadRequest:
             logger.debug("Could not delete previous welcome message %s", previous_message_id)
-    welcome_message = await message.answer(
-        welcome_text(user, language, categories),
-        parse_mode="HTML",
-        reply_markup=menu(settings, user.id, language),
-    )
+    text = welcome_text(user, language, categories)
+    settings_data = {}
+    load_settings = getattr(store, "bot_settings", None)
+    if load_settings:
+        try:
+            settings_data = await load_settings(("welcome_video_url", "welcome_photo_url"))
+        except Exception:
+            logger.exception("Could not load welcome media settings")
+    reply_markup = welcome_keyboard(user.id, settings)
+    video_url = settings_data.get("welcome_video_url")
+    photo_url = settings_data.get("welcome_photo_url")
+    if video_url:
+        welcome_message = await message.answer_video(
+            video=video_url,
+            caption=text,
+            parse_mode="HTML",
+            reply_markup=reply_markup,
+        )
+    elif photo_url:
+        welcome_message = await message.answer_photo(
+            photo=photo_url,
+            caption=text,
+            parse_mode="HTML",
+            reply_markup=reply_markup,
+        )
+    else:
+        welcome_message = await message.answer(
+            text,
+            parse_mode="HTML",
+            reply_markup=reply_markup,
+        )
     welcome_message_ids[user.id] = welcome_message.message_id
 
 
 async def deliver_order(bot: Bot, store: Store, settings: Settings, order_id: str, chat_id: int) -> None:
     await delete_payment_message(bot, store, order_id)
+    install_url = getattr(settings, "install_group_url", "")
+    if hasattr(store, "bot_settings"):
+        try:
+            configured_links = await store.bot_settings(("channel_install_link",))
+        except Exception:
+            logger.exception("Could not load installation link for order %s", order_id)
+        else:
+            install_url = configured_links.get("channel_install_link") or install_url
+    parsed_install_url = urlsplit(install_url)
+    if parsed_install_url.scheme != "https" or not parsed_install_url.netloc:
+        raise RuntimeError("A valid HTTPS installation group URL is required to deliver orders")
     credentials = await store.fulfill_order(order_id)
     if not credentials:
         return
-    details = "\n".join(f"<code>{html.escape(decrypt_stock(value, settings.stock_encryption_key))}</code>" for value in credentials)
-    language = await safe_user_language(store, chat_id)
+    keys = [decrypt_stock(value, settings.stock_encryption_key) for value in credentials]
+    key_lines = "\n".join(f"- {value}" for value in keys)
+    text = (
+        "✅ ទំនិញបានជោគជ័យ\n\n"
+        f"🔑 បញ្ជី Key របស់អ្នក [ សរុប {len(keys)} Key ]\n"
+        f"{key_lines}\n\n"
+        "🙏 អរគុណសម្រាប់ការទិញទំនិញ 🙏\n\n"
+        "📲 ចុចលីងខាងក្រោមដើម្បីដំឡើង 📲"
+    )
     await bot.send_message(
         chat_id,
-        copy(language, f"✅ បានបញ្ជាក់ការទូទាត់។ ទិន្នន័យរបស់អ្នក៖\n\n{details}", f"✅ Payment confirmed. Your delivery:\n\n{details}"),
-        parse_mode="HTML",
+        text,
+        reply_markup=keyboard(
+            [[InlineKeyboardButton(text="👉 ចូលក្រុមដំឡើង", url=install_url)]]
+        ),
     )
     await store.mark_delivered(order_id)
 
@@ -514,7 +589,7 @@ def register_handlers(
     payments: KHPayClient,
     settings: Settings,
 ) -> None:
-    async def show_catalogs(message: Message, page: int, language: str) -> None:
+    async def show_catalogs(message: Message, page: int, language: str, edit_message: bool = True) -> None:
         categories = await store.categories()
         if not categories:
             await edit_text_message(
@@ -525,6 +600,7 @@ def register_handlers(
                     "There are no product categories yet. Please check back later.",
                 ),
                 reply_markup=keyboard([back_button(language=language)]),
+                edit_message=edit_message,
             )
             return
         visible_categories, page, page_count = paginate(categories, page)
@@ -545,7 +621,13 @@ def register_handlers(
             "───────────────────\n"
             "Choose a catalog below to browse its packages:",
         )
-        await edit_text_message(message, text, parse_mode="HTML", reply_markup=keyboard(rows))
+        await edit_text_message(
+            message,
+            text,
+            parse_mode="HTML",
+            reply_markup=keyboard(rows),
+            edit_message=edit_message,
+        )
 
     async def show_packages(message: Message, category_id: str, page: int, language: str) -> None:
         category_data = await store.category(category_id)
@@ -597,34 +679,17 @@ def register_handlers(
         )
         await edit_text_message(message, text, parse_mode="HTML", reply_markup=keyboard(rows))
 
-    @router.message(CommandStart())
-    async def start(message: Message) -> None:
-        payload = (message.text or "").partition(" ")[2].strip()
-        if payload.startswith("stock_"):
-            product_data = await store.product(payload.removeprefix("stock_"))
-            if product_data:
-                language = await safe_user_language(store, message.from_user.id)
-                await safe_upsert_user(
-                    store,
-                    message.from_user.id,
-                    message.from_user.username,
-                    message.from_user.first_name,
-                    language,
-                )
-                await show_product(message, product_data, 1, language, edit_message=False)
-                return
-        await send_welcome(message, store, settings)
-
     @router.callback_query(F.data == "home")
     async def home(callback: CallbackQuery) -> None:
         await callback.answer()
         language = await safe_user_language(store, callback.from_user.id)
         categories = await store.categories()
-        welcome_message = await edit_text_message(
-            callback.message,
+        await delete_replaced_message(callback.message)
+        welcome_message = await bot.send_message(
+            callback.from_user.id,
             welcome_text(callback.from_user, language, categories),
             parse_mode="HTML",
-            reply_markup=menu(settings, callback.from_user.id, language),
+            reply_markup=welcome_keyboard(callback.from_user.id, settings),
         )
         welcome_message_ids[callback.from_user.id] = welcome_message.message_id
 
@@ -798,13 +863,29 @@ def register_handlers(
             "───────────────────"
         )
         markup = keyboard(rows)
+        video_url = product_data.get("video_url")
         image_url = product_data.get("image_url")
-        if image_url:
-            if edit_message and message.photo:
+        media_url = video_url or image_url
+        if media_url:
+            if edit_message and (message.photo or message.video):
+                media = (
+                    InputMediaVideo(media=media_url, caption=text, parse_mode="HTML")
+                    if video_url
+                    else InputMediaPhoto(media=media_url, caption=text, parse_mode="HTML")
+                )
                 await message.edit_media(
-                    media=InputMediaPhoto(media=image_url, caption=text, parse_mode="HTML"),
+                    media=media,
                     reply_markup=markup,
                 )
+            elif video_url:
+                await message.answer_video(
+                    video=video_url,
+                    caption=text,
+                    parse_mode="HTML",
+                    reply_markup=markup,
+                )
+                if edit_message:
+                    await delete_replaced_message(message)
             else:
                 await message.answer_photo(
                     photo=image_url,
@@ -817,7 +898,7 @@ def register_handlers(
                         await message.delete()
                     except TelegramBadRequest:
                         logger.debug("Could not delete previous product message %s", message.message_id)
-        elif edit_message and message.photo:
+        elif edit_message and (message.photo or message.video):
             await message.edit_caption(caption=text, parse_mode="HTML", reply_markup=markup)
         elif not edit_message:
             await message.answer(text, parse_mode="HTML", reply_markup=markup)
@@ -1145,33 +1226,36 @@ def register_handlers(
             reply_markup=keyboard(rows),
         )
 
-    @router.message(F.photo, F.caption.startswith("setphoto"))
-    async def set_product_photo(message: Message) -> None:
+    @router.message(F.photo | F.video, F.caption.startswith(("setphoto", "setvideo", "setmedia")))
+    async def set_product_media(message: Message) -> None:
         if not message.from_user or message.from_user.id not in settings.admin_ids:
             return
         language = await safe_user_language(store, message.from_user.id)
         parts = (message.caption or "").strip().split(maxsplit=1)
-        if not parts or parts[0] != "setphoto" or len(parts) != 2 or not parts[1].strip():
-            await message.answer(copy(language, "ទម្រង់មិនត្រឹមត្រូវ។ សូមប្រើ setphoto <product_id> ជាមួយរូបភាព។", "Invalid format. Use setphoto <product_id> with an image."))
+        if not parts or parts[0] not in {"setphoto", "setvideo", "setmedia"} or len(parts) != 2 or not parts[1].strip():
+            await message.answer(copy(language, "ទម្រង់មិនត្រឹមត្រូវ។ សូមប្រើ setmedia <product_id> ជាមួយរូបភាព ឬវីដេអូ។", "Invalid format. Use setmedia <product_id> with an image or video."))
             return
         product_id = parts[1].strip()
+        is_video = message.video is not None
         try:
-            image_url = await upload_product_image(bot, settings, message.photo[-1].file_id)
-            updated = await store.update_product_image(product_id, image_url)
+            file_id = message.video.file_id if is_video else message.photo[-1].file_id
+            media_url = await upload_product_media(bot, settings, file_id, "video" if is_video else "image")
+            update_media = store.update_product_video if is_video else store.update_product_image
+            updated = await update_media(product_id, media_url)
         except Exception:
-            logger.exception("Could not update product image %s", product_id)
-            await message.answer(copy(language, "មិនអាចធ្វើបច្ចុប្បន្នភាពរូបភាព Package បានទេ។", "Could not update the package image."))
+            logger.exception("Could not update product media %s", product_id)
+            await message.answer(copy(language, "មិនអាចធ្វើបច្ចុប្បន្នភាពរូបភាព/វីដេអូ Package បានទេ។", "Could not update the package image/video."))
             return
         if not updated:
             await message.answer(copy(language, f"រកមិនឃើញ Package ID {html.escape(product_id)} ទេ។", f"Package ID {html.escape(product_id)} not found."))
             return
         await message.answer(
-            copy(language, f"✅ បាន Upload រូបភាពទៅ Cloudinary និងបច្ចុប្បន្នភាព Package ID <code>{html.escape(product_id)}</code> ជោគជ័យ!", f"✅ Image uploaded to Cloudinary and package ID <code>{html.escape(product_id)}</code> updated."),
+            copy(language, f"✅ បាន Upload {'វីដេអូ' if is_video else 'រូបភាព'} ទៅ Cloudinary និងបច្ចុប្បន្នភាព Package ID <code>{html.escape(product_id)}</code> ជោគជ័យ!", f"✅ {'Video' if is_video else 'Image'} uploaded to Cloudinary and package ID <code>{html.escape(product_id)}</code> updated."),
             parse_mode="HTML",
         )
 
-    @router.message(F.photo, F.caption.contains("|"))
-    async def create_product_with_photo(message: Message) -> None:
+    @router.message(F.photo | F.video, F.caption.contains("|"))
+    async def create_product_with_media(message: Message) -> None:
         if not message.from_user or message.from_user.id not in settings.admin_ids:
             return
         language = await safe_user_language(store, message.from_user.id)
@@ -1181,18 +1265,27 @@ def register_handlers(
             return
         try:
             name, price, description = parse_product_caption(message.caption or "", language)
-            image_url = await upload_product_image(bot, settings, message.photo[-1].file_id)
-            product_id = await store.create_product(pending[1], name, price, description, image_url)
+            is_video = message.video is not None
+            file_id = message.video.file_id if is_video else message.photo[-1].file_id
+            media_url = await upload_product_media(bot, settings, file_id, "video" if is_video else "image")
+            product_id = await store.create_product(
+                pending[1],
+                name,
+                price,
+                description,
+                video_url=media_url if is_video else None,
+                image_url=None if is_video else media_url,
+            )
         except (InvalidOperation, ValueError) as exc:
             await message.answer(html.escape(str(exc)))
             return
         except Exception:
-            logger.exception("Could not create package with photo for admin %s", message.from_user.id)
+            logger.exception("Could not create package with media for admin %s", message.from_user.id)
             await message.answer(copy(language, "មិនអាចបង្កើត Package បានទេ។ សូមពិនិត្យ Cloudinary និង Supabase រួចព្យាយាមម្ដងទៀត។", "Could not create the package. Check Cloudinary and Supabase, then try again."))
             return
         pending_admin_input.pop(message.from_user.id, None)
         await message.answer(
-            copy(language, f'✅ បានបង្កើត Package "{html.escape(name)}" និង Upload រូបភាពទៅ Cloudinary រួចរាល់! ', f'✅ Package "{html.escape(name)}" created and image uploaded to Cloudinary! ')
+            copy(language, f'✅ បានបង្កើត Package "{html.escape(name)}" និង Upload {"វីដេអូ" if is_video else "រូបភាព"} ទៅ Cloudinary រួចរាល់! ', f'✅ Package "{html.escape(name)}" created and {"video" if is_video else "image"} uploaded to Cloudinary! ')
             + f"(ID: <code>{html.escape(product_id)}</code>)",
             parse_mode="HTML",
         )
@@ -1206,7 +1299,7 @@ def register_handlers(
         category_id = callback.data.removeprefix("admin:product-add:")
         pending_admin_input[callback.from_user.id] = ("product_add", category_id)
         await callback.message.edit_text(
-            copy(language, "ផ្ញើរូបភាពជាមួយ Caption <code>ឈ្មោះ | តម្លៃ | ព័ត៌មានលម្អិត</code> ដើម្បីបង្កើត Package ថ្មី។", "Send an image with the caption <code>Name | Price | Details</code> to create a package."),
+            copy(language, "ផ្ញើរូបភាព ឬវីដេអូជាមួយ Caption <code>ឈ្មោះ | តម្លៃ | ព័ត៌មានលម្អិត</code> ដើម្បីបង្កើត Package ថ្មី។", "Send an image or video with the caption <code>Name | Price | Details</code> to create a package."),
             parse_mode="HTML",
             reply_markup=keyboard([back_button("admin:cancel-input", language)]),
         )
@@ -1303,7 +1396,7 @@ def register_handlers(
         product_id = callback.data.removeprefix("admin:stock-add:")
         pending_admin_input[callback.from_user.id] = ("stock_add", product_id)
         await callback.message.answer(
-            copy(language, "ផ្ញើ Code ឬ username:password មួយក្នុងមួយបន្ទាត់ (អាចបញ្ចូល 1 ឬច្រើន)៖", "Send one code or username:password per line (you can send one or more):"),
+            copy(language, "ផ្ញើ License Key មួយក្នុងមួយបន្ទាត់៖", "Send one license key per line:"),
             reply_markup=keyboard([back_button("admin:cancel-input", language)]),
         )
 
@@ -1316,7 +1409,7 @@ def register_handlers(
         product_id = callback.data.removeprefix("admin:stock-remove:")
         pending_admin_input[callback.from_user.id] = ("stock_remove", product_id)
         await callback.message.answer(
-            copy(language, "ផ្ញើ Code ឬ username:password ដែលចង់ដក មួយក្នុងមួយបន្ទាត់។ ត្រូវផ្គូផ្គងនឹងទិន្នន័យដើម ហើយដកបានតែស្តុកដែលមិនទាន់កក់ ឬលក់៖", "Send the exact code or username:password to remove, one per line. Only stock that is neither reserved nor sold can be removed."),
+            copy(language, "ផ្ញើ License Key ដែលចង់ដក មួយក្នុងមួយបន្ទាត់។ ដកបានតែ Key ដែលមិនទាន់កក់ ឬលក់៖", "Send the exact license keys to remove, one per line. Only keys that are neither reserved nor sold can be removed."),
             reply_markup=keyboard([back_button("admin:cancel-input", language)]),
         )
 
@@ -1325,11 +1418,13 @@ def register_handlers(
         if not message.from_user:
             return
         text = (message.text or "").strip()
-        if text.startswith("/"):
+        language = await safe_user_language(store, message.from_user.id)
+        if text.casefold() in {"🛍 buy now", "buy now"}:
+            await show_catalogs(message, 0, language, edit_message=False)
             return
         if message.from_user.id not in settings.admin_ids:
+            await send_welcome(message, store, settings)
             return
-        language = await safe_user_language(store, message.from_user.id)
         try:
             stock_add = parse_stock_add(text, language)
             if stock_add:
@@ -1347,6 +1442,15 @@ def register_handlers(
             return
         pending = pending_admin_input.get(message.from_user.id)
         if not pending:
+            if text.casefold() in {"⚙️ admin", "admin"}:
+                await message.answer(
+                    copy(language, "⚙️ បើកផ្ទាំងគ្រប់គ្រងហាង៖", "⚙️ Open store administration:"),
+                    reply_markup=keyboard(
+                        [[InlineKeyboardButton(text=copy(language, "⚙️ គ្រប់គ្រងហាង", "⚙️ Store admin"), callback_data="admin")]]
+                    ),
+                )
+            else:
+                await send_welcome(message, store, settings)
             return
         action, target_id = pending
         try:
@@ -1360,7 +1464,7 @@ def register_handlers(
                 else:
                     await store.client.table("categories").update(values).eq("id", target_id).execute()
             elif action == "product_add":
-                raise ValueError(copy(language, "សូមផ្ញើរូបភាពជាមួយ Caption ដើម្បីបង្កើត Package ថ្មី។", "Send an image with a caption to create a package."))
+                raise ValueError(copy(language, "សូមផ្ញើរូបភាព ឬវីដេអូជាមួយ Caption ដើម្បីបង្កើត Package ថ្មី។", "Send an image or video with a caption to create a package."))
             elif action == "product_edit":
                 fields = [part.strip() for part in text.split("|", 2)]
                 if len(fields) != 3:
@@ -1377,13 +1481,13 @@ def register_handlers(
             elif action == "stock_add":
                 credentials = [line.strip() for line in text.splitlines() if line.strip()]
                 if not credentials:
-                    raise ValueError(copy(language, "សូមបញ្ចូល Code ឬ username:password យ៉ាងហោចណាស់មួយ។", "Enter at least one code or username:password."))
+                    raise ValueError(copy(language, "សូមបញ្ចូល License Key យ៉ាងហោចណាស់មួយ។", "Enter at least one license key."))
                 added = await store.import_stock(target_id, credentials, settings.stock_encryption_key)
                 await notify_stock_added(bot, store, settings.stock_notification_chat_ids, target_id, added)
             elif action == "stock_remove":
                 credentials = [line.strip() for line in text.splitlines() if line.strip()]
                 if not credentials:
-                    raise ValueError(copy(language, "សូមបញ្ចូល Code ឬ username:password យ៉ាងហោចណាស់មួយ។", "Enter at least one code or username:password."))
+                    raise ValueError(copy(language, "សូមបញ្ចូល License Key យ៉ាងហោចណាស់មួយ។", "Enter at least one license key."))
                 removed = await store.remove_stock(target_id, credentials, settings.stock_encryption_key)
             else:
                 return
@@ -1437,7 +1541,7 @@ def register_handlers(
             return
         pending_stock_upload[callback.from_user.id] = callback.data[3:]
         await callback.message.answer(
-            copy(language, "សូមផ្ញើឯកសារ .txt ដែលមាន Code ឬ username:password មួយក្នុងមួយជួរ។", "Send a .txt file with one code or username:password per line."),
+            copy(language, "សូមផ្ញើឯកសារ .txt ដែលមាន License Key មួយក្នុងមួយជួរ។", "Send a .txt file with one license key per line."),
             reply_markup=keyboard([back_button("admin:cancel-upload", language)]),
         )
 
@@ -1465,7 +1569,7 @@ def register_handlers(
             await bot.download(document.file_id, destination=buffer)
             credentials = [line.strip() for line in buffer.getvalue().decode("utf-8").splitlines() if line.strip()]
             if not credentials:
-                raise ValueError(copy(language, "បន្ទាត់នីមួយៗត្រូវមាន Code ឬ username:password។", "Each line must contain a code or username:password."))
+                raise ValueError(copy(language, "ឯកសារត្រូវមាន License Key យ៉ាងហោចណាស់មួយ។", "The file must contain at least one license key."))
             added = await store.import_stock(product_id, credentials, settings.stock_encryption_key)
         except (UnicodeDecodeError, ValueError) as exc:
             await message.answer(copy(language, f"ឯកសារមិនត្រឹមត្រូវ៖ {html.escape(str(exc))}", f"Invalid file: {html.escape(str(exc))}"), reply_markup=keyboard([back_button("admin:cancel-upload", language)]))

@@ -97,7 +97,7 @@ class Store:
     async def product(self, product_id: str) -> dict[str, Any] | None:
         result = await (
             self.client.table("products")
-            .select("id,category_id,name,description,price,image_url")
+            .select("id,category_id,name,description,price,image_url,video_url")
             .eq("id", product_id)
             .eq("active", True)
             .maybe_single()
@@ -111,8 +111,13 @@ class Store:
         name: str,
         price: str,
         description: str,
-        image_url: str,
+        image_url: str | None = None,
+        video_url: str | None = None,
     ) -> str:
+        if bool(image_url) == bool(video_url):
+            raise ValueError("Provide exactly one product image or video URL")
+        media_column = "video_url" if video_url else "image_url"
+        media_url = video_url or image_url
         result = await (
             self.client.table("products")
             .insert(
@@ -121,7 +126,7 @@ class Store:
                     "name": name,
                     "price": price,
                     "description": description,
-                    "image_url": image_url,
+                    media_column: media_url,
                 }
             )
             .select("id")
@@ -136,7 +141,18 @@ class Store:
     async def update_product_image(self, product_id: str, image_url: str) -> bool:
         result = await (
             self.client.table("products")
-            .update({"image_url": image_url})
+            .update({"image_url": image_url, "video_url": None})
+            .eq("id", product_id)
+            .select("id")
+            .maybe_single()
+            .execute()
+        )
+        return bool(result.data)
+
+    async def update_product_video(self, product_id: str, video_url: str) -> bool:
+        result = await (
+            self.client.table("products")
+            .update({"image_url": None, "video_url": video_url})
             .eq("id", product_id)
             .select("id")
             .maybe_single()
