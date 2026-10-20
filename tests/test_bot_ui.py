@@ -668,6 +668,22 @@ def test_reseller_registry_uses_telegram_ids():
     asyncio.run(run_test())
 
 
+def test_is_reseller_returns_false_when_maybe_single_has_no_result():
+    async def run_test():
+        query = Mock()
+        query.select.return_value = query
+        query.eq.return_value = query
+        query.maybe_single.return_value = query
+        query.execute = AsyncMock(return_value=None)
+        client = SimpleNamespace(table=Mock(return_value=query))
+
+        assert await Store(client).is_reseller(12345) is False
+        client.table.assert_called_once_with("resellers")
+        query.eq.assert_called_once_with("telegram_id", 12345)
+
+    asyncio.run(run_test())
+
+
 def test_order_reservation_passes_telegram_id_for_database_pricing():
     async def run_test():
         query = Mock()

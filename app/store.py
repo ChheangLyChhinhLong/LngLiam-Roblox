@@ -61,7 +61,7 @@ class Store:
             .maybe_single()
             .execute()
         )
-        return bool(result.data)
+        return bool(result and result.data)
 
     async def resellers(self) -> list[dict[str, Any]]:
         result = await (
