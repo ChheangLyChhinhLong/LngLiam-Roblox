@@ -16,6 +16,7 @@ from app.bot import (
     expire_payment,
     menu,
     normalize_language,
+    notify_order_success,
     notify_stock_added,
     paginate,
     pagination_row,
@@ -611,6 +612,43 @@ def test_product_update_changes_fields_and_replaces_media_only_when_requested():
     asyncio.run(run_test())
 
 
+def test_order_notification_details_loads_order_product_and_customer_profile():
+    async def run_test():
+        results = {
+            "orders": {
+                "id": "order-123",
+                "chat_id": 123,
+                "product_id": "product-123",
+                "quantity": 2,
+                "total": "2.00",
+                "transaction_id": "txn-123",
+                "created_at": "2026-10-20T09:35:00+00:00",
+                "status": "paid",
+            },
+            "products": {"name": "Key 1Day", "price": "1.50", "reseller_price": "1.00"},
+            "users": {"username": "buyer", "first_name": "Buyer"},
+        }
+        queries = {}
+        for table_name, data in results.items():
+            query = Mock()
+            query.select.return_value = query
+            query.eq.return_value = query
+            query.maybe_single.return_value = query
+            query.execute = AsyncMock(return_value=SimpleNamespace(data=data))
+            queries[table_name] = query
+        client = SimpleNamespace(table=Mock(side_effect=lambda name: queries[name]))
+
+        details = await Store(client).order_notification_details("order-123")
+
+        assert details["product"] == results["products"]
+        assert details["customer"] == results["users"]
+        queries["orders"].eq.assert_called_once_with("id", "order-123")
+        queries["products"].eq.assert_called_once_with("id", "product-123")
+        queries["users"].eq.assert_called_once_with("telegram_id", 123)
+
+    asyncio.run(run_test())
+
+
 def test_reseller_registry_uses_telegram_ids():
     async def run_test():
         query = Mock()
@@ -849,6 +887,41 @@ def test_delivery_deletes_payment_qr_before_fulfilling_and_sending_credentials()
         assert buttons[1][0].copy_text.text == "FF-1D-KEY-002"
         assert buttons[2][0].text == "👉 ចូលក្រុមដំឡើង"
         assert buttons[2][0].url == "https://t.me/install_group"
+
+    asyncio.run(run_test())
+
+
+def test_order_success_notification_sends_order_details_to_configured_group():
+    async def run_test():
+        order = {
+            "id": "order-123",
+            "chat_id": 123456789,
+            "quantity": 1,
+            "total": "1.00",
+            "transaction_id": "txn_abc123456",
+            "created_at": "2026-10-20T09:35:00+00:00",
+            "product": {"name": "Key FreeFire 1Day", "price": "2.00", "reseller_price": "1.00"},
+            "customer": {"first_name": "ChhinhLong", "username": "chhinhlong"},
+        }
+        bot = SimpleNamespace(send_message=AsyncMock())
+        store = SimpleNamespace(order_notification_details=AsyncMock(return_value=order))
+        settings = SimpleNamespace(order_notification_chat_ids="-1001234567890,@adminlog")
+
+        await notify_order_success(bot, store, settings, "order-123")
+
+        assert [call.args[0] for call in bot.send_message.await_args_list] == [
+            -1001234567890,
+            "@adminlog",
+        ]
+        text = bot.send_message.await_args_list[0].args[1]
+        assert "ChhinhLong (@chhinhlong)" in text
+        assert "<code>123456789</code>" in text
+        assert "Key FreeFire 1Day (x1)" in text
+        assert "$1.00 (Reseller Price)" in text
+        assert "<code>txn_abc123456</code>" in text
+        assert "2026-10-20 16:35:00 (Asia/Phnom_Penh)" in text
+        assert "បង់ប្រាក់រួចរាល់ &amp; ប្រគល់ Key រួចរាល់" in text
+        assert bot.send_message.await_args.kwargs["parse_mode"] == "HTML"
 
     asyncio.run(run_test())
 

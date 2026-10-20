@@ -71,6 +71,7 @@ notepad .env
 | `CLOUDINARY_API_KEY` | ស្រេចចិត្ត | Cloudinary API key។ |
 | `CLOUDINARY_API_SECRET` | ស្រេចចិត្ត | Cloudinary API secret; រក្សាសម្ងាត់។ |
 | `STOCK_NOTIFICATION_CHAT_IDS` | ស្រេចចិត្ត | Group/channel IDs ឬ `@channelname` បំបែកដោយក្បៀស។ |
+| `ORDER_NOTIFICATION_CHAT_IDS` | ស្រេចចិត្ត | Telegram Group ID ឬ `@username` សម្រាប់ទទួល Order Log ពេលការទូទាត់ជោគជ័យ និងប្រគល់ Key រួច។ បំបែកច្រើនគោលដៅដោយក្បៀស។ |
 | `SUPPORT_USERNAME` | ស្រេចចិត្ត | Telegram username របស់ផ្នែក support ដោយមិនចាំបាច់មាន `@`។ |
 | `POLL_INTERVAL_SECONDS` | មាន default | ចន្លោះពេលពិនិត្យ payment background; default `20` វិនាទី។ |
 | `PORT` | មាន default | Port របស់ web service; default `10000`។ Render អាចកំណត់ port ផ្ទាល់។ |
@@ -234,7 +235,7 @@ git push origin main
 3. Render រកឃើញ `render.yaml` នៅ project root. ពិនិត្យ configuration ហើយចុច **Deploy Blueprint**។ Blueprint កំណត់ Python web service, build/start command, health check `/health` និង `numInstances: 1`។
 4. នៅពេល Render ស្នើ environment variables សូមបញ្ចូល secrets ពិតតាមតារាងក្នុងផ្នែកទី 3។ តម្លៃចាំបាច់យ៉ាងហោចណាស់មាន `BOT_TOKEN`, `TELEGRAM_ADMIN_IDS`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `KHPAY_API_KEY` និង `STOCK_ENCRYPTION_KEY`។ កុំប្រើតម្លៃឧទាហរណ៍ក្នុង `.env.example` ជា production secrets។
 5. កំណែ Python ត្រូវបានកំណត់ដោយ `.python-version` (`3.13`)។ Render អនុវត្តកំណែនេះ ហើយប្រើ patch release ចុងក្រោយដែលមានសម្រាប់ Python 3.13។ មើល [Render Python version guide](https://render.com/docs/python-version)។
-6. បើប្រើ media Package ត្រូវបន្ថែម `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY` និង `CLOUDINARY_API_SECRET` នៅ Render **Environment**។ `PUBLIC_BASE_URL` ក៏ត្រូវបញ្ចូលក្រោយទទួលបាន service URL ដែរ។ អាចទុក `STOCK_NOTIFICATION_CHAT_IDS` និង `SUPPORT_USERNAME` ទទេ បើមិនប្រើ។
+6. បើប្រើ media Package ត្រូវបន្ថែម `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY` និង `CLOUDINARY_API_SECRET` នៅ Render **Environment**។ `PUBLIC_BASE_URL` ក៏ត្រូវបញ្ចូលក្រោយទទួលបាន service URL ដែរ។ អាចទុក `STOCK_NOTIFICATION_CHAT_IDS`, `ORDER_NOTIFICATION_CHAT_IDS` និង `SUPPORT_USERNAME` ទទេ បើមិនប្រើ។
 7. រង់ចាំ deploy ជោគជ័យ។ ក្នុង service **Settings/Overview** ចម្លង URL HTTPS ដែល Render ផ្ដល់ឲ្យ (`https://YOUR-SERVICE.onrender.com`)។
 8. នៅ Render **Environment** បន្ថែម/កែ:
 
@@ -332,6 +333,7 @@ Admin panel អាចបន្ថែម/កែ Catalog និង Package, បិ
 - Backup `STOCK_ENCRYPTION_KEY` នៅកន្លែងសុវត្ថិភាពដាច់ពី database។ បើបាត់ key នេះ License Key ដែលបាន encrypt រួចមិនអាចយកមកប្រើបានទេ។
 - កុំបិទ Supabase RLS និងកុំបង្កើត public access policies សម្រាប់ orders/stock។ Backend ប្រើ service-role key ដោយផ្ទាល់។
 - កំណត់ `STOCK_NOTIFICATION_CHAT_IDS` ជា comma-separated IDs/usernames ឧទាហរណ៍ `-1001234567890,@myshopnews`។ បន្ថែម bot ទៅ group/channel និងអនុញ្ញាតឲ្យ post។ Bot ក៏ជូនដំណឹងទៅ users ដែលបានប្រើ bot រួច; អ្នកដែល block bot ឬ chat ដែល bot មិនអាច post បាន នឹងត្រូវរំលង។
+- កំណត់ `ORDER_NOTIFICATION_CHAT_IDS` ជា Telegram Group ID ដូចជា `-1001234567890` (ឬ `@username`) ហើយបន្ថែម bot ទៅ group ដោយអនុញ្ញាតឲ្យផ្ញើសារ។ Order Log មានអតិថិជន, Telegram ID, Package, ចំនួនទឹកប្រាក់/ប្រភេទតម្លៃ, transaction reference និងម៉ោង Asia/Phnom_Penh; ផ្ញើបន្ទាប់ពីទទួល payment និងប្រគល់ Key ជោគជ័យ។
 - License Key ក្នុង database ត្រូវបាន encrypt។ ឯកសារ `.txt` មុន import និងសារ stock ក្នុង Telegram នៅតែជា plaintext ដូច្នេះកុំទុក/បញ្ជូនវាក្នុងកន្លែងមិនមានសុវត្ថិភាព។
 - កុំ run bot local និង Render instance ច្រើនក្នុងពេលតែមួយដោយប្រើ bot token ដូចគ្នា ពេល long polling កំពុងដំណើរការ។
 - ការបង្កើត payment មាន idempotency key ដោយប្រើ order ID។ ការបញ្ជូន order កើតឡើងតែបន្ទាប់ពី KHPAY API បញ្ជាក់ការទូទាត់ប៉ុណ្ណោះ។

@@ -3,6 +3,7 @@ import base64
 import html
 import io
 import logging
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
 from urllib.parse import urlsplit
@@ -467,6 +468,82 @@ async def notify_stock_added(bot: Bot, store: Store, chat_ids: str, product_id: 
     )
 
 
+async def notify_order_success(bot: Bot, store: Store, settings: Settings, order_id: str) -> None:
+    destinations_setting = getattr(settings, "order_notification_chat_ids", "").strip()
+    if not destinations_setting:
+        return
+    try:
+        order = await store.order_notification_details(order_id)
+        if not order:
+            logger.error("Could not find completed order %s for admin notification", order_id)
+            return
+    except Exception:
+        logger.exception("Could not load completed order %s for admin notification", order_id)
+        return
+
+    product = order.get("product") or {}
+    customer = order.get("customer") or {}
+    username = customer.get("username")
+    customer_name = customer.get("first_name") or (f"@{username}" if username else "Unknown")
+    customer_label = html.escape(customer_name)
+    if username and customer.get("first_name"):
+        customer_label += f" (@{html.escape(username)})"
+
+    created_at = order.get("created_at")
+    try:
+        timestamp = datetime.fromisoformat(str(created_at).replace("Z", "+00:00"))
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
+        date_text = timestamp.astimezone(timezone(timedelta(hours=7))).strftime("%Y-%m-%d %H:%M:%S")
+    except (TypeError, ValueError):
+        logger.warning("Invalid created_at for completed order %s: %r", order_id, created_at)
+        date_text = str(created_at or "Unknown")
+
+    quantity = int(order["quantity"])
+    reseller_price = Decimal(str(product.get("reseller_price", product.get("price", "0"))))
+    regular_price = Decimal(str(product.get("price", "0")))
+    reseller_order = (
+        reseller_price < regular_price
+        and Decimal(str(order["total"])) == reseller_price * quantity
+    )
+    price_type = "Reseller Price" if reseller_order else "Regular Price"
+    reference = order.get("transaction_id") or order["id"]
+    text = (
+        "🔔 <b>ការបញ្ជាទិញថ្មី (New Order)</b>\n"
+        "───────────────────\n"
+        f"👤 <b>អតិថិជន:</b> {customer_label}\n"
+        f"🆔 <b>Telegram ID:</b> <code>{int(order['chat_id'])}</code>\n"
+        f"📦 <b>ផលិតផល:</b> {html.escape(str(product.get('name') or 'Unknown'))} (x{quantity})\n"
+        f"💰 <b>ចំនួនទឹកប្រាក់:</b> {money(order['total'])} ({price_type})\n"
+        f"🏷 <b>Ref ID:</b> <code>{html.escape(str(reference))}</code>\n"
+        f"⏰ <b>កាលបរិច្ឆេទ:</b> {date_text} (Asia/Phnom_Penh)\n"
+        "───────────────────\n"
+        "✅ <b>ស្ថានភាព:</b> បង់ប្រាក់រួចរាល់ &amp; ប្រគល់ Key រួចរាល់"
+    )
+
+    destinations: list[int | str] = []
+    for value in destinations_setting.split(","):
+        destination = value.strip()
+        if not destination:
+            continue
+        try:
+            destinations.append(int(destination))
+        except ValueError:
+            if destination.startswith("@"):
+                destinations.append(destination)
+            else:
+                logger.warning("Ignoring invalid order notification destination %r", destination)
+    for destination in destinations:
+        try:
+            await bot.send_message(destination, text, parse_mode="HTML")
+        except Exception:
+            logger.exception(
+                "Could not send completed order %s notification to %s",
+                order_id,
+                destination,
+            )
+
+
 async def send_welcome(message: Message, store: Store, settings: Settings) -> None:
     user = message.from_user
     if not user:
@@ -560,6 +637,7 @@ async def deliver_order(bot: Bot, store: Store, settings: Settings, order_id: st
         reply_markup=keyboard(delivery_rows),
     )
     await store.mark_delivered(order_id)
+    await notify_order_success(bot, store, settings, order_id)
 
 
 async def delete_payment_message(bot: Bot, store: Store, order_id: str) -> None:

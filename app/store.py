@@ -321,6 +321,37 @@ class Store:
     async def mark_delivered(self, order_id: str) -> None:
         await self.client.rpc("mark_order_delivered", {"p_order_id": order_id}).execute()
 
+    async def order_notification_details(self, order_id: str) -> dict[str, Any] | None:
+        order_result = await (
+            self.client.table("orders")
+            .select("id,chat_id,product_id,quantity,total,transaction_id,created_at,status")
+            .eq("id", order_id)
+            .maybe_single()
+            .execute()
+        )
+        order = order_result.data
+        if not order:
+            return None
+        product_result = await (
+            self.client.table("products")
+            .select("name,price,reseller_price")
+            .eq("id", order["product_id"])
+            .maybe_single()
+            .execute()
+        )
+        user_result = await (
+            self.client.table("users")
+            .select("username,first_name")
+            .eq("telegram_id", order["chat_id"])
+            .maybe_single()
+            .execute()
+        )
+        return {
+            **order,
+            "product": product_result.data or {},
+            "customer": user_result.data or {},
+        }
+
     async def order_history(self, chat_id: int) -> list[dict[str, Any]]:
         result = await (
             self.client.table("orders")

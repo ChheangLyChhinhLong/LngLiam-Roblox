@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     install_group_url: str = ""
     stock_encryption_key: str
     stock_notification_chat_ids: str = ""
+    order_notification_chat_ids: str = ""
     support_username: str = ""
     poll_interval_seconds: int = 20
     port: int = 10000
