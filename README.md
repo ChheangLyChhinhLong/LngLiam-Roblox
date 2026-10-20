@@ -11,9 +11,9 @@ Project នេះជាហាងលក់ License Key និង Digital Activati
 - [ដំណើរការលើម៉ាស៊ីនផ្ទាល់ខ្លួន](#4-ដំណើរការលើម៉ាស៊ីនផ្ទាល់ខ្លួន)
 - [បង្កើត Catalog, Package និង Stock](#5-បង្កើត-catalog-package-និង-stock)
 - [កំណត់វីដេអូណែនាំ និងរូបភាព](#6-កំណត់វីដេអូណែនាំ-និងរូបភាព)
-- [ដាក់ឲ្យដំណើរការលើ Render](#7-ដាក់ឲ្យដំណើរការលើ-render)
+- [ដាក់ពី GitHub ទៅ Render](#7-ដាក់ពី-github-ទៅ-render)
 - [ភ្ជាប់ KHPAY Webhook](#8-ភ្ជាប់-khpay-webhook)
-- [ត្រួតពិនិត្យដោយ UptimeRobot](#9-ត្រួតពិនិត្យដោយ-uptimerobot)
+- [ត្រួតពិនិត្យ Render ដោយ UptimeRobot](#9-ត្រួតពិនិត្យ-render-ដោយ-uptimerobot)
 - [របៀបប្រើក្នុង Telegram](#របៀបប្រើក្នុង-telegram)
 - [សុវត្ថិភាព និងថែទាំ](#សុវត្ថិភាព-និងថែទាំ)
 - [ដោះស្រាយបញ្ហា](#ដោះស្រាយបញ្ហា)
@@ -217,23 +217,43 @@ setmedia PRODUCT_UUID
 
 រក្សាភាពចាស់ដដែលផងដែរ ដោយប្រើ `setphoto PRODUCT_UUID` ជាមួយរូបភាព។ Bot upload រូបភាព/វីដេអូទៅ Cloudinary ហើយរក្សា secure URL ក្នុង `products.image_url` ឬ `products.video_url`។ ត្រូវ run `schema.sql` ឡើងវិញដើម្បីបន្ថែម `video_url` មុនប្រើមុខងារវីដេអូ។
 
-## 7. ដាក់ឲ្យដំណើរការលើ Render
+## 7. ដាក់ពី GitHub ទៅ Render
 
-1. Push project ទៅ GitHub ហើយភ្ជាប់ repository នៅ [Render](https://render.com/) ដោយបង្កើត **New → Web Service**។
-2. ប្រសិនបើ Render សួរ config file សូមប្រើ `render.yaml`។ វាកំណត់ build command, start command, health check និង instance តែមួយ។
-3. នៅ **Environment** បញ្ចូល variables តាម `.env.example`។ `render.yaml` មិនកំណត់ `CLOUDINARY_*` ឬ `PUBLIC_BASE_URL` ទេ ដូច្នេះបន្ថែមវាដោយដៃបើប្រើរូបភាព/ABA Mobile។ បន្ថែម `PORT` តែបើ deployment ត្រូវការកំណត់វាដោយដៃ។
-4. ត្រូវមានយ៉ាងហោចណាស់ `BOT_TOKEN`, `TELEGRAM_ADMIN_IDS`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `KHPAY_API_KEY` និង `STOCK_ENCRYPTION_KEY`។
-5. ចុច **Deploy** ហើយពិនិត្យ Logs រហូត service ដំណើរការ។ URL សាធារណៈមានទម្រង់ `https://YOUR-SERVICE.onrender.com`។
-6. កំណត់ environment values:
+### 7.1 Push code ទៅ GitHub
 
-```text
-KHPAY_WEBHOOK_URL=https://YOUR-SERVICE.onrender.com/webhook/khpay
-PUBLIC_BASE_URL=https://YOUR-SERVICE.onrender.com
+1. បង្កើត ឬបើក repository [ChheangLyChhinhLong/PU_MMO169_Sale_Mod](https://github.com/ChheangLyChhinhLong/PU_MMO169_Sale_Mod)។ Branch ដែល Render ត្រូវភ្ជាប់គឺ `main`។
+2. ពី project root ពិនិត្យការកែប្រែមុន commit និង push:
+
+```powershell
+git status
+git add .env.example README.md app render.yaml schema.sql scripts tests
+git commit -m "Describe the change"
+git push origin main
 ```
 
-7. Save changes ហើយ redeploy។ សាកល្បង `https://YOUR-SERVICE.onrender.com/health`; ត្រូវទទួល `{"status":"ok"}`។
+បើគ្មានការកែប្រែថ្មី មិនចាំបាច់បង្កើត commit ទេ។ ឯកសារ `.env` មាន secrets ហើយត្រូវបាន Git ignore; កុំប្រើ `git add -f .env` ឬបញ្ចូល token/key ទៅក្នុង GitHub។
 
-កុំបង្កើត Render instances ច្រើនជាងមួយ ខណៈ bot ប្រើ Telegram long polling ព្រោះ instances ច្រើនអាចប៉ះទង្គិចគ្នា។
+### 7.2 បង្កើត Render service ពី Blueprint
+
+1. ចូល [Render Dashboard](https://dashboard.render.com/) ហើយជ្រើស **New → Blueprint**។
+2. ភ្ជាប់ GitHub account បើមិនទាន់ភ្ជាប់, ជ្រើស repository `PU_MMO169_Sale_Mod` និង branch `main`។ សូមមើល [Render Blueprints guide](https://render.com/docs/infrastructure-as-code) បើត្រូវការជំនួយក្នុងជំហានភ្ជាប់ repository។
+3. Render រកឃើញ `render.yaml` នៅ project root. ពិនិត្យ configuration ហើយចុច **Deploy Blueprint**។ Blueprint កំណត់ Python web service, build/start command, health check `/health` និង `numInstances: 1`។
+4. នៅពេល Render ស្នើ environment variables សូមបញ្ចូល secrets ពិតតាមតារាងក្នុងផ្នែកទី 3។ តម្លៃចាំបាច់យ៉ាងហោចណាស់មាន `BOT_TOKEN`, `TELEGRAM_ADMIN_IDS`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `KHPAY_API_KEY` និង `STOCK_ENCRYPTION_KEY`។ កុំប្រើតម្លៃឧទាហរណ៍ក្នុង `.env.example` ជា production secrets។
+5. កំណែ Python ត្រូវបានកំណត់ដោយ `.python-version` (`3.13`)។ Render អនុវត្តកំណែនេះ ហើយប្រើ patch release ចុងក្រោយដែលមានសម្រាប់ Python 3.13។ មើល [Render Python version guide](https://render.com/docs/python-version)។
+6. បើប្រើ media Package ត្រូវបន្ថែម `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY` និង `CLOUDINARY_API_SECRET` នៅ Render **Environment**។ `PUBLIC_BASE_URL` ក៏ត្រូវបញ្ចូលក្រោយទទួលបាន service URL ដែរ។ អាចទុក `STOCK_NOTIFICATION_CHAT_IDS` និង `SUPPORT_USERNAME` ទទេ បើមិនប្រើ។
+7. រង់ចាំ deploy ជោគជ័យ។ ក្នុង service **Settings/Overview** ចម្លង URL HTTPS ដែល Render ផ្ដល់ឲ្យ (`https://YOUR-SERVICE.onrender.com`)។
+8. នៅ Render **Environment** បន្ថែម/កែ:
+
+```text
+PUBLIC_BASE_URL=https://YOUR-SERVICE.onrender.com
+KHPAY_WEBHOOK_URL=https://YOUR-SERVICE.onrender.com/webhook/khpay
+```
+
+ចុច **Save, rebuild, and deploy** (ឬប៊ូតុង deploy ដែល Render បង្ហាញ)។ បន្ទាប់ពី commit/push ទៅ `main` Render នឹង deploy commit ថ្មីដោយស្វ័យប្រវត្តិតាមការកំណត់ auto-deploy។
+9. បើក `https://YOUR-SERVICE.onrender.com/health`។ លទ្ធផលដែលរំពឹងទុកគឺ `{"status":"ok"}`. ពិនិត្យ Render **Logs** និងសាកល្បង bot ក្នុង Telegram; `/health` បញ្ជាក់ web service ឆ្លើយតបប៉ុណ្ណោះ មិនធានាថា Supabase, Telegram polling ឬ KHPAY ដំណើរការត្រឹមត្រូវទាំងអស់ទេ។
+10. បង្កើត KHPAY webhook តាមផ្នែកទី 8 ហើយរក្សា `KHPAY_WEBHOOK_SECRET` ក្នុង Render **Environment**។ បន្ទាប់ពីប្តូរ secret ត្រូវ redeploy។
+
+កុំបង្កើត Render instances ច្រើនជាងមួយ ខណៈ bot ប្រើ Telegram long polling ព្រោះ instances ច្រើនអាចប៉ះទង្គិចគ្នា។ ក្រោយ deployment លើកដំបូង សូមពិនិត្យ Render Logs ម្តងទៀត ដើម្បីប្រាកដថាមិនមាន database/schema error។
 
 ## 8. ភ្ជាប់ KHPAY Webhook
 
@@ -290,11 +310,17 @@ $created = $null
 
 Webhook endpoint ទទួល `POST /webhook/khpay`, ពិនិត្យ HMAC signature លើ raw request body, សួរ KHPAY ដើម្បីផ្ទៀងផ្ទាត់ status ហើយផ្ទៀងផ្ទាត់ទឹកប្រាក់មុន delivery។ កុំប្រើ browser redirect ជាភស្តុតាងទូទាត់។
 
-## 9. ត្រួតពិនិត្យដោយ UptimeRobot
+## 9. ត្រួតពិនិត្យ Render ដោយ UptimeRobot
 
-1. បង្កើត **HTTP(s) monitor** ក្នុង [UptimeRobot](https://uptimerobot.com/)។
-2. ដាក់ URL `https://YOUR-SERVICE.onrender.com/health` និង interval 5 នាទី។
-3. សាកល្បងឲ្យ monitor បង្ហាញ Online បន្ទាប់ពី Render deploy រួច។
+បង្កើត monitor បន្ទាប់ពី Render service deploy ជោគជ័យ និង `/health` បង្ហាញ `{"status":"ok"}`។
+
+1. ចូល [UptimeRobot](https://uptimerobot.com/) ហើយបង្កើត monitor ថ្មីប្រភេទ **HTTP(s)**។
+2. ដាក់ឈ្មោះ monitor ឧទាហរណ៍ `PU_MMO169_Sale_Mod Render Health`។
+3. ដាក់ URL `https://YOUR-SERVICE.onrender.com/health` (ប្រើ URL ពិតរបស់ Render និងបញ្ចូល path `/health`)។
+4. ជ្រើស monitoring interval ដែលគណនីរបស់អ្នកអនុញ្ញាត និងកំណត់ email/contact សម្រាប់ alert ពេល monitor មិនឆ្លើយតប។
+5. Save ហើយរង់ចាំ check ដំបូង។ ត្រូវបង្ហាញ **Up/Online** និង HTTP 200។ ប្រើ **Test/Send test alert** ប្រសិនបើ dashboard ផ្ដល់ជម្រើសនេះ ដើម្បីផ្ទៀងផ្ទាត់ថាអ្នកទទួលសារ alert។
+
+Monitor នេះពិនិត្យតែ web health route។ វាមិនសាកល្បងការទិញ, Telegram polling, database schema, KHPAY payment ឬ webhook ដោយស្វ័យប្រវត្តិទេ។ បើ monitor បង្ហាញ Down សូមពិនិត្យ Render **Events/Deploys/Logs** និងបើក `/health` ដោយផ្ទាល់។ UptimeRobot ជាការជូនដំណឹងបន្ថែម មិនជំនួសការពិនិត្យ logs និងសាកល្បង flow ទិញពិតទេ។
 
 ## របៀបប្រើក្នុង Telegram
 
