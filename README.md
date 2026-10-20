@@ -327,7 +327,7 @@ Monitor នេះពិនិត្យតែ web health route។ វាមិន
 1. អ្នកទិញចុចប៊ូតុង reply **🛍 BUY NOW** ឬ **Shop** ក្នុងម៉ឺនុយ, ជ្រើស Catalog និង Package ហើយកំណត់ចំនួនទិញ។ ចំនួនមួយ order មានអតិបរមា 3 ហើយមិនអាចលើសស្តុកនៅសល់។
 2. ពេលបង្កើត order, Supabase កក់ stock ជាអាតូមិក ដើម្បីកុំឲ្យអតិថិជនពីរនាក់បាន License Key ដូចគ្នា។
 3. អ្នកទិញបង់តាម KHQR ឬបើក ABA Mobile។ អាចចុចប៊ូតុងពិនិត្យ payment ដោយខ្លួនឯងបាន។
-4. បន្ទាប់ពី KHPAY បញ្ជាក់ `paid` bot ផ្ញើ License Key ក្នុង Telegram ហើយលុបសារដែលមាន QR។ ករណី expired/failed stock ដែលបាន reserve នឹងត្រឡប់ទៅ available។
+4. បន្ទាប់ពី KHPAY បញ្ជាក់ `paid` bot ផ្ញើ License Key ជា code block (ចុចលើ Key ដើម្បី copy) និងមានប៊ូតុង **📋 Copy Key** សម្រាប់ Key នីមួយៗ រួចលុបសារដែលមាន QR។ ករណី expired/failed stock ដែលបាន reserve នឹងត្រឡប់ទៅ available។
 5. អ្នកប្រើអាចមើល order history, ប្តូរភាសា Khmer/English, បើកវីដេអូ How to buy និងទាក់ទង support។
 
 Admin panel អាចបន្ថែម/កែ Catalog និង Package, បិទធាតុ, បញ្ចូល/ដក stock, upload `.txt` និងមើល sales summary។ អ្នកប្រើដែលមិនមាន ID ក្នុង `TELEGRAM_ADMIN_IDS` មិនអាចគ្រប់គ្រងហាងបានទេ។

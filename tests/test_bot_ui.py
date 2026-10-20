@@ -713,14 +713,19 @@ def test_delivery_deletes_payment_qr_before_fulfilling_and_sending_credentials()
             123,
             "✅ ទំនិញបានជោគជ័យ\n\n"
             "🔑 បញ្ជី Key របស់អ្នក [ សរុប 2 Key ]\n"
-            "- FF-1H-KEY-001\n"
-            "- FF-1D-KEY-002\n\n"
+            "- <code>FF-1H-KEY-001</code>\n"
+            "- <code>FF-1D-KEY-002</code>\n\n"
             "🙏 អរគុណសម្រាប់ការទិញទំនិញ 🙏\n\n"
             "📲 ចុចលីងខាងក្រោមដើម្បីដំឡើង 📲",
         )
-        button = bot.send_message.await_args.kwargs["reply_markup"].inline_keyboard[0][0]
-        assert button.text == "👉 ចូលក្រុមដំឡើង"
-        assert button.url == "https://t.me/install_group"
+        assert bot.send_message.await_args.kwargs["parse_mode"] == "HTML"
+        buttons = bot.send_message.await_args.kwargs["reply_markup"].inline_keyboard
+        assert buttons[0][0].text == "📋 Copy Key 1"
+        assert buttons[0][0].copy_text.text == "FF-1H-KEY-001"
+        assert buttons[1][0].text == "📋 Copy Key 2"
+        assert buttons[1][0].copy_text.text == "FF-1D-KEY-002"
+        assert buttons[2][0].text == "👉 ចូលក្រុមដំឡើង"
+        assert buttons[2][0].url == "https://t.me/install_group"
 
     asyncio.run(run_test())
 

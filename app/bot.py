@@ -14,6 +14,7 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import (
     BufferedInputFile,
     CallbackQuery,
+    CopyTextButton,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     InputMediaPhoto,
@@ -498,7 +499,7 @@ async def deliver_order(bot: Bot, store: Store, settings: Settings, order_id: st
     if not credentials:
         return
     keys = [decrypt_stock(value, settings.stock_encryption_key) for value in credentials]
-    key_lines = "\n".join(f"- {value}" for value in keys)
+    key_lines = "\n".join(f"- <code>{html.escape(value)}</code>" for value in keys)
     text = (
         "✅ ទំនិញបានជោគជ័យ\n\n"
         f"🔑 បញ្ជី Key របស់អ្នក [ សរុប {len(keys)} Key ]\n"
@@ -506,12 +507,21 @@ async def deliver_order(bot: Bot, store: Store, settings: Settings, order_id: st
         "🙏 អរគុណសម្រាប់ការទិញទំនិញ 🙏\n\n"
         "📲 ចុចលីងខាងក្រោមដើម្បីដំឡើង 📲"
     )
+    delivery_rows = [
+        [
+            InlineKeyboardButton(
+                text=f"📋 Copy Key {index}",
+                copy_text=CopyTextButton(text=value),
+            )
+        ]
+        for index, value in enumerate(keys, start=1)
+    ]
+    delivery_rows.append([InlineKeyboardButton(text="👉 ចូលក្រុមដំឡើង", url=install_url)])
     await bot.send_message(
         chat_id,
         text,
-        reply_markup=keyboard(
-            [[InlineKeyboardButton(text="👉 ចូលក្រុមដំឡើង", url=install_url)]]
-        ),
+        parse_mode="HTML",
+        reply_markup=keyboard(delivery_rows),
     )
     await store.mark_delivered(order_id)
 
