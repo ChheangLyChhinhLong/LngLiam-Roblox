@@ -164,6 +164,10 @@ def test_parse_package_photo_caption():
     )
 
 
+def test_parse_package_caption_without_media_or_optional_details():
+    assert parse_product_caption("Key 1h | 0.50") == ("Key 1h", "0.50", "")
+
+
 def test_parse_stock_add_accepts_comma_and_newline_separated_codes():
     assert parse_stock_add("addstock product-123 | FF-KEY-1, FF-KEY-2\nFF-KEY-3") == (
         "product-123",
@@ -486,6 +490,34 @@ def test_product_creation_inserts_category_and_cloudinary_image_url():
                 "price": "0.01",
                 "description": "Description",
                 "image_url": "https://res.cloudinary.com/example/image/upload/test.png",
+            }
+        )
+
+    asyncio.run(run_test())
+
+
+def test_product_creation_without_media():
+    async def run_test():
+        query = Mock()
+        query.insert.return_value = query
+        query.select.return_value = query
+        query.execute = AsyncMock(return_value=SimpleNamespace(data=[{"id": "product-123"}]))
+        client = SimpleNamespace(table=Mock(return_value=query))
+
+        product_id = await Store(client).create_product(
+            "category-123",
+            "Key 1h",
+            "0.50",
+            "",
+        )
+
+        assert product_id == "product-123"
+        query.insert.assert_called_once_with(
+            {
+                "category_id": "category-123",
+                "name": "Key 1h",
+                "price": "0.50",
+                "description": "",
             }
         )
 

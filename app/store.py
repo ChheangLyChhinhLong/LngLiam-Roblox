@@ -114,21 +114,21 @@ class Store:
         image_url: str | None = None,
         video_url: str | None = None,
     ) -> str:
-        if bool(image_url) == bool(video_url):
-            raise ValueError("Provide exactly one product image or video URL")
-        media_column = "video_url" if video_url else "image_url"
-        media_url = video_url or image_url
+        if image_url and video_url:
+            raise ValueError("A product cannot have both an image and a video")
+        product_data = {
+            "category_id": category_id,
+            "name": name,
+            "price": price,
+            "description": description,
+        }
+        if image_url:
+            product_data["image_url"] = image_url
+        if video_url:
+            product_data["video_url"] = video_url
         result = await (
             self.client.table("products")
-            .insert(
-                {
-                    "category_id": category_id,
-                    "name": name,
-                    "price": price,
-                    "description": description,
-                    media_column: media_url,
-                }
-            )
+            .insert(product_data)
             .select("id")
             .execute()
         )

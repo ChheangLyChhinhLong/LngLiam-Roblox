@@ -134,13 +134,13 @@ Webhook និង ABA deep link ត្រូវការអាសយដ្ឋា
 ឈ្មោះ Catalog | ព័ត៌មានលម្អិត (អាចទុកទទេ)
 ```
 
-4. បើក Catalog ដែលទើបបង្កើត ហើយចុច **Add Package**។ ផ្ញើរូបភាព ឬវីដេអូជាមួយ caption តាមទម្រង់:
+4. បើក Catalog ដែលទើបបង្កើត ហើយចុច **Add Package**។ អាចផ្ញើសារធម្មតា ឬរូបភាព/វីដេអូដែលមាន caption តាមទម្រង់:
 
 ```text
-ឈ្មោះ Package | តម្លៃ USD | ព័ត៌មានលម្អិត
+ឈ្មោះ Package | តម្លៃ USD | ព័ត៌មានលម្អិត (ជាជម្រើស)
 ```
 
-ឧទាហរណ៍ `Free Fire Key 1h | 0.15 | License key for one hour`។ តម្លៃត្រូវធំជាងសូន្យ។ ការបង្កើត package ជាមួយរូបភាព ឬវីដេអូត្រូវការកំណត់ Cloudinary variables ទាំងបី។ Package នឹងបង្ហាញ media នៅលើទំព័រព័ត៌មានរបស់វា។
+ឧទាហរណ៍ `Free Fire Key 1h | 0.15 | License key for one hour` ឬ `Key 1h | 0.50`។ តម្លៃត្រូវធំជាងសូន្យ។ រូបភាព/វីដេអូគឺជាជម្រើស; បើដាក់ media នោះត្រូវកំណត់ Cloudinary variables ទាំងបី។ Package នឹងបង្ហាញ media នៅលើទំព័រព័ត៌មានរបស់វា។
 
 5. ចូល package ហើយប្រើ **Add stock** ដើម្បីបញ្ចូល License Key មួយក្នុងមួយបន្ទាត់។ Bot encrypt ទិន្នន័យមុនរក្សាទុក។
 6. ឬប្រើទម្រង់សារនេះពី admin account ដោយផ្ទាល់:

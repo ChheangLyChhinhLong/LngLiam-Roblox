@@ -166,15 +166,15 @@ def quantity_limit(stock: int) -> int:
 
 def parse_product_caption(caption: str, language: str = "km") -> tuple[str, str, str]:
     fields = [field.strip() for field in caption.split("|", 2)]
-    if len(fields) != 3 or not fields[0] or not fields[1]:
-        raise ValueError(copy(language, "សូមប្រើទម្រង់ ឈ្មោះ | តម្លៃ | ព័ត៌មានលម្អិត។", "Use the format Name | Price | Details."))
+    if len(fields) < 2 or not fields[0] or not fields[1]:
+        raise ValueError(copy(language, "សូមប្រើទម្រង់ ឈ្មោះ | តម្លៃ | ព័ត៌មានលម្អិត (អាចទុកទទេ)។", "Use the format Name | Price | Details (optional)."))
     try:
         price = Decimal(fields[1])
     except InvalidOperation:
         raise ValueError(copy(language, "តម្លៃមិនត្រឹមត្រូវទេ។", "The price is invalid.")) from None
     if not price.is_finite() or price <= 0:
         raise ValueError(copy(language, "តម្លៃត្រូវតែធំជាង 0។", "The price must be greater than 0."))
-    return fields[0], str(price), fields[2]
+    return fields[0], str(price), fields[2] if len(fields) == 3 else ""
 
 
 def parse_stock_add(text: str, language: str = "km") -> tuple[str, list[str]] | None:
@@ -1299,7 +1299,7 @@ def register_handlers(
         category_id = callback.data.removeprefix("admin:product-add:")
         pending_admin_input[callback.from_user.id] = ("product_add", category_id)
         await callback.message.edit_text(
-            copy(language, "ផ្ញើរូបភាព ឬវីដេអូជាមួយ Caption <code>ឈ្មោះ | តម្លៃ | ព័ត៌មានលម្អិត</code> ដើម្បីបង្កើត Package ថ្មី។", "Send an image or video with the caption <code>Name | Price | Details</code> to create a package."),
+            copy(language, "ផ្ញើសារ ឬរូបភាព/វីដេអូជាមួយ Caption តាមទម្រង់ <code>ឈ្មោះ | តម្លៃ | ព័ត៌មានលម្អិត (អាចទុកទទេ)</code> ដើម្បីបង្កើត Package ថ្មី។ Media ជាជម្រើស។", "Send text or an image/video with the caption <code>Name | Price | Details (optional)</code> to create a package. Media is optional."),
             parse_mode="HTML",
             reply_markup=keyboard([back_button("admin:cancel-input", language)]),
         )
@@ -1464,7 +1464,8 @@ def register_handlers(
                 else:
                     await store.client.table("categories").update(values).eq("id", target_id).execute()
             elif action == "product_add":
-                raise ValueError(copy(language, "សូមផ្ញើរូបភាព ឬវីដេអូជាមួយ Caption ដើម្បីបង្កើត Package ថ្មី។", "Send an image or video with a caption to create a package."))
+                name, price, description = parse_product_caption(text, language)
+                await store.create_product(target_id, name, price, description)
             elif action == "product_edit":
                 fields = [part.strip() for part in text.split("|", 2)]
                 if len(fields) != 3:
@@ -1520,7 +1521,16 @@ def register_handlers(
             target = f"ac:{target_id}"
         else:
             target = "admin:catalogs"
-        await message.answer(copy(language, "បានរក្សាទុកដោយជោគជ័យ។", "Saved successfully."), reply_markup=keyboard([back_button(target, language)]))
+        success_message = (
+            copy(
+                language,
+                "បានបង្កើត Package ដោយជោគជ័យ (មិនបានដាក់រូបភាព/វីដេអូ)។",
+                "Package created successfully (without an image/video).",
+            )
+            if action == "product_add"
+            else copy(language, "បានរក្សាទុកដោយជោគជ័យ។", "Saved successfully.")
+        )
+        await message.answer(success_message, reply_markup=keyboard([back_button(target, language)]))
 
     @router.callback_query(F.data == "admin:upload")
     async def choose_stock_product(callback: CallbackQuery) -> None:
