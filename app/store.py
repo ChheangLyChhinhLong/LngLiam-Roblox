@@ -53,6 +53,44 @@ class Store:
             raise ValueError("Unsupported language")
         await self.client.table("users").update({"language": language}).eq("telegram_id", telegram_id).execute()
 
+    async def is_reseller(self, telegram_id: int) -> bool:
+        result = await (
+            self.client.table("resellers")
+            .select("telegram_id")
+            .eq("telegram_id", telegram_id)
+            .maybe_single()
+            .execute()
+        )
+        return bool(result.data)
+
+    async def resellers(self) -> list[dict[str, Any]]:
+        result = await (
+            self.client.table("resellers")
+            .select("telegram_id")
+            .order("telegram_id")
+            .execute()
+        )
+        return result.data or []
+
+    async def add_reseller(self, telegram_id: int) -> None:
+        if telegram_id <= 0:
+            raise ValueError("Telegram ID must be a positive integer")
+        await self.client.table("resellers").upsert(
+            {"telegram_id": telegram_id},
+            on_conflict="telegram_id",
+            ignore_duplicates=True,
+        ).execute()
+
+    async def remove_reseller(self, telegram_id: int) -> bool:
+        result = await (
+            self.client.table("resellers")
+            .delete()
+            .eq("telegram_id", telegram_id)
+            .select("telegram_id")
+            .execute()
+        )
+        return bool(result.data)
+
     async def bot_settings(self, keys: tuple[str, ...]) -> dict[str, str]:
         result = await (
             self.client.table("bot_settings")
@@ -86,7 +124,7 @@ class Store:
     async def products(self, category_id: str) -> list[dict[str, Any]]:
         result = await (
             self.client.table("products")
-            .select("id,name,description,price")
+            .select("id,name,description,price,reseller_price")
             .eq("category_id", category_id)
             .eq("active", True)
             .order("sort_order")
@@ -97,7 +135,7 @@ class Store:
     async def product(self, product_id: str) -> dict[str, Any] | None:
         result = await (
             self.client.table("products")
-            .select("id,category_id,name,description,price,image_url,video_url")
+            .select("id,category_id,name,description,price,reseller_price,image_url,video_url")
             .eq("id", product_id)
             .eq("active", True)
             .maybe_single()
@@ -113,6 +151,7 @@ class Store:
         description: str,
         image_url: str | None = None,
         video_url: str | None = None,
+        reseller_price: str | None = None,
     ) -> str:
         if image_url and video_url:
             raise ValueError("A product cannot have both an image and a video")
@@ -120,6 +159,7 @@ class Store:
             "category_id": category_id,
             "name": name,
             "price": price,
+            "reseller_price": reseller_price if reseller_price is not None else price,
             "description": description,
         }
         if image_url:
@@ -137,6 +177,23 @@ class Store:
         if not isinstance(product, dict) or not product.get("id"):
             raise RuntimeError("Supabase did not return the new product ID")
         return str(product["id"])
+
+    async def update_product(
+        self,
+        product_id: str,
+        name: str,
+        price: str,
+        reseller_price: str,
+        description: str,
+    ) -> None:
+        await self.client.table("products").update(
+            {
+                "name": name,
+                "price": price,
+                "reseller_price": reseller_price,
+                "description": description,
+            }
+        ).eq("id", product_id).execute()
 
     async def update_product_image(self, product_id: str, image_url: str) -> bool:
         result = await (

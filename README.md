@@ -37,7 +37,7 @@ Project នេះជាហាងលក់ License Key និង Digital Activati
 
 1. បង្កើត project ថ្មីនៅ [Supabase](https://supabase.com/) ហើយរង់ចាំ database រួចរាល់។
 2. បើក **SQL Editor → New query**។ បើក [schema.sql](schema.sql), ចម្លង SQL ទាំងមូលទៅក្នុង editor ហើយចុច **Run**។ Script នេះបង្កើត tables, indexes និង database functions ដែល bot ត្រូវការ។
-3. បើមាន database ចាស់ អាច run `schema.sql` ម្តងទៀត ដើម្បីអនុវត្តការបន្ថែម schema ដែល idempotent។ វាបង្កើត column `products.video_url` សម្រាប់វីដេអូ Package និងអនុញ្ញាត import License Key ដែលបានលក់រួចមកវិញជាស្តុកថ្មី; ត្រូវ run schema ចុងក្រោយមុនប្រើមុខងារទាំងនេះ។
+3. បើមាន database ចាស់ អាច run `schema.sql` ម្តងទៀត ដើម្បីអនុវត្តការបន្ថែម schema ដែល idempotent។ វាបន្ថែម `products.video_url`, តម្លៃ Reseller និងតារាង `resellers`; Package ចាស់នឹងមានតម្លៃ Reseller ស្មើតម្លៃអតិថិជន រហូតដល់អ្នកកែវា។ វាក៏អនុញ្ញាត import License Key ដែលបានលក់រួចមកវិញជាស្តុកថ្មីផងដែរ។ ត្រូវ run schema ចុងក្រោយមុនប្រើមុខងារទាំងនេះ។
 4. បើក **Project Settings → API** រួចចម្លង Project URL និង `service_role` key ទៅ environment variables។ ប្រើ `service_role` key តែក្នុង backend/Render ប៉ុណ្ណោះ។
 5. ទុក Row Level Security (RLS) ឲ្យបើក។ កុំបង្កើត public policies សម្រាប់ stock ឬ orders។
 
@@ -137,10 +137,12 @@ Webhook និង ABA deep link ត្រូវការអាសយដ្ឋា
 4. បើក Catalog ដែលទើបបង្កើត ហើយចុច **Add Package**។ អាចផ្ញើសារធម្មតា ឬរូបភាព/វីដេអូដែលមាន caption តាមទម្រង់:
 
 ```text
-ឈ្មោះ Package | តម្លៃ USD | ព័ត៌មានលម្អិត (ជាជម្រើស)
+ឈ្មោះ Package | តម្លៃអតិថិជន USD | តម្លៃ Reseller USD | ព័ត៌មានលម្អិត
 ```
 
-ឧទាហរណ៍ `Free Fire Key 1h | 0.15 | License key for one hour` ឬ `Key 1h | 0.50`។ តម្លៃត្រូវធំជាងសូន្យ។ រូបភាព/វីដេអូគឺជាជម្រើស; បើដាក់ media នោះត្រូវកំណត់ Cloudinary variables ទាំងបី។ Package នឹងបង្ហាញ media នៅលើទំព័រព័ត៌មានរបស់វា។
+ឧទាហរណ៍ `Free Fire Key 1h | 0.50 | 0.35 | License key for one hour`។ តម្លៃទាំងពីរត្រូវធំជាងសូន្យ ហើយតម្លៃ Reseller ត្រូវទាបជាងតម្លៃអតិថិជន។ រូបភាព/វីដេអូគឺជាជម្រើស; បើដាក់ media នោះត្រូវកំណត់ Cloudinary variables ទាំងបី។ Package នឹងបង្ហាញ media នៅលើទំព័រព័ត៌មានរបស់វា។
+
+Admin អាចបើក **Store admin → Manage resellers → Add reseller** រួចផ្ញើ Telegram user ID ជាលេខ។ ចុចលើ ID ក្នុងបញ្ជីដើម្បីដកសិទ្ធិ។ Reseller ប្រើ bot ដូចអតិថិជនធម្មតា ប៉ុន្តែ catalog, ព័ត៌មាន package និងការកក់ទិញនឹងប្រើតម្លៃ Reseller។ តម្លៃ checkout ត្រូវបានគណនាដោយ Supabase តាម Telegram ID មិនមែនតាមតម្លៃដែលបានផ្ញើពី UI ទេ។
 
 5. ចូល package ហើយប្រើ **Add stock** ដើម្បីបញ្ចូល License Key មួយក្នុងមួយបន្ទាត់។ Bot encrypt ទិន្នន័យមុនរក្សាទុក។
 6. ឬប្រើទម្រង់សារនេះពី admin account ដោយផ្ទាល់:

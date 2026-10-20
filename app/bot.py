@@ -165,17 +165,48 @@ def quantity_limit(stock: int) -> int:
     return max(0, min(3, stock))
 
 
-def parse_product_caption(caption: str, language: str = "km") -> tuple[str, str, str]:
-    fields = [field.strip() for field in caption.split("|", 2)]
+def parse_product_caption(caption: str, language: str = "km") -> tuple[str, str, str, str]:
+    fields = [field.strip() for field in caption.split("|", 3)]
     if len(fields) < 2 or not fields[0] or not fields[1]:
-        raise ValueError(copy(language, "សូមប្រើទម្រង់ ឈ្មោះ | តម្លៃ | ព័ត៌មានលម្អិត (អាចទុកទទេ)។", "Use the format Name | Price | Details (optional)."))
+        raise ValueError(
+            copy(
+                language,
+                "សូមប្រើទម្រង់ ឈ្មោះ | តម្លៃធម្មតា | តម្លៃ Reseller | ព័ត៌មានលម្អិត។",
+                "Use the format Name | regular price | reseller price | Details.",
+            )
+        )
     try:
         price = Decimal(fields[1])
     except InvalidOperation:
         raise ValueError(copy(language, "តម្លៃមិនត្រឹមត្រូវទេ។", "The price is invalid.")) from None
     if not price.is_finite() or price <= 0:
         raise ValueError(copy(language, "តម្លៃត្រូវតែធំជាង 0។", "The price must be greater than 0."))
-    return fields[0], str(price), fields[2] if len(fields) == 3 else ""
+    reseller_price = price
+    description = ""
+    if len(fields) == 4:
+        try:
+            reseller_price = Decimal(fields[2])
+        except InvalidOperation:
+            raise ValueError(copy(language, "តម្លៃ Reseller មិនត្រឹមត្រូវទេ។", "The reseller price is invalid.")) from None
+        if not reseller_price.is_finite() or reseller_price <= 0 or reseller_price >= price:
+            raise ValueError(
+                copy(
+                    language,
+                    "តម្លៃ Reseller ត្រូវតែធំជាង 0 និងទាបជាងតម្លៃធម្មតា។",
+                    "The reseller price must be greater than 0 and lower than the regular price.",
+                )
+            )
+        description = fields[3]
+    elif len(fields) == 3:
+        description = fields[2]
+    return fields[0], str(price), str(reseller_price), description
+
+
+def product_price(product_data: dict[str, Any], is_reseller: bool = False) -> Decimal:
+    price = product_data["price"]
+    if is_reseller:
+        price = product_data.get("reseller_price", price)
+    return Decimal(str(price))
 
 
 def parse_stock_add(text: str, language: str = "km") -> tuple[str, list[str]] | None:
@@ -639,7 +670,13 @@ def register_handlers(
             edit_message=edit_message,
         )
 
-    async def show_packages(message: Message, category_id: str, page: int, language: str) -> None:
+    async def show_packages(
+        message: Message,
+        category_id: str,
+        page: int,
+        language: str,
+        is_reseller: bool = False,
+    ) -> None:
         category_data = await store.category(category_id)
         if not category_data:
             await edit_text_message(
@@ -664,10 +701,11 @@ def register_handlers(
         rows = []
         for item, stock in zip(visible_products, stock_counts):
             stock_label = str(stock) if stock else copy(language, "អស់ស្តុក", "Out")
+            price = product_price(item, is_reseller)
             rows.append(
                 [
                     InlineKeyboardButton(
-                        text=f"📦 {item['name']} • {money(item['price'])} ({stock_label})",
+                        text=f"📦 {item['name']} • {money(price)} ({stock_label})",
                         callback_data=f"p:{item['id']}",
                     )
                 ]
@@ -688,6 +726,36 @@ def register_handlers(
             f"{intro + chr(10) if intro else ''}Choose a package below:",
         )
         await edit_text_message(message, text, parse_mode="HTML", reply_markup=keyboard(rows))
+
+    async def show_resellers(message: Message, language: str) -> None:
+        entries = await store.resellers()
+        rows = [
+            [
+                InlineKeyboardButton(
+                    text=f"🗑 {item['telegram_id']}",
+                    callback_data=f"admin:reseller-remove:{item['telegram_id']}",
+                )
+            ]
+            for item in entries
+        ]
+        rows.extend(
+            [
+                [
+                    InlineKeyboardButton(
+                        text=copy(language, "➕ បន្ថែម Reseller", "➕ Add reseller"),
+                        callback_data="admin:reseller-add",
+                    )
+                ],
+                back_button("admin", language),
+            ]
+        )
+        await message.edit_text(
+            f"👥 <b>{copy(language, 'គ្រប់គ្រង Reseller', 'Manage resellers')}</b>\n"
+            f"{copy(language, 'ចុច Telegram ID ដើម្បីដកសិទ្ធិ។', 'Select a Telegram ID to remove reseller access.')} "
+            f"({len(entries)})",
+            parse_mode="HTML",
+            reply_markup=keyboard(rows),
+        )
 
     @router.callback_query(F.data == "home")
     async def home(callback: CallbackQuery) -> None:
@@ -796,14 +864,16 @@ def register_handlers(
         await callback.answer()
         language = await safe_user_language(store, callback.from_user.id)
         category_id, page = callback.data[len("shop:packages:") :].rsplit(":", 1)
-        await show_packages(callback.message, category_id, int(page), language)
+        is_reseller = await store.is_reseller(callback.from_user.id)
+        await show_packages(callback.message, category_id, int(page), language, is_reseller)
 
     @router.callback_query(F.data.startswith("c:"))
     async def category(callback: CallbackQuery) -> None:
         await callback.answer()
         language = await safe_user_language(store, callback.from_user.id)
         category_id = callback.data[2:]
-        await show_packages(callback.message, category_id, 0, language)
+        is_reseller = await store.is_reseller(callback.from_user.id)
+        await show_packages(callback.message, category_id, 0, language, is_reseller)
 
     @router.callback_query(F.data.startswith("p:"))
     async def product(callback: CallbackQuery) -> None:
@@ -816,7 +886,8 @@ def register_handlers(
                 reply_markup=keyboard([back_button("shop", language)]),
             )
             return
-        await show_product(callback.message, product_data, 1, language)
+        is_reseller = await store.is_reseller(callback.from_user.id)
+        await show_product(callback.message, product_data, 1, language, is_reseller=is_reseller)
 
     async def show_product(
         message: Message,
@@ -824,11 +895,13 @@ def register_handlers(
         quantity: int,
         language: str,
         edit_message: bool = True,
+        is_reseller: bool = False,
     ) -> None:
         stock = await store.available_stock(product_data["id"])
         max_quantity = quantity_limit(stock)
         quantity = min(max(quantity, 1), max_quantity) if max_quantity else 0
         category_data = await store.category(product_data["category_id"])
+        unit_price = product_price(product_data, is_reseller)
         rows: list[list[InlineKeyboardButton]] = []
         if max_quantity:
             rows.append(
@@ -847,7 +920,7 @@ def register_handlers(
                     ),
                 ]
             )
-            total = Decimal(str(product_data["price"])) * quantity
+            total = unit_price * quantity
             rows.append(
                 [
                     InlineKeyboardButton(
@@ -861,12 +934,17 @@ def register_handlers(
         rows.append(back_button(f"c:{product_data['category_id']}", language))
         category_title = f"🛍 {html.escape(category_data['name'])}\n" if category_data else ""
         description = description_preview(product_data.get("description") or "", language)
+        unit_price_label = (
+            copy(language, "តម្លៃឯកតា Reseller", "Reseller unit price")
+            if is_reseller
+            else copy(language, "តម្លៃឯកតា", "Unit price")
+        )
         text = (
             f"{category_title}"
             f"🛒 <b>{copy(language, 'បញ្ជាក់ការបញ្ជាទិញ', 'Order details')}</b>\n"
             "───────────────────\n"
             f"• {copy(language, 'ផលិតផល', 'Product')}: {html.escape(product_data['name'])}\n"
-            f"• {copy(language, 'តម្លៃឯកតា', 'Unit price')}: {money(product_data['price'])}\n"
+            f"• {unit_price_label}: {money(unit_price)}\n"
             f"• {copy(language, 'ស្តុកមាន', 'Available stock')}: {stock}\n\n"
             f"<b>{copy(language, 'ព័ត៌មានលម្អិត', 'Product details')}</b>\n"
             f"{description}\n"
@@ -927,7 +1005,14 @@ def register_handlers(
                 reply_markup=keyboard([back_button("shop", language)]),
             )
             return
-        await show_product(callback.message, product_data, int(quantity_text), language)
+        is_reseller = await store.is_reseller(callback.from_user.id)
+        await show_product(
+            callback.message,
+            product_data,
+            int(quantity_text),
+            language,
+            is_reseller=is_reseller,
+        )
 
     @router.callback_query(F.data == "noop")
     async def no_action(callback: CallbackQuery) -> None:
@@ -1124,6 +1209,7 @@ def register_handlers(
         total_stock = sum(stock_counts)
         rows = [
             [InlineKeyboardButton(text=copy(language, "🗂 គ្រប់គ្រង Catalog និង Package", "🗂 Manage catalogs and packages"), callback_data="admin:catalogs")],
+            [InlineKeyboardButton(text=copy(language, "👥 គ្រប់គ្រង Reseller", "👥 Manage resellers"), callback_data="admin:resellers")],
             [InlineKeyboardButton(text=copy(language, "📥 បញ្ចូលស្តុក (.txt)", "📥 Import stock (.txt)"), callback_data="admin:upload")],
             [InlineKeyboardButton(text=copy(language, "📊 ស្ថិតិការលក់", "📊 Sales summary"), callback_data="admin:sales")],
             back_button(language=language),
@@ -1135,6 +1221,49 @@ def register_handlers(
             parse_mode="HTML",
             reply_markup=keyboard(rows),
         )
+
+    @router.callback_query(F.data == "admin:resellers")
+    async def admin_resellers(callback: CallbackQuery) -> None:
+        await callback.answer()
+        language = await safe_user_language(store, callback.from_user.id)
+        if callback.from_user.id not in settings.admin_ids:
+            return
+        await show_resellers(callback.message, language)
+
+    @router.callback_query(F.data == "admin:reseller-add")
+    async def add_reseller_prompt(callback: CallbackQuery) -> None:
+        await callback.answer()
+        language = await safe_user_language(store, callback.from_user.id)
+        if callback.from_user.id not in settings.admin_ids:
+            return
+        pending_admin_input[callback.from_user.id] = ("reseller_add", None)
+        await callback.message.edit_text(
+            copy(
+                language,
+                "ផ្ញើ Telegram ID ដែលចង់ផ្តល់តម្លៃ Reseller៖",
+                "Send the Telegram ID to grant reseller pricing:",
+            ),
+            reply_markup=keyboard([back_button("admin:cancel-input", language)]),
+        )
+
+    @router.callback_query(F.data.startswith("admin:reseller-remove:"))
+    async def remove_reseller(callback: CallbackQuery) -> None:
+        language = await safe_user_language(store, callback.from_user.id)
+        if callback.from_user.id not in settings.admin_ids:
+            await callback.answer()
+            return
+        try:
+            telegram_id = int(callback.data.removeprefix("admin:reseller-remove:"))
+        except ValueError:
+            await callback.answer(copy(language, "Telegram ID មិនត្រឹមត្រូវទេ។", "Invalid Telegram ID."), show_alert=True)
+            return
+        removed = await store.remove_reseller(telegram_id)
+        await callback.answer(
+            copy(language, "បានដក Reseller រួចរាល់។", "Reseller removed.")
+            if removed
+            else copy(language, "រកមិនឃើញ Reseller ទេ។", "Reseller not found.")
+        )
+        await show_resellers(callback.message, language)
 
     @router.callback_query(F.data == "admin:catalogs")
     async def admin_catalogs(callback: CallbackQuery) -> None:
@@ -1229,7 +1358,8 @@ def register_handlers(
         await callback.message.edit_text(
             f"📦 <b>{html.escape(product_data['name'])}</b>\n"
             f"ID: <code>{html.escape(product_data['id'])}</code>\n"
-            f"{copy(language, 'តម្លៃ៖', 'Price:')} {money(product_data['price'])}\n"
+            f"{copy(language, 'តម្លៃអតិថិជន៖', 'Customer price:')} {money(product_data['price'])}\n"
+            f"{copy(language, 'តម្លៃ Reseller៖', 'Reseller price:')} {money(product_data['reseller_price'])}\n"
             f"{copy(language, 'ស្តុកនៅសល់៖', 'Stock remaining:')} {stock}\n\n"
             f"{html.escape(product_data.get('description') or '')}",
             parse_mode="HTML",
@@ -1274,7 +1404,7 @@ def register_handlers(
             await message.answer(copy(language, "សូមជ្រើសរើស Catalog និង Package ថ្មីក្នុងម៉ឺនុយគ្រប់គ្រងជាមុនសិន។", "Choose a catalog and start adding a package from the admin menu first."))
             return
         try:
-            name, price, description = parse_product_caption(message.caption or "", language)
+            name, price, reseller_price, description = parse_product_caption(message.caption or "", language)
             is_video = message.video is not None
             file_id = message.video.file_id if is_video else message.photo[-1].file_id
             media_url = await upload_product_media(bot, settings, file_id, "video" if is_video else "image")
@@ -1285,6 +1415,7 @@ def register_handlers(
                 description,
                 video_url=media_url if is_video else None,
                 image_url=None if is_video else media_url,
+                reseller_price=reseller_price,
             )
         except (InvalidOperation, ValueError) as exc:
             await message.answer(html.escape(str(exc)))
@@ -1309,7 +1440,7 @@ def register_handlers(
         category_id = callback.data.removeprefix("admin:product-add:")
         pending_admin_input[callback.from_user.id] = ("product_add", category_id)
         await callback.message.edit_text(
-            copy(language, "ផ្ញើសារ ឬរូបភាព/វីដេអូជាមួយ Caption តាមទម្រង់ <code>ឈ្មោះ | តម្លៃ | ព័ត៌មានលម្អិត (អាចទុកទទេ)</code> ដើម្បីបង្កើត Package ថ្មី។ Media ជាជម្រើស។", "Send text or an image/video with the caption <code>Name | Price | Details (optional)</code> to create a package. Media is optional."),
+            copy(language, "ផ្ញើសារ ឬរូបភាព/វីដេអូជាមួយ Caption តាមទម្រង់ <code>ឈ្មោះ | តម្លៃអតិថិជន | តម្លៃ Reseller | ព័ត៌មានលម្អិត</code>។ Media ជាជម្រើស។", "Send text or an image/video with the caption <code>Name | customer price | reseller price | Details</code> to create a package. Media is optional."),
             parse_mode="HTML",
             reply_markup=keyboard([back_button("admin:cancel-input", language)]),
         )
@@ -1337,7 +1468,7 @@ def register_handlers(
         product_id = callback.data.removeprefix("admin:product-edit:")
         pending_admin_input[callback.from_user.id] = ("product_edit", product_id)
         await callback.message.edit_text(
-            copy(language, "ផ្ញើឈ្មោះ តម្លៃ និងព័ត៌មានថ្មីតាមទម្រង់៖ <code>ឈ្មោះ | តម្លៃ | ព័ត៌មានលម្អិត</code>", "Send the updated name, price, and details in this format: <code>Name | Price | Details</code>"),
+            copy(language, "ផ្ញើឈ្មោះ និងតម្លៃថ្មីតាមទម្រង់៖ <code>ឈ្មោះ | តម្លៃអតិថិជន | តម្លៃ Reseller | ព័ត៌មានលម្អិត</code>", "Send the updated name and prices in this format: <code>Name | customer price | reseller price | Details</code>"),
             parse_mode="HTML",
             reply_markup=keyboard([back_button("admin:cancel-input", language)]),
         )
@@ -1394,7 +1525,13 @@ def register_handlers(
         language = await safe_user_language(store, callback.from_user.id)
         pending = pending_admin_input.pop(callback.from_user.id, None)
         await callback.answer(copy(language, "បានបោះបង់", "Cancelled"))
-        target = f"ap:{pending[1]}" if pending and pending[0] in {"stock_add", "stock_remove"} else "admin:catalogs"
+        target = (
+            f"ap:{pending[1]}"
+            if pending and pending[0] in {"stock_add", "stock_remove"}
+            else "admin:resellers"
+            if pending and pending[0] == "reseller_add"
+            else "admin:catalogs"
+        )
         await callback.message.edit_text(copy(language, "បានបោះបង់។", "Cancelled."), reply_markup=keyboard([back_button(target, language)]))
 
     @router.callback_query(F.data.startswith("admin:stock-add:"))
@@ -1474,21 +1611,23 @@ def register_handlers(
                 else:
                     await store.client.table("categories").update(values).eq("id", target_id).execute()
             elif action == "product_add":
-                name, price, description = parse_product_caption(text, language)
-                await store.create_product(target_id, name, price, description)
+                if target_id is None:
+                    raise ValueError(copy(language, "សូមជ្រើសរើស Catalog ជាមុនសិន។", "Choose a catalog first."))
+                name, price, reseller_price, description = parse_product_caption(text, language)
+                await store.create_product(
+                    target_id,
+                    name,
+                    price,
+                    description,
+                    reseller_price=reseller_price,
+                )
             elif action == "product_edit":
-                fields = [part.strip() for part in text.split("|", 2)]
-                if len(fields) != 3:
-                    raise ValueError(copy(language, "សូមប្រើទម្រង់ ឈ្មោះ | តម្លៃ | ព័ត៌មានលម្អិត។", "Use the format Name | Price | Details."))
-                name, price_text, description = fields
-                try:
-                    price = Decimal(price_text)
-                except InvalidOperation:
-                    raise ValueError(copy(language, "តម្លៃមិនត្រឹមត្រូវទេ។", "The price is invalid.")) from None
-                if not name or price <= 0:
-                    raise ValueError(copy(language, "ឈ្មោះ និងតម្លៃត្រូវតែត្រឹមត្រូវ ហើយតម្លៃត្រូវធំជាង 0។", "Enter a name and a valid price greater than 0."))
-                values = {"name": name, "price": str(price), "description": description}
-                await store.client.table("products").update(values).eq("id", target_id).execute()
+                name, price, reseller_price, description = parse_product_caption(text, language)
+                await store.update_product(target_id, name, price, reseller_price, description)
+            elif action == "reseller_add":
+                if not text.isdecimal():
+                    raise ValueError(copy(language, "សូមបញ្ចូល Telegram ID ជាលេខវិជ្ជមាន។", "Enter a positive numeric Telegram ID."))
+                await store.add_reseller(int(text))
             elif action == "stock_add":
                 credentials = [line.strip() for line in text.splitlines() if line.strip()]
                 if not credentials:
@@ -1529,10 +1668,14 @@ def register_handlers(
             target = f"ap:{target_id}"
         elif action == "product_add":
             target = f"ac:{target_id}"
+        elif action == "reseller_add":
+            target = "admin:resellers"
         else:
             target = "admin:catalogs"
         success_message = (
-            copy(
+            copy(language, "បានផ្តល់សិទ្ធិ Reseller ដោយជោគជ័យ។", "Reseller pricing enabled successfully.")
+            if action == "reseller_add"
+            else copy(
                 language,
                 "បានបង្កើត Package ដោយជោគជ័យ (មិនបានដាក់រូបភាព/វីដេអូ)។",
                 "Package created successfully (without an image/video).",

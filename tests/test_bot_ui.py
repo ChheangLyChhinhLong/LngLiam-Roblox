@@ -1,4 +1,5 @@
 import asyncio
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -22,6 +23,7 @@ from app.bot import (
     payment_keyboard,
     parse_product_caption,
     parse_stock_add,
+    product_price,
     quantity_limit,
     safe_user_language,
     send_welcome,
@@ -160,12 +162,39 @@ def test_parse_package_photo_caption():
     assert parse_product_caption("សាកល្បង | 0.01 | ស្ដុកសាកល្បង") == (
         "សាកល្បង",
         "0.01",
+        "0.01",
         "ស្ដុកសាកល្បង",
     )
 
 
 def test_parse_package_caption_without_media_or_optional_details():
-    assert parse_product_caption("Key 1h | 0.50") == ("Key 1h", "0.50", "")
+    assert parse_product_caption("Key 1h | 0.50") == ("Key 1h", "0.50", "0.50", "")
+
+
+def test_parse_package_caption_with_reseller_price_and_details():
+    assert parse_product_caption("Key 1h | 0.50 | 0.35 | One-hour key") == (
+        "Key 1h",
+        "0.50",
+        "0.35",
+        "One-hour key",
+    )
+
+
+def test_parse_package_caption_rejects_reseller_price_not_below_customer_price():
+    for caption in ("Key 1h | 0.50 | 0.50 | Details", "Key 1h | 0.50 | 0.60 | Details"):
+        try:
+            parse_product_caption(caption, "en")
+        except ValueError as exc:
+            assert "reseller price" in str(exc)
+        else:
+            raise AssertionError("Expected invalid reseller pricing to be rejected")
+
+
+def test_product_price_uses_reseller_price_only_for_resellers():
+    product = {"price": "0.50", "reseller_price": "0.35"}
+
+    assert product_price(product) == Decimal("0.50")
+    assert product_price(product, is_reseller=True) == Decimal("0.35")
 
 
 def test_parse_stock_add_accepts_comma_and_newline_separated_codes():
@@ -488,6 +517,7 @@ def test_product_creation_inserts_category_and_cloudinary_image_url():
                 "category_id": "category-123",
                 "name": "Test package",
                 "price": "0.01",
+                "reseller_price": "0.01",
                 "description": "Description",
                 "image_url": "https://res.cloudinary.com/example/image/upload/test.png",
             }
@@ -517,8 +547,68 @@ def test_product_creation_without_media():
                 "category_id": "category-123",
                 "name": "Key 1h",
                 "price": "0.50",
+                "reseller_price": "0.50",
                 "description": "",
             }
+        )
+
+    asyncio.run(run_test())
+
+
+def test_product_creation_persists_a_reseller_price():
+    async def run_test():
+        query = Mock()
+        query.insert.return_value = query
+        query.select.return_value = query
+        query.execute = AsyncMock(return_value=SimpleNamespace(data=[{"id": "product-123"}]))
+        client = SimpleNamespace(table=Mock(return_value=query))
+
+        product_id = await Store(client).create_product(
+            "category-123",
+            "Key 1h",
+            "0.50",
+            "One-hour key",
+            reseller_price="0.35",
+        )
+
+        assert product_id == "product-123"
+        assert query.insert.call_args.args[0]["price"] == "0.50"
+        assert query.insert.call_args.args[0]["reseller_price"] == "0.35"
+
+    asyncio.run(run_test())
+
+
+def test_reseller_registry_uses_telegram_ids():
+    async def run_test():
+        query = Mock()
+        query.upsert.return_value = query
+        query.execute = AsyncMock(return_value=SimpleNamespace(data=None))
+        client = SimpleNamespace(table=Mock(return_value=query))
+
+        await Store(client).add_reseller(12345)
+
+        client.table.assert_called_once_with("resellers")
+        query.upsert.assert_called_once_with(
+            {"telegram_id": 12345},
+            on_conflict="telegram_id",
+            ignore_duplicates=True,
+        )
+
+    asyncio.run(run_test())
+
+
+def test_order_reservation_passes_telegram_id_for_database_pricing():
+    async def run_test():
+        query = Mock()
+        query.execute = AsyncMock(return_value=SimpleNamespace(data={"id": "order-1", "total": "0.70"}))
+        client = SimpleNamespace(rpc=Mock(return_value=query))
+
+        order = await Store(client).reserve_order(12345, "product-123", 2)
+
+        assert order["total"] == "0.70"
+        client.rpc.assert_called_once_with(
+            "reserve_order",
+            {"p_chat_id": 12345, "p_product_id": "product-123", "p_quantity": 2},
         )
 
     asyncio.run(run_test())

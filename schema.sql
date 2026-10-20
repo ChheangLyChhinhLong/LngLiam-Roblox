@@ -27,6 +27,7 @@ create table if not exists public.products (
     name text not null,
     description text not null default '',
     price numeric(10, 2) not null check (price > 0),
+    reseller_price numeric(10, 2),
     image_url text,
     video_url text,
     active boolean not null default true,
@@ -35,6 +36,28 @@ create table if not exists public.products (
 
 alter table public.products add column if not exists image_url text;
 alter table public.products add column if not exists video_url text;
+alter table public.products add column if not exists reseller_price numeric(10, 2);
+update public.products set reseller_price = price where reseller_price is null;
+alter table public.products alter column reseller_price set not null;
+
+do $$
+begin
+    if not exists (
+        select 1 from pg_constraint
+        where conrelid = 'public.products'::regclass
+          and conname = 'products_reseller_price_check'
+    ) then
+        alter table public.products
+            add constraint products_reseller_price_check
+            check (reseller_price > 0 and reseller_price <= price);
+    end if;
+end;
+$$;
+
+create table if not exists public.resellers (
+    telegram_id bigint primary key check (telegram_id > 0),
+    created_at timestamptz not null default now()
+);
 
 create table if not exists public.orders (
     id uuid primary key default gen_random_uuid(),
@@ -106,6 +129,7 @@ end;
 $$;
 
 alter table public.users enable row level security;
+alter table public.resellers enable row level security;
 alter table public.bot_settings enable row level security;
 alter table public.categories enable row level security;
 alter table public.products enable row level security;
@@ -120,7 +144,14 @@ declare
     v_stock_ids uuid[];
 begin
     if p_quantity < 1 or p_quantity > 3 then raise exception 'Quantity must be between 1 and 3'; end if;
-    select price into v_price from products where id = p_product_id and active = true;
+    select case
+        when exists (select 1 from resellers where telegram_id = p_chat_id)
+            then reseller_price
+        else price
+    end
+    into v_price
+    from products
+    where id = p_product_id and active = true;
     if v_price is null then raise exception 'Product is not available'; end if;
     select array_agg(id) into v_stock_ids from (
         select id from stock_items where product_id = p_product_id and status = 'available'
