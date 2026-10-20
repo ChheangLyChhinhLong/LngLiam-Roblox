@@ -128,19 +128,11 @@ Webhook និង ABA deep link ត្រូវការអាសយដ្ឋា
 
 1. បន្ថែម Telegram ID របស់អ្នកក្នុង `TELEGRAM_ADMIN_IDS` ហើយចាប់ផ្តើម bot ឡើងវិញ។
 2. បើក bot ដោយ admin account ហើយចុច **Store admin → Catalogs and packages → Add Catalog**។
-3. បញ្ចូល Catalog តាមទម្រង់:
+3. ចុច **Add catalog** ហើយបញ្ចូលឈ្មោះ និងព័ត៌មានលម្អិតតាមសំណួរដែល bot បង្ហាញម្តងមួយៗ។ ព័ត៌មានលម្អិតអាចរំលងបាន។
 
-```text
-ឈ្មោះ Catalog | ព័ត៌មានលម្អិត (អាចទុកទទេ)
-```
+4. បើក Catalog ដែលទើបបង្កើត ហើយចុច **Add Package**។ Wizard នឹងសួរតាមលំដាប់៖ រូបភាព/វីដេអូ, ឈ្មោះ, ព័ត៌មានលម្អិត, តម្លៃអតិថិជន និងតម្លៃ Reseller។ ចុច **Skip** សម្រាប់ Media/ព័ត៌មានលម្អិត ឬតម្លៃ Reseller (តម្លៃ Reseller នឹងស្មើតម្លៃអតិថិជន)។ ឈ្មោះ និងតម្លៃអតិថិជនត្រូវបញ្ចូល។ ពិនិត្យព័ត៌មាន រួចចុច **Confirm save**។ ពេលកែ Package អាច Skip ដើម្បីទុកតម្លៃដដែល។ ចុច **Cancel** បានគ្រប់ជំហាន។
 
-4. បើក Catalog ដែលទើបបង្កើត ហើយចុច **Add Package**។ អាចផ្ញើសារធម្មតា ឬរូបភាព/វីដេអូដែលមាន caption តាមទម្រង់:
-
-```text
-ឈ្មោះ Package | តម្លៃអតិថិជន USD | តម្លៃ Reseller USD | ព័ត៌មានលម្អិត
-```
-
-ឧទាហរណ៍ `Free Fire Key 1h | 0.50 | 0.35 | License key for one hour`។ តម្លៃទាំងពីរត្រូវធំជាងសូន្យ ហើយតម្លៃ Reseller ត្រូវទាបជាងតម្លៃអតិថិជន។ រូបភាព/វីដេអូគឺជាជម្រើស; បើដាក់ media នោះត្រូវកំណត់ Cloudinary variables ទាំងបី។ Package នឹងបង្ហាញ media នៅលើទំព័រព័ត៌មានរបស់វា។
+តម្លៃទាំងពីរត្រូវធំជាងសូន្យ ហើយតម្លៃ Reseller ដែលបញ្ចូលត្រូវទាបជាងតម្លៃអតិថិជន។ Media ជាជម្រើស; បើផ្ញើរូបភាព/វីដេអូ ត្រូវកំណត់ Cloudinary variables ទាំងបី។ Package នឹងបង្ហាញ media នៅលើទំព័រព័ត៌មានរបស់វា។
 
 Admin អាចបើក **Store admin → Manage resellers → Add reseller** រួចផ្ញើ Telegram user ID ជាលេខ។ ចុចលើ ID ក្នុងបញ្ជីដើម្បីដកសិទ្ធិ។ Reseller ប្រើ bot ដូចអតិថិជនធម្មតា ប៉ុន្តែ catalog, ព័ត៌មាន package និងការកក់ទិញនឹងប្រើតម្លៃ Reseller។ តម្លៃ checkout ត្រូវបានគណនាដោយ Supabase តាម Telegram ID មិនមែនតាមតម្លៃដែលបានផ្ញើពី UI ទេ។
 

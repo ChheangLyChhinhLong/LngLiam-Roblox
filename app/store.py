@@ -185,15 +185,20 @@ class Store:
         price: str,
         reseller_price: str,
         description: str,
+        image_url: str | None = None,
+        video_url: str | None = None,
+        update_media: bool = False,
     ) -> None:
-        await self.client.table("products").update(
-            {
-                "name": name,
-                "price": price,
-                "reseller_price": reseller_price,
-                "description": description,
-            }
-        ).eq("id", product_id).execute()
+        values: dict[str, Any] = {
+            "name": name,
+            "price": price,
+            "reseller_price": reseller_price,
+            "description": description,
+        }
+        if update_media:
+            values["image_url"] = image_url
+            values["video_url"] = video_url
+        await self.client.table("products").update(values).eq("id", product_id).execute()
 
     async def update_product_image(self, product_id: str, image_url: str) -> bool:
         result = await (

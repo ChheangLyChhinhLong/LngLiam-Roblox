@@ -578,6 +578,39 @@ def test_product_creation_persists_a_reseller_price():
     asyncio.run(run_test())
 
 
+def test_product_update_changes_fields_and_replaces_media_only_when_requested():
+    async def run_test():
+        query = Mock()
+        query.update.return_value = query
+        query.eq.return_value = query
+        query.execute = AsyncMock(return_value=SimpleNamespace(data=[]))
+        client = SimpleNamespace(table=Mock(return_value=query))
+
+        await Store(client).update_product(
+            "product-123",
+            "Updated key",
+            "0.50",
+            "0.35",
+            "Updated details",
+            image_url="https://example.com/image.png",
+            update_media=True,
+        )
+
+        query.update.assert_called_once_with(
+            {
+                "name": "Updated key",
+                "price": "0.50",
+                "reseller_price": "0.35",
+                "description": "Updated details",
+                "image_url": "https://example.com/image.png",
+                "video_url": None,
+            }
+        )
+        query.eq.assert_called_once_with("id", "product-123")
+
+    asyncio.run(run_test())
+
+
 def test_reseller_registry_uses_telegram_ids():
     async def run_test():
         query = Mock()

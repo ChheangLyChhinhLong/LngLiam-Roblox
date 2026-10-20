@@ -33,9 +33,14 @@ logger = logging.getLogger(__name__)
 router = Router()
 pending_stock_upload: dict[int, str] = {}
 pending_admin_input: dict[int, tuple[str, str | None]] = {}
+admin_wizards: dict[int, dict[str, Any]] = {}
 welcome_message_ids: dict[int, int] = {}
 payment_message_ids: dict[str, tuple[int, int]] = {}
 CATALOG_PAGE_SIZE = 8
+ADMIN_WIZARD_STEPS = {
+    "product": ("media", "name", "description", "price", "reseller_price"),
+    "category": ("name", "description"),
+}
 
 
 def keyboard(rows: list[list[InlineKeyboardButton]]) -> InlineKeyboardMarkup:
@@ -757,6 +762,168 @@ def register_handlers(
             reply_markup=keyboard(rows),
         )
 
+    async def show_admin_wizard(
+        message: Message,
+        user_id: int,
+        language: str,
+        edit_message: bool = True,
+    ) -> None:
+        async def render(text: str, **kwargs: Any) -> None:
+            if edit_message:
+                await message.edit_text(text, **kwargs)
+            else:
+                await message.answer(text, **kwargs)
+
+        wizard = admin_wizards[user_id]
+        kind = wizard["kind"]
+        steps = ADMIN_WIZARD_STEPS[kind]
+        step = wizard.get("step")
+        if step is None:
+            title = copy(language, "💾 ពិនិត្យ និងរក្សាទុក", "💾 Review and save")
+            rows = [
+                [
+                    InlineKeyboardButton(
+                        text=copy(language, "💾 បញ្ជាក់ការរក្សាទុក", "💾 Confirm save"),
+                        callback_data="admin:wizard-save",
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        text=copy(language, "❌ បោះបង់", "❌ Cancel"),
+                        callback_data="admin:wizard-cancel",
+                    )
+                ],
+            ]
+            if kind == "product":
+                values = wizard["values"]
+                summary = (
+                    f"📦 <b>{html.escape(values['name'])}</b>\n"
+                    f"{copy(language, 'ព័ត៌មានលម្អិត៖', 'Details:')} {html.escape(values.get('description') or '-')}\n"
+                    f"{copy(language, 'តម្លៃអតិថិជន៖', 'Customer price:')} {money(values['price'])}\n"
+                    f"{copy(language, 'តម្លៃ Reseller៖', 'Reseller price:')} {money(values['reseller_price'])}\n"
+                    f"{copy(language, 'Media៖', 'Media:')} "
+                    f"{'✅' if values.get('image_url') or values.get('video_url') or values.get('media_file_id') else '—'}"
+                )
+            else:
+                values = wizard["values"]
+                summary = (
+                    f"🗂 <b>{html.escape(values['name'])}</b>\n"
+                    f"{copy(language, 'ព័ត៌មានលម្អិត៖', 'Details:')} {html.escape(values.get('description') or '-')}"
+                )
+            await render(
+                f"{title}\n───────────────────\n{summary}",
+                parse_mode="HTML",
+                reply_markup=keyboard(rows),
+            )
+            return
+
+        step_number = steps.index(step) + 1
+        step_labels = {
+            "media": copy(language, "រូបភាព/វីដេអូ Package", "Package photo/video"),
+            "name": copy(language, "ឈ្មោះ", "Name"),
+            "description": copy(language, "ព័ត៌មានលម្អិត", "Details"),
+            "price": copy(language, "តម្លៃទូទៅ", "Customer price"),
+            "reseller_price": copy(language, "តម្លៃ Reseller", "Reseller price"),
+        }
+        prompts = {
+            "media": copy(language, "សូមផ្ញើរូបភាព ឬវីដេអូ Package។", "Send a package photo or video."),
+            "name": copy(language, "សូមបញ្ចូលឈ្មោះផលិតផល។", "Enter the product name."),
+            "description": copy(language, "សូមបញ្ចូលព័ត៌មានលម្អិត។", "Enter the details."),
+            "price": copy(language, "សូមបញ្ចូលតម្លៃអតិថិជន (USD)។", "Enter the customer price (USD)."),
+            "reseller_price": copy(language, "សូមបញ្ចូលតម្លៃ Reseller (USD) ដែលទាបជាងតម្លៃទូទៅ។", "Enter a reseller price (USD) lower than the customer price."),
+        }
+        wizard["step_index"] = step_number - 1
+        rows: list[list[InlineKeyboardButton]] = []
+        optional = step in {"media", "description", "reseller_price"}
+        can_skip = (wizard["edit"] or optional) and not (
+            step == "reseller_price" and wizard.get("must_set_reseller_price")
+        )
+        if can_skip:
+            rows.append(
+                [
+                    InlineKeyboardButton(
+                        text=copy(language, "⏩ រំលង / ទុកដដែល", "⏩ Skip / Keep current"),
+                        callback_data=f"admin:wizard-skip:{step}",
+                    )
+                ]
+            )
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=copy(language, "❌ បោះបង់", "❌ Cancel"),
+                    callback_data="admin:wizard-cancel",
+                )
+            ]
+        )
+        await render(
+            f"🧭 <b>{copy(language, 'ជំហាន', 'Step')} {step_number}/{len(steps)} · {step_labels[step]}</b>\n"
+            "───────────────────\n"
+            f"{prompts[step]}",
+            parse_mode="HTML",
+            reply_markup=keyboard(rows),
+        )
+
+    async def finish_admin_wizard(user_id: int, language: str) -> str:
+        wizard = admin_wizards[user_id]
+        values = wizard["values"]
+        kind = wizard["kind"]
+        if kind == "product":
+            if not values.get("name") or not values.get("price"):
+                raise ValueError(copy(language, "ឈ្មោះ និងតម្លៃទូទៅត្រូវតែបញ្ចូល។", "Product name and customer price are required."))
+            price = Decimal(str(values["price"]))
+            reseller_price = Decimal(str(values.get("reseller_price") or price))
+            if (
+                not price.is_finite()
+                or price <= 0
+                or not reseller_price.is_finite()
+                or reseller_price <= 0
+                or reseller_price > price
+            ):
+                raise ValueError(copy(language, "តម្លៃមិនត្រឹមត្រូវទេ។ តម្លៃ Reseller ត្រូវមិនលើសតម្លៃអតិថិជន។", "Invalid prices. Reseller price must not exceed the customer price."))
+
+            media_url = None
+            media_type = None
+            if values.get("media_file_id"):
+                media_type = values["media_type"]
+                media_url = await upload_product_media(bot, settings, values["media_file_id"], media_type)
+            if wizard["action"] == "product_add":
+                if wizard.get("category_id") is None:
+                    raise ValueError(copy(language, "សូមជ្រើសរើស Catalog ជាមុនសិន។", "Choose a catalog first."))
+                await store.create_product(
+                    wizard["category_id"],
+                    values["name"],
+                    str(price),
+                    values.get("description", ""),
+                    image_url=media_url if media_type == "image" else None,
+                    video_url=media_url if media_type == "video" else None,
+                    reseller_price=str(reseller_price),
+                )
+                return f"ac:{wizard['category_id']}"
+
+            await store.update_product(
+                wizard["target_id"],
+                values["name"],
+                str(price),
+                str(reseller_price),
+                values.get("description", ""),
+                image_url=media_url if media_type == "image" else None,
+                video_url=media_url if media_type == "video" else None,
+                update_media=media_type is not None,
+            )
+            return f"ap:{wizard['target_id']}"
+
+        if not values.get("name"):
+            raise ValueError(copy(language, "ឈ្មោះ Catalog ត្រូវតែបញ្ចូល។", "Catalog name is required."))
+        category_values = {
+            "name": values["name"],
+            "description": values.get("description", ""),
+        }
+        if wizard["action"] == "category_add":
+            await store.client.table("categories").insert(category_values).execute()
+            return "admin:catalogs"
+        await store.client.table("categories").update(category_values).eq("id", wizard["target_id"]).execute()
+        return f"ac:{wizard['target_id']}"
+
     @router.callback_query(F.data == "home")
     async def home(callback: CallbackQuery) -> None:
         await callback.answer()
@@ -1300,12 +1467,16 @@ def register_handlers(
         language = await safe_user_language(store, callback.from_user.id)
         if callback.from_user.id not in settings.admin_ids:
             return
-        pending_admin_input[callback.from_user.id] = ("category_add", None)
-        await callback.message.edit_text(
-            copy(language, "ផ្ញើព័ត៌មាន Catalog តាមទម្រង់៖ <code>ឈ្មោះ | ព័ត៌មានលម្អិត</code>", "Send catalog details in this format: <code>Name | Details</code>"),
-            parse_mode="HTML",
-            reply_markup=keyboard([back_button("admin:cancel-input", language)]),
-        )
+        pending_admin_input.pop(callback.from_user.id, None)
+        admin_wizards[callback.from_user.id] = {
+            "kind": "category",
+            "action": "category_add",
+            "target_id": None,
+            "edit": False,
+            "step": "name",
+            "values": {"description": ""},
+        }
+        await show_admin_wizard(callback.message, callback.from_user.id, language)
 
     @router.callback_query(F.data.startswith("ac:"))
     async def admin_category(callback: CallbackQuery) -> None:
@@ -1394,42 +1565,24 @@ def register_handlers(
             parse_mode="HTML",
         )
 
-    @router.message(F.photo | F.video, F.caption.contains("|"))
-    async def create_product_with_media(message: Message) -> None:
+    @router.message(F.photo | F.video)
+    async def receive_wizard_media(message: Message) -> None:
         if not message.from_user or message.from_user.id not in settings.admin_ids:
             return
+        wizard = admin_wizards.get(message.from_user.id)
+        if not wizard:
+            return
         language = await safe_user_language(store, message.from_user.id)
-        pending = pending_admin_input.get(message.from_user.id)
-        if not pending or pending[0] != "product_add" or not pending[1]:
-            await message.answer(copy(language, "សូមជ្រើសរើស Catalog និង Package ថ្មីក្នុងម៉ឺនុយគ្រប់គ្រងជាមុនសិន។", "Choose a catalog and start adding a package from the admin menu first."))
+        if wizard.get("step") != "media":
+            await show_admin_wizard(message, message.from_user.id, language, edit_message=False)
             return
-        try:
-            name, price, reseller_price, description = parse_product_caption(message.caption or "", language)
-            is_video = message.video is not None
-            file_id = message.video.file_id if is_video else message.photo[-1].file_id
-            media_url = await upload_product_media(bot, settings, file_id, "video" if is_video else "image")
-            product_id = await store.create_product(
-                pending[1],
-                name,
-                price,
-                description,
-                video_url=media_url if is_video else None,
-                image_url=None if is_video else media_url,
-                reseller_price=reseller_price,
-            )
-        except (InvalidOperation, ValueError) as exc:
-            await message.answer(html.escape(str(exc)))
-            return
-        except Exception:
-            logger.exception("Could not create package with media for admin %s", message.from_user.id)
-            await message.answer(copy(language, "មិនអាចបង្កើត Package បានទេ។ សូមពិនិត្យ Cloudinary និង Supabase រួចព្យាយាមម្ដងទៀត។", "Could not create the package. Check Cloudinary and Supabase, then try again."))
-            return
-        pending_admin_input.pop(message.from_user.id, None)
-        await message.answer(
-            copy(language, f'✅ បានបង្កើត Package "{html.escape(name)}" និង Upload {"វីដេអូ" if is_video else "រូបភាព"} ទៅ Cloudinary រួចរាល់! ', f'✅ Package "{html.escape(name)}" created and {"video" if is_video else "image"} uploaded to Cloudinary! ')
-            + f"(ID: <code>{html.escape(product_id)}</code>)",
-            parse_mode="HTML",
-        )
+        is_video = message.video is not None
+        media = message.video if is_video else message.photo[-1]
+        wizard["values"]["media_file_id"] = media.file_id
+        wizard["values"]["media_type"] = "video" if is_video else "image"
+        steps = ADMIN_WIZARD_STEPS[wizard["kind"]]
+        wizard["step"] = steps[1]
+        await show_admin_wizard(message, message.from_user.id, language, edit_message=False)
 
     @router.callback_query(F.data.startswith("admin:product-add:"))
     async def add_product_prompt(callback: CallbackQuery) -> None:
@@ -1438,12 +1591,17 @@ def register_handlers(
         if callback.from_user.id not in settings.admin_ids:
             return
         category_id = callback.data.removeprefix("admin:product-add:")
-        pending_admin_input[callback.from_user.id] = ("product_add", category_id)
-        await callback.message.edit_text(
-            copy(language, "ផ្ញើសារ ឬរូបភាព/វីដេអូជាមួយ Caption តាមទម្រង់ <code>ឈ្មោះ | តម្លៃអតិថិជន | តម្លៃ Reseller | ព័ត៌មានលម្អិត</code>។ Media ជាជម្រើស។", "Send text or an image/video with the caption <code>Name | customer price | reseller price | Details</code> to create a package. Media is optional."),
-            parse_mode="HTML",
-            reply_markup=keyboard([back_button("admin:cancel-input", language)]),
-        )
+        pending_admin_input.pop(callback.from_user.id, None)
+        admin_wizards[callback.from_user.id] = {
+            "kind": "product",
+            "action": "product_add",
+            "target_id": None,
+            "category_id": category_id,
+            "edit": False,
+            "step": "media",
+            "values": {"description": ""},
+        }
+        await show_admin_wizard(callback.message, callback.from_user.id, language)
 
     @router.callback_query(F.data.startswith("admin:category-edit:"))
     async def edit_category_prompt(callback: CallbackQuery) -> None:
@@ -1452,12 +1610,23 @@ def register_handlers(
         if callback.from_user.id not in settings.admin_ids:
             return
         category_id = callback.data.removeprefix("admin:category-edit:")
-        pending_admin_input[callback.from_user.id] = ("category_edit", category_id)
-        await callback.message.edit_text(
-            copy(language, "ផ្ញើឈ្មោះ និងព័ត៌មានថ្មីតាមទម្រង់៖ <code>ឈ្មោះ | ព័ត៌មានលម្អិត</code>", "Send the updated name and details in this format: <code>Name | Details</code>"),
-            parse_mode="HTML",
-            reply_markup=keyboard([back_button("admin:cancel-input", language)]),
-        )
+        category = await store.category(category_id)
+        if not category:
+            await callback.message.edit_text(
+                copy(language, "រកមិនឃើញ Catalog ទេ។", "Catalog not found."),
+                reply_markup=keyboard([back_button("admin:catalogs", language)]),
+            )
+            return
+        pending_admin_input.pop(callback.from_user.id, None)
+        admin_wizards[callback.from_user.id] = {
+            "kind": "category",
+            "action": "category_edit",
+            "target_id": category_id,
+            "edit": True,
+            "step": "name",
+            "values": {"name": category["name"], "description": category.get("description") or ""},
+        }
+        await show_admin_wizard(callback.message, callback.from_user.id, language)
 
     @router.callback_query(F.data.startswith("admin:product-edit:"))
     async def edit_product_prompt(callback: CallbackQuery) -> None:
@@ -1466,12 +1635,31 @@ def register_handlers(
         if callback.from_user.id not in settings.admin_ids:
             return
         product_id = callback.data.removeprefix("admin:product-edit:")
-        pending_admin_input[callback.from_user.id] = ("product_edit", product_id)
-        await callback.message.edit_text(
-            copy(language, "ផ្ញើឈ្មោះ និងតម្លៃថ្មីតាមទម្រង់៖ <code>ឈ្មោះ | តម្លៃអតិថិជន | តម្លៃ Reseller | ព័ត៌មានលម្អិត</code>", "Send the updated name and prices in this format: <code>Name | customer price | reseller price | Details</code>"),
-            parse_mode="HTML",
-            reply_markup=keyboard([back_button("admin:cancel-input", language)]),
-        )
+        product = await store.product(product_id)
+        if not product:
+            await callback.message.edit_text(
+                copy(language, "រកមិនឃើញ Package ទេ។", "Package not found."),
+                reply_markup=keyboard([back_button("admin:catalogs", language)]),
+            )
+            return
+        pending_admin_input.pop(callback.from_user.id, None)
+        admin_wizards[callback.from_user.id] = {
+            "kind": "product",
+            "action": "product_edit",
+            "target_id": product_id,
+            "category_id": product["category_id"],
+            "edit": True,
+            "step": "media",
+            "values": {
+                "name": product["name"],
+                "description": product.get("description") or "",
+                "price": str(product["price"]),
+                "reseller_price": str(product.get("reseller_price") or product["price"]),
+                "image_url": product.get("image_url"),
+                "video_url": product.get("video_url"),
+            },
+        }
+        await show_admin_wizard(callback.message, callback.from_user.id, language)
 
     @router.callback_query(F.data.startswith("admin:category-disable:"))
     async def confirm_category_disable(callback: CallbackQuery) -> None:
@@ -1520,6 +1708,89 @@ def register_handlers(
         await store.client.table("products").update({"active": False}).eq("id", product_id).execute()
         await callback.message.edit_text(copy(language, "បានបិទ Package។", "Package disabled."), reply_markup=keyboard([back_button("admin:catalogs", language)]))
 
+    @router.callback_query(F.data.startswith("admin:wizard-skip:"))
+    async def skip_admin_wizard_step(callback: CallbackQuery) -> None:
+        language = await safe_user_language(store, callback.from_user.id)
+        if callback.from_user.id not in settings.admin_ids:
+            await callback.answer()
+            return
+        wizard = admin_wizards.get(callback.from_user.id)
+        if not wizard:
+            await callback.answer(copy(language, "Wizard មិនសកម្មទេ។", "No active wizard."), show_alert=True)
+            return
+        step = wizard.get("step")
+        requested_step = callback.data.removeprefix("admin:wizard-skip:")
+        if step != requested_step:
+            await callback.answer(copy(language, "ជំហាននេះលែងសកម្មហើយ។", "This step is no longer active."), show_alert=True)
+            return
+        if not step or (step not in {"media", "description", "reseller_price"} and not wizard["edit"]):
+            await callback.answer(copy(language, "ជំហាននេះមិនអាចរំលងបានទេ។", "This step cannot be skipped."), show_alert=True)
+            return
+        if step == "reseller_price" and wizard.get("must_set_reseller_price"):
+            await callback.answer(
+                copy(language, "សូមបញ្ចូលតម្លៃ Reseller ថ្មី ព្រោះតម្លៃទូទៅត្រូវបានបន្ថយ។", "Enter a new reseller price because the customer price was reduced."),
+                show_alert=True,
+            )
+            return
+        if step == "reseller_price" and not wizard["edit"]:
+            wizard["values"]["reseller_price"] = wizard["values"].get("price")
+        steps = ADMIN_WIZARD_STEPS[wizard["kind"]]
+        current_index = steps.index(step)
+        wizard["step"] = steps[current_index + 1] if current_index + 1 < len(steps) else None
+        await callback.answer()
+        await show_admin_wizard(callback.message, callback.from_user.id, language)
+
+    @router.callback_query(F.data == "admin:wizard-cancel")
+    async def cancel_admin_wizard(callback: CallbackQuery) -> None:
+        language = await safe_user_language(store, callback.from_user.id)
+        if callback.from_user.id not in settings.admin_ids:
+            await callback.answer()
+            return
+        wizard = admin_wizards.pop(callback.from_user.id, None)
+        await callback.answer(copy(language, "បានបោះបង់", "Cancelled"))
+        target = "admin:catalogs"
+        if wizard and wizard["kind"] == "product":
+            target = (
+                f"ap:{wizard['target_id']}"
+                if wizard["action"] == "product_edit"
+                else f"ac:{wizard['category_id']}"
+            )
+        elif wizard and wizard["action"] == "category_edit":
+            target = f"ac:{wizard['target_id']}"
+        await callback.message.edit_text(
+            copy(language, "បានបោះបង់ការកែប្រែ។", "Changes cancelled."),
+            reply_markup=keyboard([back_button(target, language)]),
+        )
+
+    @router.callback_query(F.data == "admin:wizard-save")
+    async def save_admin_wizard(callback: CallbackQuery) -> None:
+        language = await safe_user_language(store, callback.from_user.id)
+        if callback.from_user.id not in settings.admin_ids:
+            await callback.answer()
+            return
+        wizard = admin_wizards.get(callback.from_user.id)
+        if not wizard or wizard.get("step") is not None:
+            await callback.answer(copy(language, "Wizard មិនទាន់រួចរាល់សម្រាប់រក្សាទុកទេ។", "The wizard is not ready to save."), show_alert=True)
+            return
+        try:
+            target = await finish_admin_wizard(callback.from_user.id, language)
+        except ValueError as exc:
+            await callback.answer(str(exc), show_alert=True)
+            return
+        except Exception:
+            logger.exception("Admin wizard save failed for user %s", callback.from_user.id)
+            await callback.answer(
+                copy(language, "រក្សាទុកមិនបានទេ។ សូមពិនិត្យ Cloudinary/Supabase រួចព្យាយាមម្ដងទៀត។", "Could not save. Check Cloudinary/Supabase and try again."),
+                show_alert=True,
+            )
+            return
+        admin_wizards.pop(callback.from_user.id, None)
+        await callback.answer(copy(language, "បានរក្សាទុកដោយជោគជ័យ។", "Saved successfully."))
+        await callback.message.edit_text(
+            copy(language, "✅ បានរក្សាទុក Package/Catalog ដោយជោគជ័យ។", "✅ Package/catalog saved successfully."),
+            reply_markup=keyboard([back_button(target, language)]),
+        )
+
     @router.callback_query(F.data == "admin:cancel-input")
     async def cancel_admin_input(callback: CallbackQuery) -> None:
         language = await safe_user_language(store, callback.from_user.id)
@@ -1566,11 +1837,68 @@ def register_handlers(
             return
         text = (message.text or "").strip()
         language = await safe_user_language(store, message.from_user.id)
+        if message.from_user.id not in settings.admin_ids:
+            if text.casefold() in {"🛍 buy now", "buy now"}:
+                await show_catalogs(message, 0, language, edit_message=False)
+            else:
+                await send_welcome(message, store, settings)
+            return
+        wizard = admin_wizards.get(message.from_user.id)
+        if wizard:
+            step = wizard.get("step")
+            values = wizard["values"]
+            try:
+                if step == "media":
+                    raise ValueError(copy(language, "សូមផ្ញើរូបភាព/វីដេអូ ឬចុចរំលង។", "Send a photo/video or use Skip."))
+                if step == "name":
+                    if not text:
+                        raise ValueError(copy(language, "ឈ្មោះមិនអាចទទេបានទេ។", "Name cannot be empty."))
+                    values["name"] = text
+                elif step == "description":
+                    values["description"] = text
+                elif step == "price":
+                    try:
+                        price = Decimal(text)
+                    except InvalidOperation:
+                        raise ValueError(copy(language, "តម្លៃមិនត្រឹមត្រូវទេ។", "Invalid price.")) from None
+                    if not price.is_finite() or price <= 0:
+                        raise ValueError(copy(language, "តម្លៃត្រូវតែធំជាង 0។", "Price must be greater than 0."))
+                    values["price"] = str(price)
+                    if wizard["edit"] and Decimal(str(values.get("reseller_price", "0"))) >= price:
+                        wizard["must_set_reseller_price"] = True
+                elif step == "reseller_price":
+                    try:
+                        reseller_price = Decimal(text)
+                        customer_price = Decimal(str(values["price"]))
+                    except (InvalidOperation, KeyError):
+                        raise ValueError(copy(language, "សូមបញ្ចូលតម្លៃ Reseller ត្រឹមត្រូវ។", "Enter a valid reseller price.")) from None
+                    if not reseller_price.is_finite() or reseller_price <= 0 or reseller_price >= customer_price:
+                        raise ValueError(
+                            copy(
+                                language,
+                                "តម្លៃ Reseller ត្រូវតែធំជាង 0 និងទាបជាងតម្លៃទូទៅ។",
+                                "Reseller price must be greater than 0 and lower than the customer price.",
+                            )
+                        )
+                    values["reseller_price"] = str(reseller_price)
+                    wizard.pop("must_set_reseller_price", None)
+                else:
+                    raise ValueError(copy(language, "Wizard មិនសកម្មទេ។", "No active wizard step."))
+                steps = ADMIN_WIZARD_STEPS[wizard["kind"]]
+                current_index = steps.index(step)
+                wizard["step"] = steps[current_index + 1] if current_index + 1 < len(steps) else None
+            except ValueError as exc:
+                await message.answer(
+                    html.escape(str(exc)),
+                    reply_markup=keyboard(
+                        [[InlineKeyboardButton(text=copy(language, "❌ បោះបង់", "❌ Cancel"), callback_data="admin:wizard-cancel")]]
+                    ),
+                )
+                return
+            await show_admin_wizard(message, message.from_user.id, language, edit_message=False)
+            return
         if text.casefold() in {"🛍 buy now", "buy now"}:
             await show_catalogs(message, 0, language, edit_message=False)
-            return
-        if message.from_user.id not in settings.admin_ids:
-            await send_welcome(message, store, settings)
             return
         try:
             stock_add = parse_stock_add(text, language)
@@ -1601,30 +1929,7 @@ def register_handlers(
             return
         action, target_id = pending
         try:
-            if action in {"category_add", "category_edit"}:
-                name, separator, description = text.partition("|")
-                if not name.strip():
-                    raise ValueError(copy(language, "សូមបញ្ចូលឈ្មោះ Catalog។", "Enter a catalog name."))
-                values = {"name": name.strip(), "description": description.strip() if separator else ""}
-                if action == "category_add":
-                    await store.client.table("categories").insert(values).execute()
-                else:
-                    await store.client.table("categories").update(values).eq("id", target_id).execute()
-            elif action == "product_add":
-                if target_id is None:
-                    raise ValueError(copy(language, "សូមជ្រើសរើស Catalog ជាមុនសិន។", "Choose a catalog first."))
-                name, price, reseller_price, description = parse_product_caption(text, language)
-                await store.create_product(
-                    target_id,
-                    name,
-                    price,
-                    description,
-                    reseller_price=reseller_price,
-                )
-            elif action == "product_edit":
-                name, price, reseller_price, description = parse_product_caption(text, language)
-                await store.update_product(target_id, name, price, reseller_price, description)
-            elif action == "reseller_add":
+            if action == "reseller_add":
                 if not text.isdecimal():
                     raise ValueError(copy(language, "សូមបញ្ចូល Telegram ID ជាលេខវិជ្ជមាន។", "Enter a positive numeric Telegram ID."))
                 await store.add_reseller(int(text))
@@ -1662,28 +1967,10 @@ def register_handlers(
                 reply_markup=keyboard([back_button(f"ap:{target_id}", language)]),
             )
             return
-        if action == "category_edit":
-            target = f"ac:{target_id}"
-        elif action == "product_edit":
-            target = f"ap:{target_id}"
-        elif action == "product_add":
-            target = f"ac:{target_id}"
-        elif action == "reseller_add":
-            target = "admin:resellers"
-        else:
-            target = "admin:catalogs"
-        success_message = (
-            copy(language, "បានផ្តល់សិទ្ធិ Reseller ដោយជោគជ័យ។", "Reseller pricing enabled successfully.")
-            if action == "reseller_add"
-            else copy(
-                language,
-                "បានបង្កើត Package ដោយជោគជ័យ (មិនបានដាក់រូបភាព/វីដេអូ)។",
-                "Package created successfully (without an image/video).",
-            )
-            if action == "product_add"
-            else copy(language, "បានរក្សាទុកដោយជោគជ័យ។", "Saved successfully.")
+        await message.answer(
+            copy(language, "បានផ្តល់សិទ្ធិ Reseller ដោយជោគជ័យ។", "Reseller pricing enabled successfully."),
+            reply_markup=keyboard([back_button("admin:resellers", language)]),
         )
-        await message.answer(success_message, reply_markup=keyboard([back_button(target, language)]))
 
     @router.callback_query(F.data == "admin:upload")
     async def choose_stock_product(callback: CallbackQuery) -> None:
