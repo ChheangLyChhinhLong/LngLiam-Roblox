@@ -37,7 +37,7 @@ Project នេះជាហាងលក់ License Key និង Digital Activati
 
 1. បង្កើត project ថ្មីនៅ [Supabase](https://supabase.com/) ហើយរង់ចាំ database រួចរាល់។
 2. បើក **SQL Editor → New query**។ បើក [schema.sql](schema.sql), ចម្លង SQL ទាំងមូលទៅក្នុង editor ហើយចុច **Run**។ Script នេះបង្កើត tables, indexes និង database functions ដែល bot ត្រូវការ។
-3. បើមាន database ចាស់ អាច run `schema.sql` ម្តងទៀត ដើម្បីអនុវត្តការបន្ថែម schema ដែល idempotent។ វាបង្កើត column `products.video_url` សម្រាប់វីដេអូ Package ផងដែរ; ត្រូវ run schema ចុងក្រោយមុនបើក feature នេះ។
+3. បើមាន database ចាស់ អាច run `schema.sql` ម្តងទៀត ដើម្បីអនុវត្តការបន្ថែម schema ដែល idempotent។ វាបង្កើត column `products.video_url` សម្រាប់វីដេអូ Package និងអនុញ្ញាត import License Key ដែលបានលក់រួចមកវិញជាស្តុកថ្មី; ត្រូវ run schema ចុងក្រោយមុនប្រើមុខងារទាំងនេះ។
 4. បើក **Project Settings → API** រួចចម្លង Project URL និង `service_role` key ទៅ environment variables។ ប្រើ `service_role` key តែក្នុង backend/Render ប៉ុណ្ណោះ។
 5. ទុក Row Level Security (RLS) ឲ្យបើក។ កុំបង្កើត public policies សម្រាប់ stock ឬ orders។
 
@@ -149,7 +149,7 @@ Webhook និង ABA deep link ត្រូវការអាសយដ្ឋា
 addstock PRODUCT_UUID | key1, key2
 ```
 
-អាចប្រើបន្ទាត់ថ្មីជំនួស comma បាន។ កុំផ្ញើ stock ទៅ chat សាធារណៈ។
+អាចប្រើបន្ទាត់ថ្មីជំនួស comma បាន។ Key ដែលមានស្រាប់ក្នុង stock `available` ឬ `reserved` នឹងត្រូវរំលង; ប៉ុន្តែបើ Key ដូចគ្នាត្រូវបានលក់រួច អ្នកអាចបញ្ចូលវាវិញជាស្តុកថ្មីបាន។ កុំផ្ញើ stock ទៅ chat សាធារណៈ។
 
 ### បញ្ចូល stock ជា `.txt`
 
@@ -168,7 +168,7 @@ FF-1D-KEY-002
 .\.venv313\Scripts\python.exe -m scripts.import_stock PRODUCT_UUID .\stock.txt
 ```
 
-Script អាន `.env` ពី project root។ វាត្រូវការ `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` និង `STOCK_ENCRYPTION_KEY`។ ទិន្នន័យស្ទួនត្រូវបានរំលង។ បន្ទាប់ពី import សូមលុប/ផ្លាស់ទីឯកសារ stock ឲ្យមានសុវត្ថិភាព ព្រោះក្នុងនោះមាន License Key ជាអក្សរធម្មតា។
+Script អាន `.env` ពី project root។ វាត្រូវការ `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` និង `STOCK_ENCRYPTION_KEY`។ Key ដែលមានស្រាប់ជា `available` ឬ `reserved` នឹងត្រូវរំលង; Key ដែលបានលក់រួចអាច import វិញជាស្តុកថ្មី។ បន្ទាប់ពី import សូមលុប/ផ្លាស់ទីឯកសារ stock ឲ្យមានសុវត្ថិភាព ព្រោះក្នុងនោះមាន License Key ជាអក្សរធម្មតា។
 
 ### កែប្រែ និងបិទ Catalog/Package
 

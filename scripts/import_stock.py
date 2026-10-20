@@ -6,7 +6,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from supabase import acreate_client
 
-from app.security import encrypt_stock, stock_fingerprint
+from app.store import Store
 
 
 async def main() -> None:
@@ -21,18 +21,8 @@ async def main() -> None:
     if not credentials:
         raise SystemExit("Stock file must contain at least one license key")
     supabase = await acreate_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_ROLE_KEY"])
-    rows = [
-        {
-            "product_id": args.product_id,
-            "credential_cipher": encrypt_stock(item, key),
-            "credential_fingerprint": stock_fingerprint(item, key),
-        }
-        for item in credentials
-    ]
-    result = await supabase.table("stock_items").upsert(
-        rows, on_conflict="product_id,credential_fingerprint", ignore_duplicates=True
-    ).execute()
-    added = len(result.data or [])
+    store = Store(supabase)
+    added = await store.import_stock(args.product_id, credentials, key)
     print(f"Imported {added} stock item(s).")
     if added and os.environ.get("BOT_TOKEN"):
         from aiogram import Bot
@@ -44,7 +34,7 @@ async def main() -> None:
         try:
             await notify_stock_added(
                 bot,
-                Store(supabase),
+                store,
                 os.environ.get("STOCK_NOTIFICATION_CHAT_IDS", ""),
                 args.product_id,
                 added,

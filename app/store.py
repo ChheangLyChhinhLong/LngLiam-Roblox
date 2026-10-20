@@ -273,18 +273,16 @@ class Store:
     async def import_stock(self, product_id: str, credentials: list[str], key: str) -> int:
         rows = [
             {
-                "product_id": product_id,
                 "credential_cipher": encrypt_stock(value, key),
                 "credential_fingerprint": stock_fingerprint(value, key),
             }
             for value in credentials
         ]
-        result = await self.client.table("stock_items").upsert(
-            rows,
-            on_conflict="product_id,credential_fingerprint",
-            ignore_duplicates=True,
+        result = await self.client.rpc(
+            "import_stock_items",
+            {"p_product_id": product_id, "p_items": rows},
         ).execute()
-        return len(result.data or [])
+        return int(result.data or 0)
 
     async def remove_stock(self, product_id: str, credentials: list[str], key: str) -> int:
         fingerprints = list(dict.fromkeys(stock_fingerprint(value, key) for value in credentials))

@@ -2,6 +2,8 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
+from cryptography.fernet import Fernet
+
 from app.bot import (
     admin_category_actions,
     admin_product_actions,
@@ -30,7 +32,7 @@ from app.bot import (
     welcome_text,
 )
 import app.bot as bot_module
-from app.security import encrypt_stock, stock_fingerprint
+from app.security import decrypt_stock, encrypt_stock, stock_fingerprint
 from app.store import Store
 
 
@@ -513,6 +515,29 @@ def test_stock_removal_matches_only_available_stock_for_the_selected_product():
             "credential_fingerprint",
             [stock_fingerprint(credential, key)],
         )
+
+    asyncio.run(run_test())
+
+
+def test_stock_import_uses_database_deduplication_function_and_returns_added_count():
+    async def run_test():
+        product_id = "product-123"
+        credential = "FF-KEY-REISSUE"
+        key = Fernet.generate_key().decode("ascii")
+        query = Mock()
+        query.execute = AsyncMock(return_value=SimpleNamespace(data=1))
+        client = SimpleNamespace(rpc=Mock(return_value=query))
+
+        added = await Store(client).import_stock(product_id, [credential], key)
+
+        assert added == 1
+        client.rpc.assert_called_once()
+        function_name, arguments = client.rpc.call_args.args
+        assert function_name == "import_stock_items"
+        assert arguments["p_product_id"] == product_id
+        stock_item = arguments["p_items"][0]
+        assert decrypt_stock(stock_item["credential_cipher"], key) == credential
+        assert stock_item["credential_fingerprint"] == stock_fingerprint(credential, key)
 
     asyncio.run(run_test())
 

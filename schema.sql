@@ -74,8 +74,36 @@ create table if not exists public.stock_items (
     unique(product_id, credential_fingerprint)
 );
 
+alter table public.stock_items
+    drop constraint if exists stock_items_product_id_credential_fingerprint_key;
+
 create index if not exists stock_available_idx on public.stock_items(product_id) where status = 'available';
+create unique index if not exists stock_active_fingerprint_idx
+    on public.stock_items(product_id, credential_fingerprint)
+    where status in ('available', 'reserved');
 create index if not exists orders_pending_idx on public.orders(status, created_at) where status = 'pending';
+
+create or replace function public.import_stock_items(p_product_id uuid, p_items jsonb)
+returns integer language plpgsql security definer set search_path = public as $$
+declare
+    v_added integer;
+begin
+    if jsonb_typeof(p_items) is distinct from 'array' then raise exception 'Stock items must be a JSON array'; end if;
+
+    insert into stock_items(product_id, credential_cipher, credential_fingerprint)
+    select p_product_id, item.credential_cipher, item.credential_fingerprint
+    from jsonb_to_recordset(p_items) as item(
+        credential_cipher text,
+        credential_fingerprint text
+    )
+    on conflict (product_id, credential_fingerprint)
+        where status in ('available', 'reserved')
+        do nothing;
+
+    get diagnostics v_added = row_count;
+    return v_added;
+end;
+$$;
 
 alter table public.users enable row level security;
 alter table public.bot_settings enable row level security;
@@ -178,6 +206,7 @@ revoke all on function public.fulfill_order(uuid) from public, anon, authenticat
 revoke all on function public.mark_order_delivered(uuid) from public, anon, authenticated;
 revoke all on function public.available_stock_count(uuid) from public, anon, authenticated;
 revoke all on function public.sales_summary() from public, anon, authenticated;
+revoke all on function public.import_stock_items(uuid, jsonb) from public, anon, authenticated;
 grant execute on function public.reserve_order(bigint, uuid, integer) to service_role;
 grant execute on function public.set_order_payment(uuid, text, text) to service_role;
 grant execute on function public.release_order(uuid, text) to service_role;
@@ -185,3 +214,4 @@ grant execute on function public.fulfill_order(uuid) to service_role;
 grant execute on function public.mark_order_delivered(uuid) to service_role;
 grant execute on function public.available_stock_count(uuid) to service_role;
 grant execute on function public.sales_summary() to service_role;
+grant execute on function public.import_stock_items(uuid, jsonb) to service_role;
