@@ -1216,7 +1216,7 @@ async def notify_order_success(bot: Bot, store: Store, settings: Settings, order
         f"🏷 <b>Ref ID:</b> <code>{html.escape(str(reference))}</code>\n"
         f"⏰ <b>កាលបរិច្ឆេទ:</b> {date_text} (Asia/Phnom_Penh)\n"
         "───────────────────\n"
-        "✅ <b>ស្ថានភាព:</b> បង់ប្រាក់រួចរាល់ &amp; ប្រគល់ Key រួចរាល់"
+        "✅ <b>ស្ថានភាព:</b> បង់ប្រាក់រួចរាល់ &amp; ប្រគល់ទំនិញ រួចរាល់"
     )
 
     destinations: list[int | str] = []
@@ -1324,7 +1324,7 @@ async def send_welcome(
         return
     if immediate:
         language = normalize_language(
-            language or user_language_cache.get(user.id) or "km"
+            language or user_language_cache.get(user.id) or getattr(user, "language_code", None)
         )
     else:
         language = normalize_language(language or await safe_user_language(store, user.id))
@@ -1516,14 +1516,14 @@ async def deliver_order(bot: Bot, store: Store, settings: Settings, order_id: st
     key_lines = "\n".join(f"- <code>{html.escape(value)}</code>" for value in keys)
     text = (
         "✅ ទំនិញបានជោគជ័យ\n\n"
-        f"🔑 បញ្ជីទំនិញ របស់អ្នក [ សរុប {len(keys)} Key ]\n"
+        f"🔑 បញ្ជីទំនិញ របស់អ្នក [ សរុប {len(keys)} កូដ ]\n"
         f"{key_lines}\n\n"
         "🙏 អរគុណសម្រាប់ការទិញទំនិញ 🙏"
     )
     delivery_rows = [
         [
             InlineKeyboardButton(
-                text=f"📋 Copy Key {index}",
+                text=f"📋 ចំលងកូដ {index}",
                 copy_text=CopyTextButton(text=value),
             )
         ]
@@ -3986,7 +3986,7 @@ def register_handlers(
         if text.casefold().startswith("/start"):
             language = user_language_cache.get(
                 message.from_user.id,
-                "km",
+                normalize_language(message.from_user.language_code),
             )
             if await handle_broadcast_input(message, language):
                 return
@@ -3998,7 +3998,6 @@ def register_handlers(
             if product_id:
                 product_data = await store.product(product_id)
                 if product_data:
-                    language = await safe_user_language(store, message.from_user.id)
                     await safe_upsert_user(
                         store,
                         message.from_user.id,
