@@ -37,7 +37,7 @@ async def lifespan(_: FastAPI):
     supabase = await acreate_client(
         settings.supabase_url,
         settings.supabase_service_role_key,
-        options=AsyncClientOptions(postgrest_client_timeout=10),
+        options=AsyncClientOptions(postgrest_client_timeout=30),
     )
     store = Store(supabase)
     app.state.store = store
