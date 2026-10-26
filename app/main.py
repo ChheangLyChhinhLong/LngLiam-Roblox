@@ -11,7 +11,15 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from supabase import acreate_client
 
-from app.bot import deliver_order, expire_payment, reconcile_payments, register_handlers
+from app.bot import (
+    complete_wallet_deposit,
+    deliver_order,
+    expire_payment,
+    expire_wallet_deposit,
+    reconcile_broadcasts,
+    reconcile_payments,
+    register_handlers,
+)
 from app.config import get_settings
 from app.payments import KHPayClient, verify_webhook_signature
 from app.store import Store
@@ -31,12 +39,19 @@ async def lifespan(_: FastAPI):
     register_handlers(dispatcher, bot, store, payments, settings)
     polling_task = asyncio.create_task(dispatcher.start_polling(bot))
     reconcile_task = asyncio.create_task(reconcile_payments(bot, store, payments, settings))
+    broadcasts_task = asyncio.create_task(reconcile_broadcasts(bot, store))
     try:
         yield
     finally:
         polling_task.cancel()
         reconcile_task.cancel()
-        await asyncio.gather(polling_task, reconcile_task, return_exceptions=True)
+        broadcasts_task.cancel()
+        await asyncio.gather(
+            polling_task,
+            reconcile_task,
+            broadcasts_task,
+            return_exceptions=True,
+        )
         await bot.session.close()
         await payments.close()
 
@@ -54,6 +69,8 @@ async def health() -> dict[str, str]:
 async def open_aba_mobile(order_id: str, request: Request) -> RedirectResponse:
     store: Store = request.app.state.store
     deeplink = await store.pending_payment_deeplink(order_id)
+    if not deeplink:
+        deeplink = await store.pending_wallet_payment_deeplink(order_id)
     parsed = urlsplit(deeplink or "")
     query = parse_qs(parsed.query)
     if (
@@ -113,7 +130,36 @@ async def khpay_webhook(request: Request) -> dict[str, bool | str]:
     store: Store = request.app.state.store
     order = await store.order_by_transaction(transaction_id)
     if not order:
-        return {"received": True, "status": "unknown_transaction"}
+        deposit = await store.wallet_deposit_by_transaction(transaction_id)
+        if not deposit:
+            return {"received": True, "status": "unknown_transaction"}
+        if deposit["status"] != "pending":
+            return {"received": True, "status": "deposit_already_closed"}
+
+        try:
+            payment = await payments.check_payment(transaction_id)
+        except Exception:
+            logging.getLogger(__name__).exception("KHPAY status verification failed for %s", transaction_id)
+            raise HTTPException(status_code=503, detail="Could not verify payment with KHPAY") from None
+        if payment.get("status") != expected_status:
+            return {"received": True, "status": "awaiting_api_confirmation"}
+
+        if expected_status == "paid":
+            try:
+                expected_amount = Decimal(str(deposit["amount"]))
+                confirmed_amount = Decimal(str(payment["amount"]))
+                webhook_amount = event_data.get("amount")
+                if confirmed_amount != expected_amount or (
+                    webhook_amount is not None and Decimal(str(webhook_amount)) != expected_amount
+                ):
+                    raise HTTPException(status_code=400, detail="Payment amount does not match the deposit")
+            except (InvalidOperation, KeyError, TypeError):
+                raise HTTPException(status_code=400, detail="Invalid payment amount") from None
+            await complete_wallet_deposit(bot, store, deposit)
+        else:
+            await expire_wallet_deposit(bot, store, deposit, expected_status)
+        return {"received": True, "status": expected_status}
+
     if order["status"] != "pending" and not (order["status"] == "paid" and expected_status == "paid"):
         return {"received": True, "status": "order_already_closed"}
 

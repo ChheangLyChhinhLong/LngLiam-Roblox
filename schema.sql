@@ -13,12 +13,62 @@ create table if not exists public.bot_settings (
     value text not null default ''
 );
 
+create table if not exists public.user_wallets (
+    telegram_id bigint primary key,
+    balance numeric(12, 2) not null default 0 check (balance >= 0),
+    updated_at timestamptz not null default now()
+);
+
+create table if not exists public.wallet_deposits (
+    id uuid primary key default gen_random_uuid(),
+    chat_id bigint not null,
+    amount numeric(10, 2) not null check (amount >= 1 and amount <= 500),
+    status text not null default 'pending' check (status in ('pending', 'paid', 'expired', 'failed')),
+    transaction_id text unique,
+    payment_url text,
+    message_id bigint,
+    created_at timestamptz not null default now(),
+    credited_at timestamptz
+);
+
+create table if not exists public.broadcast_jobs (
+    id uuid primary key default gen_random_uuid(),
+    admin_id bigint not null,
+    scheduled_at timestamptz not null,
+    content jsonb not null,
+    buttons jsonb not null default '[]'::jsonb,
+    status text not null default 'scheduled'
+        check (status in ('scheduled', 'sending', 'sent', 'cancelled', 'failed')),
+    sent_count integer not null default 0,
+    failed_count integer not null default 0,
+    created_at timestamptz not null default now(),
+    finished_at timestamptz
+);
+
+create index if not exists broadcast_jobs_due_idx
+    on public.broadcast_jobs(scheduled_at)
+    where status = 'scheduled';
+alter table public.broadcast_jobs enable row level security;
+revoke all on public.broadcast_jobs from public, anon, authenticated;
+grant all on public.broadcast_jobs to service_role;
+
 create table if not exists public.categories (
     id uuid primary key default gen_random_uuid(),
     name text not null,
     description text not null default '',
     active boolean not null default true,
     sort_order integer not null default 0
+);
+
+insert into public.categories (name, description, sort_order)
+select seed.name, seed.description, seed.sort_order
+from (values
+    ('Roblox (Robux Send)', 'Robux top-up via player username', 1000),
+    ('Roblox (Robux Code)', 'Robux gift code', 1001)
+) as seed(name, description, sort_order)
+where not exists (
+    select 1 from public.categories existing
+    where lower(existing.name) = lower(seed.name)
 );
 
 create table if not exists public.products (
@@ -30,12 +80,18 @@ create table if not exists public.products (
     reseller_price numeric(10, 2),
     image_url text,
     video_url text,
+    delivery_message text not null default '',
+    delivery_image_url text,
+    delivery_video_url text,
     active boolean not null default true,
     sort_order integer not null default 0
 );
 
 alter table public.products add column if not exists image_url text;
 alter table public.products add column if not exists video_url text;
+alter table public.products add column if not exists delivery_message text not null default '';
+alter table public.products add column if not exists delivery_image_url text;
+alter table public.products add column if not exists delivery_video_url text;
 alter table public.products add column if not exists reseller_price numeric(10, 2);
 update public.products set reseller_price = price where reseller_price is null;
 alter table public.products alter column reseller_price set not null;
@@ -129,6 +185,8 @@ end;
 $$;
 
 alter table public.users enable row level security;
+alter table public.user_wallets enable row level security;
+alter table public.wallet_deposits enable row level security;
 alter table public.resellers enable row level security;
 alter table public.bot_settings enable row level security;
 alter table public.categories enable row level security;
@@ -162,6 +220,52 @@ begin
     values (p_chat_id, p_product_id, p_quantity, v_price * p_quantity) returning id into v_order_id;
     update stock_items set status = 'reserved', order_id = v_order_id where id = any(v_stock_ids);
     return jsonb_build_object('id', v_order_id, 'total', v_price * p_quantity);
+end;
+$$;
+
+create or replace function public.reserve_wallet_order(p_chat_id bigint, p_product_id uuid, p_quantity integer)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare
+    v_order_id uuid;
+    v_price numeric(10, 2);
+    v_total numeric(10, 2);
+    v_stock_ids uuid[];
+    v_balance numeric(12, 2);
+begin
+    if p_quantity < 1 or p_quantity > 3 then raise exception 'Quantity must be between 1 and 3'; end if;
+
+    select balance into v_balance
+    from user_wallets
+    where telegram_id = p_chat_id
+    for update;
+    if not found then raise exception 'Insufficient wallet balance'; end if;
+
+    select case
+        when exists (select 1 from resellers where telegram_id = p_chat_id)
+            then reseller_price
+        else price
+    end
+    into v_price
+    from products
+    where id = p_product_id and active = true;
+    if v_price is null then raise exception 'Product is not available'; end if;
+    v_total := v_price * p_quantity;
+    if v_balance < v_total then raise exception 'Insufficient wallet balance'; end if;
+
+    select array_agg(id) into v_stock_ids from (
+        select id from stock_items where product_id = p_product_id and status = 'available'
+        order by created_at for update skip locked limit p_quantity
+    ) available;
+    if coalesce(array_length(v_stock_ids, 1), 0) < p_quantity then raise exception 'Insufficient stock'; end if;
+
+    update user_wallets
+    set balance = balance - v_total, updated_at = now()
+    where telegram_id = p_chat_id;
+    insert into orders(chat_id, product_id, quantity, total, status)
+    values (p_chat_id, p_product_id, p_quantity, v_total, 'paid')
+    returning id into v_order_id;
+    update stock_items set status = 'sold', order_id = v_order_id where id = any(v_stock_ids);
+    return jsonb_build_object('id', v_order_id, 'total', v_total);
 end;
 $$;
 
@@ -230,7 +334,75 @@ returns jsonb language sql stable security definer set search_path = public as $
     ) from orders where status = 'paid';
 $$;
 
+create or replace function public.create_wallet_deposit(p_chat_id bigint, p_amount numeric)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare
+    v_deposit_id uuid;
+begin
+    if p_chat_id <= 0 then raise exception 'Telegram ID must be positive'; end if;
+    if p_amount is null or p_amount < 1 or p_amount > 500 or round(p_amount, 2) <> p_amount then
+        raise exception 'Deposit amount must be between 1.00 and 500.00 USD';
+    end if;
+    insert into wallet_deposits(chat_id, amount)
+    values (p_chat_id, p_amount)
+    returning id into v_deposit_id;
+    return jsonb_build_object('id', v_deposit_id, 'amount', p_amount);
+end;
+$$;
+
+create or replace function public.set_wallet_deposit_payment(
+    p_deposit_id uuid,
+    p_transaction_id text,
+    p_payment_url text
+)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+    update wallet_deposits
+    set transaction_id = p_transaction_id, payment_url = p_payment_url
+    where id = p_deposit_id and status = 'pending';
+    if not found then raise exception 'Pending wallet deposit not found'; end if;
+end;
+$$;
+
+create or replace function public.complete_wallet_deposit(p_deposit_id uuid)
+returns boolean language plpgsql security definer set search_path = public as $$
+declare
+    v_chat_id bigint;
+    v_amount numeric(10, 2);
+begin
+    select chat_id, amount into v_chat_id, v_amount
+    from wallet_deposits
+    where id = p_deposit_id and status = 'pending'
+    for update;
+    if not found then return false; end if;
+
+    update wallet_deposits
+    set status = 'paid', credited_at = now()
+    where id = p_deposit_id;
+
+    insert into user_wallets(telegram_id, balance, updated_at)
+    values (v_chat_id, v_amount, now())
+    on conflict (telegram_id) do update
+    set balance = user_wallets.balance + excluded.balance,
+        updated_at = now();
+    return true;
+end;
+$$;
+
+create or replace function public.close_wallet_deposit(p_deposit_id uuid, p_status text)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+    if p_status not in ('expired', 'failed') then
+        raise exception 'Invalid wallet deposit status';
+    end if;
+    update wallet_deposits
+    set status = p_status
+    where id = p_deposit_id and status = 'pending';
+end;
+$$;
+
 revoke all on function public.reserve_order(bigint, uuid, integer) from public, anon, authenticated;
+revoke all on function public.reserve_wallet_order(bigint, uuid, integer) from public, anon, authenticated;
 revoke all on function public.set_order_payment(uuid, text, text) from public, anon, authenticated;
 revoke all on function public.release_order(uuid, text) from public, anon, authenticated;
 revoke all on function public.fulfill_order(uuid) from public, anon, authenticated;
@@ -238,7 +410,12 @@ revoke all on function public.mark_order_delivered(uuid) from public, anon, auth
 revoke all on function public.available_stock_count(uuid) from public, anon, authenticated;
 revoke all on function public.sales_summary() from public, anon, authenticated;
 revoke all on function public.import_stock_items(uuid, jsonb) from public, anon, authenticated;
+revoke all on function public.create_wallet_deposit(bigint, numeric) from public, anon, authenticated;
+revoke all on function public.set_wallet_deposit_payment(uuid, text, text) from public, anon, authenticated;
+revoke all on function public.complete_wallet_deposit(uuid) from public, anon, authenticated;
+revoke all on function public.close_wallet_deposit(uuid, text) from public, anon, authenticated;
 grant execute on function public.reserve_order(bigint, uuid, integer) to service_role;
+grant execute on function public.reserve_wallet_order(bigint, uuid, integer) to service_role;
 grant execute on function public.set_order_payment(uuid, text, text) to service_role;
 grant execute on function public.release_order(uuid, text) to service_role;
 grant execute on function public.fulfill_order(uuid) to service_role;
@@ -246,3 +423,7 @@ grant execute on function public.mark_order_delivered(uuid) to service_role;
 grant execute on function public.available_stock_count(uuid) to service_role;
 grant execute on function public.sales_summary() to service_role;
 grant execute on function public.import_stock_items(uuid, jsonb) to service_role;
+grant execute on function public.create_wallet_deposit(bigint, numeric) to service_role;
+grant execute on function public.set_wallet_deposit_payment(uuid, text, text) to service_role;
+grant execute on function public.complete_wallet_deposit(uuid) to service_role;
+grant execute on function public.close_wallet_deposit(uuid, text) to service_role;

@@ -19,7 +19,6 @@ class Settings(BaseSettings):
     khpay_webhook_secret: str = ""
     khpay_webhook_url: str = ""
     public_base_url: str = ""
-    install_group_url: str = ""
     stock_encryption_key: str
     stock_notification_chat_ids: str = ""
     order_notification_chat_ids: str = ""

@@ -1,6 +1,6 @@
 # PU_MMO169_Sale_Mod — Telegram Digital Key Shop
 
-Project នេះជាហាងលក់ License Key និង Digital Activation Code តាម Telegram Bot។ អ្នកទិញចុច **🛍 BUY NOW** ឬផ្ញើសារមក bot ដើម្បីជ្រើស Catalog និង Package, កក់ស្តុក, ទូទាត់តាម KHPAY KHQR ហើយ bot ផ្ញើ Key បន្ទាប់ពី KHPAY បញ្ជាក់ការទូទាត់។ Package គាំទ្ររូបភាព និងវីដេអូតាម Cloudinary។ Backend ប្រើ Supabase, ដំណើរការលើ Render និងមាន health endpoint `/health`។
+Project នេះជា Telegram TopUp shop ដែលមាន Roblox (Robux Send/Code), wallet, order history និងវីដេអូ How to Buy។ អ្នកប្រើអាចបញ្ចូលសមតុល្យតាម KHPAY KHQR ហើយបង់ទំនិញដោយ wallet ឬ KHPAY checkout។ Bot ផ្ញើ digital goods បន្ទាប់ពីការទូទាត់ត្រូវបានផ្ទៀងផ្ទាត់។ រូបភាព/វីដេអូ Welcome និង Tutorial ត្រូវបាន upload ទៅ Cloudinary ហើយ URL ត្រូវបានរក្សាទុកក្នុង Supabase។ Backend ដំណើរការលើ Render និងមាន health endpoint `/health`។
 
 ## មាតិកា
 
@@ -37,7 +37,7 @@ Project នេះជាហាងលក់ License Key និង Digital Activati
 
 1. បង្កើត project ថ្មីនៅ [Supabase](https://supabase.com/) ហើយរង់ចាំ database រួចរាល់។
 2. បើក **SQL Editor → New query**។ បើក [schema.sql](schema.sql), ចម្លង SQL ទាំងមូលទៅក្នុង editor ហើយចុច **Run**។ Script នេះបង្កើត tables, indexes និង database functions ដែល bot ត្រូវការ។
-3. បើមាន database ចាស់ អាច run `schema.sql` ម្តងទៀត ដើម្បីអនុវត្តការបន្ថែម schema ដែល idempotent។ វាបន្ថែម `products.video_url`, តម្លៃ Reseller និងតារាង `resellers`; Package ចាស់នឹងមានតម្លៃ Reseller ស្មើតម្លៃអតិថិជន រហូតដល់អ្នកកែវា។ វាក៏អនុញ្ញាត import License Key ដែលបានលក់រួចមកវិញជាស្តុកថ្មីផងដែរ។ ត្រូវ run schema ចុងក្រោយមុនប្រើមុខងារទាំងនេះ។
+3. បើមាន database ចាស់ អាច run `schema.sql` ម្តងទៀត ដើម្បីអនុវត្តការបន្ថែម schema ដែល idempotent។ វាបន្ថែម `products.video_url`, តម្លៃ Reseller, តារាង `resellers`, wallet/deposit tables, scheduled broadcast jobs និង functions សម្រាប់បញ្ចូល/ប្រើសមតុល្យ។ វាក៏បង្កើត Catalog `Roblox (Robux Send)` និង `Roblox (Robux Code)` ប្រសិនបើមិនទាន់មាន។ Package ចាស់នឹងមានតម្លៃ Reseller ស្មើតម្លៃអតិថិជន រហូតដល់អ្នកកែវា។ ត្រូវ run schema ចុងក្រោយមុនប្រើមុខងារទាំងនេះ។
 4. បើក **Project Settings → API** រួចចម្លង Project URL និង `service_role` key ទៅ environment variables។ ប្រើ `service_role` key តែក្នុង backend/Render ប៉ុណ្ណោះ។
 5. ទុក Row Level Security (RLS) ឲ្យបើក។ កុំបង្កើត public policies សម្រាប់ stock ឬ orders។
 
@@ -66,7 +66,6 @@ notepad .env
 | `KHPAY_WEBHOOK_URL` | សម្រាប់ production | URL ពេញលេញទៅ `/webhook/khpay` របស់ service។ |
 | `KHPAY_WEBHOOK_SECRET` | សម្រាប់ webhook | Secret ដែល KHPAY បង្កើតសម្រាប់ webhook។ |
 | `PUBLIC_BASE_URL` | សម្រាប់ ABA link | URL HTTPS សាធារណៈរបស់ Render ដោយមិនបញ្ចូល path។ |
-| `INSTALL_GROUP_URL` | ចាំបាច់សម្រាប់ delivery | HTTPS link ទៅកាន់ក្រុម/Channel ដំឡើងដែលអ្នកទិញត្រូវចូល។ អាចកំណត់ `channel_install_link` ក្នុង `bot_settings` ជំនួសបាន។ |
 | `CLOUDINARY_CLOUD_NAME` | ស្រេចចិត្ត | Cloud name; ត្រូវបំពេញជាមួយ API key/secret ប្រសិនបើប្រើរូបភាព ឬវីដេអូ Package។ |
 | `CLOUDINARY_API_KEY` | ស្រេចចិត្ត | Cloudinary API key។ |
 | `CLOUDINARY_API_SECRET` | ស្រេចចិត្ត | Cloudinary API secret; រក្សាសម្ងាត់។ |
@@ -110,7 +109,7 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
 .\.venv313\Scripts\python.exe -m app.main
 ```
 
-ទុក process នេះឲ្យដំណើរការ ហើយបើក browser ទៅ `http://127.0.0.1:10000/health`។ លទ្ធផលធម្មតាគឺ `{"status":"ok"}`។ បន្ទាប់មកបើក bot ក្នុង Telegram ហើយផ្ញើសារអ្វីក៏បាន ឬចុច **🛍 BUY NOW**។
+ទុក process នេះឲ្យដំណើរការ ហើយបើក browser ទៅ `http://127.0.0.1:10000/health`។ លទ្ធផលធម្មតាគឺ `{"status":"ok"}`។ បន្ទាប់មកបើក bot ក្នុង Telegram ហើយផ្ញើ `/start`។
 
 Webhook និង ABA deep link ត្រូវការអាសយដ្ឋាន HTTPS ដែល KHPAY/Telegram អាចចូលដល់បាន។ ដូច្នេះការសាកល្បង webhook ក្នុង local machine ត្រូវការប្រើ HTTPS tunnel; បើមិនបានកំណត់ webhook ទេ bot នៅតែអាចពិនិត្យ payment តាម background polling និងប៊ូតុងពិនិត្យ payment។
 
@@ -131,9 +130,13 @@ Webhook និង ABA deep link ត្រូវការអាសយដ្ឋា
 2. បើក bot ដោយ admin account ហើយចុច **Store admin → Catalogs and packages → Add Catalog**។
 3. ចុច **Add catalog** ហើយបញ្ចូលឈ្មោះ និងព័ត៌មានលម្អិតតាមសំណួរដែល bot បង្ហាញម្តងមួយៗ។ ព័ត៌មានលម្អិតអាចរំលងបាន។
 
-4. បើក Catalog ដែលទើបបង្កើត ហើយចុច **Add Package**។ Wizard នឹងសួរតាមលំដាប់៖ រូបភាព/វីដេអូ, ឈ្មោះ, ព័ត៌មានលម្អិត, តម្លៃអតិថិជន និងតម្លៃ Reseller។ ចុច **Skip** សម្រាប់ Media/ព័ត៌មានលម្អិត ឬតម្លៃ Reseller (តម្លៃ Reseller នឹងស្មើតម្លៃអតិថិជន)។ ឈ្មោះ និងតម្លៃអតិថិជនត្រូវបញ្ចូល។ ពិនិត្យព័ត៌មាន រួចចុច **Confirm save**។ ពេលកែ Package អាច Skip ដើម្បីទុកតម្លៃដដែល។ ចុច **Cancel** បានគ្រប់ជំហាន។
+4. បើក Catalog ដែលទើបបង្កើត ហើយចុច **Add Package**។ Wizard នឹងសួរតាមលំដាប់៖ រូបភាព/វីដេអូ, ឈ្មោះ, ព័ត៌មានលម្អិត, តម្លៃអតិថិជន, តម្លៃ Reseller, សារ/របៀបប្រើក្រោយ Order, រូបភាព និងវីដេអូក្រោយ Order។ ចុច **Skip** លើជំហានស្រេចចិត្តដើម្បីរំលង។ ឈ្មោះ និងតម្លៃអតិថិជនត្រូវបញ្ចូល។ ពិនិត្យព័ត៌មាន រួចចុច **Confirm save**។ ពេលកែ Package អាច Skip ដើម្បីទុកតម្លៃដដែល ឬ Clear រូបភាព/វីដេអូក្រោយ Order. ចុច **Cancel** បានគ្រប់ជំហាន។
 
 តម្លៃទាំងពីរត្រូវធំជាងសូន្យ ហើយតម្លៃ Reseller ដែលបញ្ចូលត្រូវទាបជាងតម្លៃអតិថិជន។ Media ជាជម្រើស; បើផ្ញើរូបភាព/វីដេអូ ត្រូវកំណត់ Cloudinary variables ទាំងបី។ Package នឹងបង្ហាញ media នៅលើទំព័រព័ត៌មានរបស់វា។
+
+សារ រូបភាព និងវីដេអូក្រោយ Order ត្រូវបានកំណត់តាម **Edit Package** ហើយ Bot ផ្ញើវាបន្ទាប់ពីទូទាត់ជោគជ័យ មុនពេលផ្ញើ Key។ License Key/Product Code នៅតែបញ្ចូលតាម **Add stock/Import stock (.txt)** សម្រាប់ Package នីមួយៗ; Bot រក្សាទុកជាទម្រង់ encrypted និងផ្ញើតាមចំនួនដែលបានទិញ។
+
+មុនប្រើមុខងារនេះ សូម run `schema.sql` ចុងក្រោយក្នុង Supabase SQL Editor ដើម្បីបន្ថែម delivery fields លើ products។ រូបភាព និងវីដេអូក្រោយ Order ត្រូវបាន upload ទៅ Cloudinary ដោយប្រើ Cloudinary variables ទាំងបីដូច Package media។
 
 Admin អាចបើក **Store admin → Manage resellers → Add reseller** រួចផ្ញើ Telegram user ID ជាលេខ។ ចុចលើ ID ក្នុងបញ្ជីដើម្បីដកសិទ្ធិ។ Reseller ប្រើ bot ដូចអតិថិជនធម្មតា ប៉ុន្តែ catalog, ព័ត៌មាន package និងការកក់ទិញនឹងប្រើតម្លៃ Reseller។ តម្លៃ checkout ត្រូវបានគណនាដោយ Supabase តាម Telegram ID មិនមែនតាមតម្លៃដែលបានផ្ញើពី UI ទេ។
 
@@ -149,6 +152,14 @@ addstock PRODUCT_UUID | key1, key2
 ### បញ្ចូល stock ជា `.txt`
 
 ក្នុង Admin panel ជ្រើស **Import stock (.txt)**, ជ្រើស package ហើយផ្ញើឯកសារ `.txt`។ ឯកសារមិនអាចធំជាង 1 MB; ដាក់ License Key មួយក្នុងមួយបន្ទាត់។
+
+### Broadcast
+
+នៅ **Store admin → Broadcast** អាចបង្កើតសារផ្សព្វផ្សាយជាអត្ថបទ, រូបភាព, វីដេអូ, ឯកសារ, audio/voice, GIF/animation, video note, sticker, contact, location, poll និង album បាន។ អាចផ្ញើច្រើនមាតិកាជាប់គ្នា រួចចុច **Preview** ដើម្បីពិនិត្យមាតិកា និងចំនួនអ្នកទទួលមុនពេល Confirm។ ជម្រើស **Add buttons** ទទួល URL មួយក្នុងមួយបន្ទាត់ ដូចជា `បើកហាង | https://example.com`; អាចបញ្ចូលបានអតិបរមា 8 តំណ។
+
+Broadcast ផ្ញើទៅអ្នកប្រើដែលបានចាប់ផ្តើម Bot និង chat IDs ដែលកំណត់នៅ **Settings → Notifications** (Stock និង Order notifications)។ អ្នកទទួលត្រូវបាន deduplicate; អ្នកប្រើដែល block bot ឬ chat ដែល bot មិនមានសិទ្ធិ post នឹងរាប់ជា Failed។ ពេលផ្ញើអាចមើល Sent/Failed/Progress និងចុច **Stop** ដើម្បីបញ្ឈប់។
+
+ចុច **Schedule** ដើម្បីកំណត់ការផ្ញើម្តងតាមម៉ោងភ្នំពេញ ដោយប្រើទម្រង់ `YYYY-MM-DD HH:MM`។ អាចមើល/លុប Schedule នៅ **Scheduled Broadcasts**។ សូម run `schema.sql` ចុងក្រោយ ដើម្បីបង្កើតតារាង `broadcast_jobs`; bot នឹងរក្សា Schedule និងចាប់ផ្តើមផ្ញើក្រោយ restart បាន។ សូមកុំលុបសារដើមដែល Admin ផ្ញើសម្រាប់ draft ដែលបាន Schedule រហូតដល់ការផ្ញើចប់ ឬ Schedule ត្រូវបានលុប។
 
 អាចប្រើ command-line importer ផងដែរ។ ដាក់ License Key មួយក្នុងមួយបន្ទាត់:
 
@@ -177,12 +188,12 @@ Script អាន `.env` ពី project root។ វាត្រូវការ `S
 
 ### វីដេអូ “How to buy”
 
-បញ្ចូល `how_to_buy_video_url` និង caption ក្នុង `public.bot_settings` តាម Supabase SQL Editor។ `value` របស់ video អាចជា Telegram `file_id` ឬ URL វីដេអូដែលអាចចូលប្រើជាសាធារណៈបាន។ ប្រើ `how_to_buy_caption_km` និង `how_to_buy_caption_en` ដើម្បីបង្ហាញ caption តាមភាសាអ្នកប្រើ។ បើមិនបានកំណត់ caption តាមភាសា bot នឹងប្រើ `how_to_buy_caption` ចាស់ជាជម្រើសបម្រុង។ Telegram កំណត់ caption អតិបរមា 1024 តួអក្សរ។
+នៅ **Store admin → Settings → Media → How to Buy** admin អាចផ្ញើវីដេអូសម្រាប់ upload ទៅ Cloudinary ហើយ URL HTTPS ត្រូវបានរក្សាទុកក្នុង `public.bot_settings.how_to_buy_video_url`។ Caption ខ្មែរ/អង់គ្លេសអាចកំណត់នៅ **Settings → Captions**។ ក៏អាចកែ URL/caption ដោយផ្ទាល់តាម Supabase SQL Editor; បើគ្មាន caption វីដេអូនឹងផ្ញើដោយគ្មាន caption។
 
 ```sql
 insert into public.bot_settings (key, value)
 values
-    ('how_to_buy_video_url', 'PASTE_TELEGRAM_FILE_ID_OR_PUBLIC_VIDEO_URL'),
+    ('how_to_buy_video_url', 'PASTE_CLOUDINARY_HTTPS_VIDEO_URL'),
     ('how_to_buy_caption_km', 'ការណែនាំអំពីរបៀបទិញ'),
     ('how_to_buy_caption_en', 'How to buy tutorial')
 on conflict (key) do update set value = excluded.value;
@@ -190,17 +201,20 @@ on conflict (key) do update set value = excluded.value;
 
 Bot ទាញ settings ថ្មីរាល់ពេលអ្នកប្រើបើក tutorial ដូច្នេះមិនចាំបាច់ restart bot បន្ទាប់ពីកែទេ។
 
-កំណត់ media ស្វាគមន៍ និង link ក្រុមដំឡើងក្នុង `bot_settings`។ Welcome video មានអាទិភាពលើ photo; បើមិនកំណត់ media ទាំងពីរ វាបង្ហាញតែអត្ថបទស្វាគមន៍។ កំណត់ `INSTALL_GROUP_URL` ក្នុង environment ឬប្រើ `channel_install_link` ក្នុង table:
+នៅ **Store admin → Settings → Media → Welcome media** admin អាចផ្ញើរូបភាព ឬវីដេអូ។ Bot upload ទៅ Cloudinary ហើយរក្សា URL នៅក្នុង Supabase `bot_settings`; media ប្រភេទថ្មីនឹងជំនួស media ចាស់ ហើយមានប៊ូតុង Clear តែមួយសម្រាប់លុប Welcome media ទាំងពីរប្រភេទ។ Settings → **Store links** អាចកំណត់ Support username និង **Notifications** អាចកំណត់ group IDs សម្រាប់ stock/order notifications។
 
 ```sql
 insert into public.bot_settings (key, value)
 values
-    ('welcome_video_url', 'PASTE_TELEGRAM_FILE_ID_OR_PUBLIC_VIDEO_URL'),
-    ('channel_install_link', 'https://t.me/your_install_group')
+    ('welcome_video_url', 'PASTE_TELEGRAM_FILE_ID_OR_PUBLIC_VIDEO_URL')
 on conflict (key) do update set value = excluded.value;
 ```
 
-ចាប់ផ្តើមប្រើ bot ដោយផ្ញើសារណាមួយ ឬចុច **🛍 BUY NOW**។
+ចាប់ផ្តើមប្រើ bot ដោយផ្ញើ `/start`។ Bot នឹងបង្ហាញ Welcome media និងម៉ឺនុយសេវាកម្ម។
+
+### Wallet និងម៉ឺនុយ
+
+ទំព័រ `/start` បង្ហាញ Welcome media ហើយប៊ូតុងប្រើជា reply keyboard នៅខាងក្រោមប្រអប់សរសេរសារ៖ **Account**, **Add funds**, **Games Service**, **My Orders** និង **How to Buy**។ ជ្រើស Roblox package តាម **Games Service**។ Add funds គាំទ្រចំនួន $1, $5, $10, $15, $20, $50 ឬចំនួនផ្ទាល់ខ្លួនពី $1 ដល់ $500; សមតុល្យត្រូវបានបន្ថែមតែបន្ទាប់ពី KHPAY បញ្ជាក់ transaction និងចំនួនទឹកប្រាក់។ បើសមតុល្យគ្រប់គ្រាន់ ទំព័រ Package ផ្តល់ជម្រើសបង់ដោយ Wallet ផងដែរ។ ដើម្បីប្រើ wallet សូម run `schema.sql` ចុងក្រោយ។
 
 ### រូបភាព និងវីដេអូ Package
 
@@ -319,13 +333,13 @@ Monitor នេះពិនិត្យតែ web health route។ វាមិន
 
 ## របៀបប្រើក្នុង Telegram
 
-1. អ្នកទិញចុចប៊ូតុង reply **🛍 BUY NOW** ឬ **Shop** ក្នុងម៉ឺនុយ, ជ្រើស Catalog និង Package ហើយកំណត់ចំនួនទិញ។ ចំនួនមួយ order មានអតិបរមា 3 ហើយមិនអាចលើសស្តុកនៅសល់។
+1. អ្នកទិញចុច **Games Service**, ជ្រើស Catalog និង Package (ឧ. Roblox Send/Code) ហើយកំណត់ចំនួនទិញ។ ចំនួនមួយ order មានអតិបរមា 3 ហើយមិនអាចលើសស្តុកនៅសល់។
 2. ពេលបង្កើត order, Supabase កក់ stock ជាអាតូមិក ដើម្បីកុំឲ្យអតិថិជនពីរនាក់បាន License Key ដូចគ្នា។
 3. អ្នកទិញបង់តាម KHQR ឬបើក ABA Mobile។ អាចចុចប៊ូតុងពិនិត្យ payment ដោយខ្លួនឯងបាន។
 4. បន្ទាប់ពី KHPAY បញ្ជាក់ `paid` bot ផ្ញើ License Key ជា code block (ចុចលើ Key ដើម្បី copy) និងមានប៊ូតុង **📋 Copy Key** សម្រាប់ Key នីមួយៗ រួចលុបសារដែលមាន QR។ ករណី expired/failed stock ដែលបាន reserve នឹងត្រឡប់ទៅ available។
-5. អ្នកប្រើអាចមើល order history, ប្តូរភាសា Khmer/English, បើកវីដេអូ How to buy និងទាក់ទង support។
+5. អ្នកប្រើអាចមើល Account/Balance, បញ្ចូលប្រាក់, មើល order history និងចាក់វីដេអូ How to Buy។
 
-Admin panel អាចបន្ថែម/កែ Catalog និង Package, បិទធាតុ, បញ្ចូល/ដក stock, upload `.txt` និងមើល sales summary។ អ្នកប្រើដែលមិនមាន ID ក្នុង `TELEGRAM_ADMIN_IDS` មិនអាចគ្រប់គ្រងហាងបានទេ។
+Admin panel អាចបន្ថែម/កែ Catalog និង Package, បិទធាតុ, បញ្ចូល/ដក stock, upload `.txt`, Broadcast និងមើល sales summary។ អ្នកប្រើដែលមិនមាន ID ក្នុង `TELEGRAM_ADMIN_IDS` មិនអាចគ្រប់គ្រងហាងបានទេ។
 
 ## សុវត្ថិភាព និងថែទាំ
 
@@ -343,10 +357,11 @@ Admin panel អាចបន្ថែម/កែ Catalog និង Package, បិ
 | រោគសញ្ញា | អ្វីដែលត្រូវពិនិត្យ |
 | --- | --- |
 | Bot មិនឆ្លើយតប | ពិនិត្យ `BOT_TOKEN`, Render Logs និងថាមាន polling process តែមួយប៉ុណ្ណោះ។ |
-| ប៊ូតុង **🛍 BUY NOW** មិនបង្ហាញ Catalog | ចុចប៊ូតុង reply ដើម្បីផ្ញើសារ `🛍 BUY NOW`; ពិនិត្យថា bot កំពុងដំណើរការ និងមាន Catalog ដែល `active = true`។ បើមាន error សូមមើល logs សម្រាប់ Supabase schema/table error។ |
+| Games Service មិនបង្ហាញ Catalog | ពិនិត្យថា bot កំពុងដំណើរការ និងមាន Catalog ដែល `active = true`។ បើមាន error សូមមើល logs សម្រាប់ Supabase schema/table error។ |
 | Bot បង្ហាញថាមិនមាន Catalog | ពិនិត្យថាមាន `categories` ដែល `active = true` ក្នុង Supabase។ |
 | Admin panel មិនបង្ហាញ | ពិនិត្យ Telegram numeric ID ក្នុង `TELEGRAM_ADMIN_IDS` ហើយ restart/redeploy។ |
 | Supabase request បរាជ័យ | ពិនិត្យ `SUPABASE_URL`, service-role key និងថា `schema.sql` បាន run ជោគជ័យ។ កុំបិទ RLS ដើម្បីជៀសបញ្ហា។ |
+| `PGRST205` រកមិនឃើញ `user_wallets` ឬ `wallet_deposits` | បើក Supabase SQL Editor ហើយ run `schema.sql` ចុងក្រោយ។ បន្ទាប់មកសាកល្បង Account/Add funds ម្តងទៀត។ Bot នឹងប្រាប់ថា Wallet មិនទាន់រៀបចំ ជំនួសឲ្យបរាជ័យដោយ unhandled exception។ |
 | Import stock មិនជោគជ័យ | ពិនិត្យ Product UUID, file UTF-8, format មួយ License Key ក្នុងមួយបន្ទាត់ និង encryption key។ |
 | រូបភាព/វីដេអូមិន upload ឬមិនបង្ហាញ | បំពេញ Cloudinary variables ទាំងបី, ពិនិត្យ `CLOUDINARY_CLOUD_NAME`, API key/secret នៅ local/Render និង run schema ចុងក្រោយដែលមាន `products.video_url`។ |
 | KHPAY checkout បរាជ័យ | ពិនិត្យ API key, `KHPAY_BASE_URL`, KHPAY account/payout setup និង Render Logs។ |

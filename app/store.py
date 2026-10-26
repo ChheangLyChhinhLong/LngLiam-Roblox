@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from typing import Any
 
 from supabase import AsyncClient
@@ -47,6 +48,103 @@ class Store:
             if len(page) < page_size:
                 return users
             offset += page_size
+
+    async def create_scheduled_broadcast(
+        self,
+        admin_id: int,
+        scheduled_at: str,
+        content: list[dict[str, Any]],
+        buttons: list[dict[str, str]],
+    ) -> str:
+        result = await (
+            self.client.table("broadcast_jobs")
+            .insert(
+                {
+                    "admin_id": admin_id,
+                    "scheduled_at": scheduled_at,
+                    "content": content,
+                    "buttons": buttons,
+                    "status": "scheduled",
+                }
+            )
+            .select("id")
+            .execute()
+        )
+        rows = result.data or []
+        if not rows or not rows[0].get("id"):
+            raise RuntimeError("Supabase did not return the scheduled broadcast ID")
+        return str(rows[0]["id"])
+
+    async def due_broadcast_jobs(self, now: str) -> list[dict[str, Any]]:
+        result = await (
+            self.client.table("broadcast_jobs")
+            .select("id,admin_id,scheduled_at,content,buttons")
+            .eq("status", "scheduled")
+            .lte("scheduled_at", now)
+            .order("scheduled_at")
+            .limit(10)
+            .execute()
+        )
+        return result.data or []
+
+    async def claim_broadcast_job(self, job_id: str) -> bool:
+        result = await (
+            self.client.table("broadcast_jobs")
+            .update({"status": "sending"})
+            .eq("id", job_id)
+            .eq("status", "scheduled")
+            .select("id")
+            .execute()
+        )
+        return bool(result.data)
+
+    async def finish_broadcast_job(
+        self,
+        job_id: str,
+        status: str,
+        sent: int = 0,
+        failed: int = 0,
+    ) -> None:
+        if status not in {"sent", "cancelled", "failed"}:
+            raise ValueError("Invalid scheduled broadcast status")
+        await (
+            self.client.table("broadcast_jobs")
+            .update(
+                {
+                    "status": status,
+                    "sent_count": sent,
+                    "failed_count": failed,
+                    "finished_at": datetime.now(timezone.utc).isoformat(),
+                }
+            )
+            .eq("id", job_id)
+            .execute()
+        )
+
+    async def scheduled_broadcasts(self, admin_id: int) -> list[dict[str, Any]]:
+        result = await (
+            self.client.table("broadcast_jobs")
+            .select("id,scheduled_at,status")
+            .eq("admin_id", admin_id)
+            .eq("status", "scheduled")
+            .order("scheduled_at")
+            .limit(20)
+            .execute()
+        )
+        return result.data or []
+
+    async def cancel_scheduled_broadcast(self, job_id: str, admin_id: int) -> dict[str, Any] | None:
+        result = await (
+            self.client.table("broadcast_jobs")
+            .update({"status": "cancelled"})
+            .eq("id", job_id)
+            .eq("admin_id", admin_id)
+            .eq("status", "scheduled")
+            .select("id,content")
+            .maybe_single()
+            .execute()
+        )
+        return result.data if result else None
 
     async def set_user_language(self, telegram_id: int, language: str) -> None:
         if language not in {"km", "en"}:
@@ -100,6 +198,133 @@ class Store:
         )
         return {item["key"]: item["value"] for item in result.data or []}
 
+    async def set_bot_setting(self, key: str, value: str) -> None:
+        await self.client.table("bot_settings").upsert(
+            {"key": key, "value": value},
+            on_conflict="key",
+        ).execute()
+
+    async def wallet_balance(self, telegram_id: int) -> str:
+        result = await (
+            self.client.table("user_wallets")
+            .select("balance")
+            .eq("telegram_id", telegram_id)
+            .maybe_single()
+            .execute()
+        )
+        data = getattr(result, "data", None)
+        return str((data or {}).get("balance", "0.00"))
+
+    async def create_wallet_deposit(self, telegram_id: int, amount: str) -> dict[str, Any]:
+        result = await self.client.rpc(
+            "create_wallet_deposit",
+            {"p_chat_id": telegram_id, "p_amount": amount},
+        ).execute()
+        return result.data
+
+    async def set_wallet_deposit_payment(
+        self,
+        deposit_id: str,
+        transaction_id: str,
+        payment_url: str,
+    ) -> None:
+        await self.client.rpc(
+            "set_wallet_deposit_payment",
+            {
+                "p_deposit_id": deposit_id,
+                "p_transaction_id": transaction_id,
+                "p_payment_url": payment_url,
+            },
+        ).execute()
+
+    async def pending_wallet_payment_deeplink(self, deposit_id: str) -> str | None:
+        result = await (
+            self.client.table("wallet_deposits")
+            .select("payment_url")
+            .eq("id", deposit_id)
+            .eq("status", "pending")
+            .maybe_single()
+            .execute()
+        )
+        return (result.data or {}).get("payment_url")
+
+    async def wallet_deposit_by_transaction(self, transaction_id: str) -> dict[str, Any] | None:
+        result = await (
+            self.client.table("wallet_deposits")
+            .select("id,chat_id,amount,status,transaction_id")
+            .eq("transaction_id", transaction_id)
+            .maybe_single()
+            .execute()
+        )
+        return result.data
+
+    async def wallet_deposit_for_user(
+        self,
+        deposit_id: str,
+        telegram_id: int,
+    ) -> dict[str, Any] | None:
+        result = await (
+            self.client.table("wallet_deposits")
+            .select("id,chat_id,amount,status,transaction_id")
+            .eq("id", deposit_id)
+            .eq("chat_id", telegram_id)
+            .maybe_single()
+            .execute()
+        )
+        return result.data
+
+    async def pending_wallet_deposits(self) -> list[dict[str, Any]]:
+        result = await (
+            self.client.table("wallet_deposits")
+            .select("id,chat_id,amount,transaction_id")
+            .eq("status", "pending")
+            .not_.is_("transaction_id", "null")
+            .execute()
+        )
+        return result.data or []
+
+    async def complete_wallet_deposit(self, deposit_id: str) -> bool:
+        result = await self.client.rpc(
+            "complete_wallet_deposit",
+            {"p_deposit_id": deposit_id},
+        ).execute()
+        return bool(result.data)
+
+    async def close_wallet_deposit(self, deposit_id: str, status: str) -> None:
+        await self.client.rpc(
+            "close_wallet_deposit",
+            {"p_deposit_id": deposit_id, "p_status": status},
+        ).execute()
+
+    async def set_wallet_deposit_message(self, deposit_id: str, message_id: int) -> None:
+        await (
+            self.client.table("wallet_deposits")
+            .update({"message_id": message_id})
+            .eq("id", deposit_id)
+            .execute()
+        )
+
+    async def wallet_deposit_message(self, deposit_id: str) -> dict[str, Any] | None:
+        result = await (
+            self.client.table("wallet_deposits")
+            .select("chat_id,message_id")
+            .eq("id", deposit_id)
+            .maybe_single()
+            .execute()
+        )
+        return result.data
+
+    async def category_by_name(self, name: str) -> dict[str, Any] | None:
+        result = await (
+            self.client.table("categories")
+            .select("id,name,description")
+            .ilike("name", name)
+            .eq("active", True)
+            .maybe_single()
+            .execute()
+        )
+        return result.data
+
     async def categories(self) -> list[dict[str, Any]]:
         result = await (
             self.client.table("categories")
@@ -135,7 +360,10 @@ class Store:
     async def product(self, product_id: str) -> dict[str, Any] | None:
         result = await (
             self.client.table("products")
-            .select("id,category_id,name,description,price,reseller_price,image_url,video_url")
+            .select(
+                "id,category_id,name,description,price,reseller_price,image_url,video_url,"
+                "delivery_message,delivery_image_url,delivery_video_url"
+            )
             .eq("id", product_id)
             .eq("active", True)
             .maybe_single()
@@ -152,6 +380,9 @@ class Store:
         image_url: str | None = None,
         video_url: str | None = None,
         reseller_price: str | None = None,
+        delivery_message: str | None = None,
+        delivery_image_url: str | None = None,
+        delivery_video_url: str | None = None,
     ) -> str:
         if image_url and video_url:
             raise ValueError("A product cannot have both an image and a video")
@@ -166,6 +397,17 @@ class Store:
             product_data["image_url"] = image_url
         if video_url:
             product_data["video_url"] = video_url
+        if any(
+            value is not None
+            for value in (delivery_message, delivery_image_url, delivery_video_url)
+        ):
+            product_data.update(
+                {
+                    "delivery_message": delivery_message or "",
+                    "delivery_image_url": delivery_image_url,
+                    "delivery_video_url": delivery_video_url,
+                }
+            )
         result = await (
             self.client.table("products")
             .insert(product_data)
@@ -188,6 +430,10 @@ class Store:
         image_url: str | None = None,
         video_url: str | None = None,
         update_media: bool = False,
+        delivery_message: str | None = None,
+        delivery_image_url: str | None = None,
+        delivery_video_url: str | None = None,
+        update_delivery: bool = False,
     ) -> None:
         values: dict[str, Any] = {
             "name": name,
@@ -198,6 +444,14 @@ class Store:
         if update_media:
             values["image_url"] = image_url
             values["video_url"] = video_url
+        if update_delivery:
+            values.update(
+                {
+                    "delivery_message": delivery_message or "",
+                    "delivery_image_url": delivery_image_url,
+                    "delivery_video_url": delivery_video_url,
+                }
+            )
         await self.client.table("products").update(values).eq("id", product_id).execute()
 
     async def update_product_image(self, product_id: str, image_url: str) -> bool:
@@ -231,6 +485,13 @@ class Store:
     async def reserve_order(self, chat_id: int, product_id: str, quantity: int) -> dict[str, Any]:
         result = await self.client.rpc(
             "reserve_order",
+            {"p_chat_id": chat_id, "p_product_id": product_id, "p_quantity": quantity},
+        ).execute()
+        return result.data
+
+    async def reserve_wallet_order(self, chat_id: int, product_id: str, quantity: int) -> dict[str, Any]:
+        result = await self.client.rpc(
+            "reserve_wallet_order",
             {"p_chat_id": chat_id, "p_product_id": product_id, "p_quantity": quantity},
         ).execute()
         return result.data
@@ -318,6 +579,26 @@ class Store:
         result = await self.client.rpc("fulfill_order", {"p_order_id": order_id}).execute()
         return result.data or []
 
+    async def order_delivery_details(self, order_id: str) -> dict[str, Any] | None:
+        order_result = await (
+            self.client.table("orders")
+            .select("product_id")
+            .eq("id", order_id)
+            .maybe_single()
+            .execute()
+        )
+        order = order_result.data
+        if not order:
+            return None
+        product_result = await (
+            self.client.table("products")
+            .select("delivery_message,delivery_image_url,delivery_video_url")
+            .eq("id", order["product_id"])
+            .maybe_single()
+            .execute()
+        )
+        return product_result.data
+
     async def mark_delivered(self, order_id: str) -> None:
         await self.client.rpc("mark_order_delivered", {"p_order_id": order_id}).execute()
 
@@ -352,16 +633,45 @@ class Store:
             "customer": user_result.data or {},
         }
 
-    async def order_history(self, chat_id: int) -> list[dict[str, Any]]:
+    async def order_history_page(
+        self,
+        chat_id: int,
+        page: int = 0,
+        page_size: int = 10,
+    ) -> tuple[list[dict[str, Any]], bool]:
+        if page < 0 or page_size <= 0:
+            raise ValueError("Order history page and page size must be valid")
+        offset = page * page_size
         result = await (
             self.client.table("orders")
-            .select("id,total,status,created_at")
+            .select("id,product_id,quantity,total,status,transaction_id,created_at")
             .eq("chat_id", chat_id)
             .order("created_at", desc=True)
-            .limit(10)
+            .range(offset, offset + page_size)
             .execute()
         )
-        return result.data
+        rows = result.data or []
+        has_next = len(rows) > page_size
+        orders = rows[:page_size]
+        product_ids = list(dict.fromkeys(order["product_id"] for order in orders if order.get("product_id")))
+        if product_ids:
+            products_result = await (
+                self.client.table("products")
+                .select("id,name")
+                .in_("id", product_ids)
+                .execute()
+            )
+            product_names = {
+                product["id"]: product.get("name", "")
+                for product in (products_result.data or [])
+            }
+            for order in orders:
+                order["product_name"] = product_names.get(order.get("product_id"), "")
+        return orders, has_next
+
+    async def order_history(self, chat_id: int) -> list[dict[str, Any]]:
+        orders, _ = await self.order_history_page(chat_id)
+        return orders
 
     async def import_stock(self, product_id: str, credentials: list[str], key: str) -> int:
         rows = [

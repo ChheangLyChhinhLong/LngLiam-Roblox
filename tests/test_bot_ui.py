@@ -4,18 +4,31 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 from cryptography.fernet import Fernet
+import pytest
 
 from app.bot import (
     admin_category_actions,
     admin_product_actions,
+    account_text,
+    broadcast_destinations,
+    broadcast_draft_keyboard,
+    copy_broadcast_content,
+    bot_setting_section,
     copy,
+    complete_wallet_deposit,
     delete_replaced_message,
     deliver_order,
     description_preview,
+    execute_broadcast,
     edit_text_message,
     expire_payment,
+    is_wallet_schema_missing,
     menu,
     normalize_language,
+    order_history_keyboard,
+    order_history_text,
+    parse_broadcast_buttons,
+    parse_wallet_deposit_amount,
     notify_order_success,
     notify_stock_added,
     paginate,
@@ -27,12 +40,16 @@ from app.bot import (
     product_price,
     quantity_limit,
     safe_user_language,
+    send_replacing_screen,
     send_welcome,
     track_payment_message,
+    update_active_screen,
     upload_product_image,
     upload_product_video,
     welcome_keyboard,
     welcome_text,
+    wallet_error_message,
+    wallet_deposit_keyboard,
 )
 import app.bot as bot_module
 from app.security import decrypt_stock, encrypt_stock, stock_fingerprint
@@ -45,19 +62,222 @@ def test_welcome_text_escapes_profile_data_and_handles_missing_username():
     text = welcome_text(user)
 
     assert "&lt;Jing&gt;" in text
-    assert "<code>12345</code>" in text
-    assert "@" not in text
-    assert "មិនមាន" in text
+    assert "LngLiam Roblox" in text
+    assert "ID: 12345" in text
+    assert "└ ឈ្មោះ: &lt;Jing&gt;" in text
+    assert "ទិញ Robux និងសេវាកម្ម Roblox" in text
+    assert "Account" not in text
 
 
-def test_english_welcome_shows_account_details():
-    user = SimpleNamespace(id=12345, first_name="Jing", username="jing")
+def test_english_welcome_promotes_the_shop_and_account_screen_is_separate():
+    user = SimpleNamespace(id=12345, first_name="Jing", last_name="Long", username="jing")
 
     text = welcome_text(user, "en")
+    account = account_text(user, "2.50", "en", is_reseller=True)
 
-    assert "Welcome, Jing" in text
-    assert "<code>12345</code>" in text
-    assert "@jing" in text
+    assert "Welcome to LngLiam Roblox!" in text
+    assert "ID: 12345" in text
+    assert "Name: Jing Long" in text
+    assert "quickly, easily, and securely" in text
+    assert "Choose a service from the menu below" in text
+    assert "Account" in account
+    assert "Full name: Jing Long" in account
+    assert "Username: @jing" in account
+    assert "Account type: Reseller" in account
+    assert "<code>12345</code>" in account
+    assert "$2.50" in account
+
+
+def test_account_text_handles_missing_username_and_last_name():
+    user = SimpleNamespace(id=12345, first_name="Jing", username=None)
+
+    account = account_text(user, "0.00", "en")
+
+    assert "Full name: Jing" in account
+    assert "Username: Not set" in account
+    assert "Account type: Customer" in account
+    assert "Balance: <b>$0.00</b>" in account
+
+
+def test_order_history_shows_empty_message_or_order_details():
+    assert order_history_text([], "km") == "អ្នកមិនទាន់មានការបញ្ជាទិញទេ។"
+    assert order_history_text([], "en") == "You have no orders yet."
+
+    text = order_history_text(
+        [
+            {
+                "id": "order-123456",
+                "product_name": "Robux <Gift>",
+                "quantity": 2,
+                "total": "5.00",
+                "status": "paid",
+                "transaction_id": "txn-456",
+                "created_at": "2026-10-20T09:35:00+07:00",
+            }
+        ],
+        "en",
+    )
+
+    assert "2026-10-20 02:35 UTC" in text
+    assert "Robux &lt;Gift&gt; ×2" in text
+    assert "$5.00" in text
+    assert "txn-456" in text
+    assert "Paid" in text
+
+
+def test_order_history_keyboard_has_previous_and_next_pagination_buttons():
+    markup = order_history_keyboard(1, True, "en")
+
+    assert [button.text for button in markup.inline_keyboard[0]] == ["⏮️ Prev", "Next ⏭️"]
+    assert [button.callback_data for button in markup.inline_keyboard[0]] == [
+        "history:page:0",
+        "history:page:2",
+    ]
+
+    first_page = order_history_keyboard(0, False, "en")
+    assert len(first_page.inline_keyboard) == 1
+    assert first_page.inline_keyboard[0][0].callback_data == "home"
+
+
+def test_broadcast_button_parser_accepts_multiple_http_links_and_rejects_invalid_urls():
+    buttons = parse_broadcast_buttons(
+        "Shop | https://example.com/shop\nSupport | https://t.me/example"
+    )
+
+    assert buttons == [
+        {"text": "Shop", "url": "https://example.com/shop"},
+        {"text": "Support", "url": "https://t.me/example"},
+    ]
+    assert parse_broadcast_buttons("-") == []
+    with pytest.raises(ValueError):
+        parse_broadcast_buttons("Bad | javascript:alert(1)")
+    with pytest.raises(ValueError):
+        parse_broadcast_buttons("\n".join(f"Link {index} | https://example.com/{index}" for index in range(9)))
+
+
+def test_broadcast_preview_keyboard_contains_send_now_and_schedule_actions():
+    markup = broadcast_draft_keyboard("preview", "en")
+
+    buttons = [button for row in markup.inline_keyboard for button in row]
+    assert buttons[0].text == "📣 Send now"
+    assert buttons[0].callback_data == "admin:broadcast:send"
+    assert buttons[1].text == "🕒 Schedule"
+    assert buttons[1].callback_data == "admin:broadcast:schedule"
+
+
+def test_broadcast_destinations_deduplicates_users_and_notification_chats():
+    async def run_test():
+        store = SimpleNamespace(
+            stock_notification_users=AsyncMock(
+                return_value=[
+                    {"telegram_id": 123, "language": "km"},
+                    {"telegram_id": 456, "language": "en"},
+                ]
+            ),
+            bot_settings=AsyncMock(
+                return_value={
+                    "stock_notification_chat_ids": "123,-1001,@shop",
+                    "order_notification_chat_ids": "-1001,@orders",
+                }
+            ),
+        )
+
+        settings = SimpleNamespace(
+            stock_notification_chat_ids="-1001,@legacy",
+            order_notification_chat_ids="@orders",
+        )
+        assert await broadcast_destinations(store, settings) == [
+            123,
+            456,
+            -1001,
+            "@shop",
+            "@legacy",
+            "@orders",
+        ]
+
+    asyncio.run(run_test())
+
+
+def test_copy_broadcast_content_preserves_albums_and_adds_url_buttons():
+    async def run_test():
+        bot = SimpleNamespace(
+            copy_messages=AsyncMock(
+                return_value=[
+                    SimpleNamespace(message_id=101),
+                    SimpleNamespace(message_id=102),
+                    SimpleNamespace(message_id=103),
+                    SimpleNamespace(message_id=104),
+                ]
+            ),
+            send_message=AsyncMock(return_value=SimpleNamespace(message_id=105)),
+        )
+        content = [
+            {"message_id": 13, "media_group_id": None},
+            {"message_id": 12, "media_group_id": "album"},
+            {"message_id": 11, "media_group_id": "album"},
+            {"message_id": 10, "media_group_id": None},
+        ]
+        buttons = [{"text": "Shop", "url": "https://example.com"}]
+
+        copied = await copy_broadcast_content(bot, 123, 999, content, buttons)
+
+        assert copied == [101, 102, 103, 104, 105]
+        bot.copy_messages.assert_awaited_once_with(
+            chat_id=123,
+            from_chat_id=999,
+            message_ids=[10, 11, 12, 13],
+        )
+        assert bot.send_message.await_args.kwargs["reply_markup"].inline_keyboard[0][0].url == "https://example.com"
+
+    asyncio.run(run_test())
+
+
+def test_execute_broadcast_reports_success_and_respects_cancel_request():
+    async def run_test():
+        bot = SimpleNamespace(
+            copy_messages=AsyncMock(return_value=[SimpleNamespace(message_id=20)]),
+            send_message=AsyncMock(return_value=SimpleNamespace(message_id=21)),
+        )
+        store = SimpleNamespace(
+            stock_notification_users=AsyncMock(
+                return_value=[{"telegram_id": 123, "language": "km"}]
+            ),
+            bot_settings=AsyncMock(return_value={}),
+        )
+        progress = SimpleNamespace(edit_text=AsyncMock())
+        event = asyncio.Event()
+
+        result = await execute_broadcast(
+            bot,
+            store,
+            999,
+            [{"message_id": 10, "media_group_id": None}],
+            [],
+            progress,
+            event,
+        )
+
+        assert result == (1, 0, False)
+        bot.copy_messages.assert_awaited_once_with(
+            chat_id=123,
+            from_chat_id=999,
+            message_ids=[10],
+        )
+        assert "Sent / បានផ្ញើ: 1" in progress.edit_text.await_args.args[0]
+
+        event.set()
+        cancelled_result = await execute_broadcast(
+            bot,
+            store,
+            999,
+            [{"message_id": 10, "media_group_id": None}],
+            [],
+            progress,
+            event,
+        )
+        assert cancelled_result == (0, 0, True)
+
+    asyncio.run(run_test())
 
 
 def test_language_helpers_normalize_supported_locale_variants():
@@ -75,9 +295,24 @@ def test_language_helpers_normalize_supported_locale_variants():
     asyncio.run(run_test())
 
 
-def test_welcome_sends_buy_now_reply_button_and_saves_profile():
+def test_bot_setting_section_resolves_all_settings_to_their_screen():
+    assert bot_setting_section("welcome_photo_url") == "media"
+    assert bot_setting_section("welcome_video_url") == "media"
+    assert bot_setting_section("how_to_buy_video_url") == "media"
+    assert bot_setting_section("how_to_buy_caption") == "captions"
+    assert bot_setting_section("how_to_buy_caption_km") == "captions"
+    assert bot_setting_section("how_to_buy_caption_en") == "captions"
+    assert "channel_install_link" not in bot_module.BOT_SETTING_LABELS
+    assert bot_setting_section("support_username") == "shop"
+    assert bot_setting_section("stock_notification_chat_ids") == "notifications"
+    assert bot_setting_section("order_notification_chat_ids") == "notifications"
+
+
+def test_welcome_sends_the_new_shop_keyboard_and_saves_profile():
     async def run_test():
         bot_module.welcome_message_ids.clear()
+        bot_module.menu_keyboard_messages.clear()
+        bot_module.active_screen_messages.clear()
         user = SimpleNamespace(id=12345, first_name="Jing", username="jing")
         sent_message = SimpleNamespace(message_id=789)
         message = SimpleNamespace(from_user=user, answer=AsyncMock(return_value=sent_message), bot=SimpleNamespace())
@@ -94,9 +329,16 @@ def test_welcome_sends_buy_now_reply_button_and_saves_profile():
         message.answer.assert_awaited_once()
         sent_text = message.answer.call_args.args[0]
         sent_markup = message.answer.call_args.kwargs["reply_markup"]
-        assert "សូមស្វាគមន៍ Jing" in sent_text
-        assert sent_markup.keyboard[0][0].text == "🛍 BUY NOW"
+        assert "សូមស្វាគមន៍មកកាន់ LngLiam Roblox!" in sent_text
+        assert "ID: 12345" in sent_text
+        assert "ឈ្មោះ: Jing" in sent_text
+        assert [button.text for button in sent_markup.keyboard[0]] == ["👤 Account", "💰 Add funds"]
+        assert sent_markup.keyboard[1][0].text == "🎮 Games Service"
+        assert [button.text for button in sent_markup.keyboard[2]] == ["🛒 My Orders", "🎥 How to Buy"]
+        assert all("Roblox" not in button.text for row in sent_markup.keyboard for button in row)
+        assert isinstance(sent_markup, bot_module.ReplyKeyboardMarkup)
         assert bot_module.welcome_message_ids[user.id] == sent_message.message_id
+        assert bot_module.menu_keyboard_messages[user.id] is sent_message
 
     asyncio.run(run_test())
 
@@ -123,13 +365,13 @@ def test_welcome_uses_configured_photo_preview():
 
         message.answer_photo.assert_awaited_once()
         assert message.answer_photo.await_args.kwargs["photo"] == "https://images.example/welcome.png"
-        assert message.answer_photo.await_args.kwargs["reply_markup"].keyboard[0][0].text == "🛍 BUY NOW"
+        assert message.answer_photo.await_args.kwargs["reply_markup"].keyboard[0][0].text == "👤 Account"
         message.answer.assert_not_awaited()
 
     asyncio.run(run_test())
 
 
-def test_welcome_lists_database_categories():
+def test_welcome_keeps_categories_out_of_the_main_promo_copy():
     user = SimpleNamespace(id=12345, first_name="Jing", username="jing")
 
     text = welcome_text(
@@ -140,10 +382,8 @@ def test_welcome_lists_database_categories():
         ],
     )
 
-    assert "Gift Cards</b> (Instant delivery)" in text
-    assert "VPN &amp; Tools</b> (Secure access)" in text
-    assert "├─ 🛍" in text
-    assert "└─ 🛍" in text
+    assert "Gift Cards" not in text
+    assert "VPN" not in text
 
 
 def test_quantity_limit_matches_available_stock_and_order_cap():
@@ -222,13 +462,106 @@ def test_menu_uses_dynamic_tutorial_callback_and_groups_language_support():
     assert [button.callback_data for button in markup.inline_keyboard[3]] == ["language", "support"]
 
 
-def test_admin_welcome_keyboard_places_buy_now_at_the_bottom():
+def test_admin_welcome_keyboard_includes_admin_access_and_store_actions():
     markup = welcome_keyboard(12345, SimpleNamespace(admin_ids={12345}))
 
-    assert [[button.text for button in row] for row in markup.keyboard] == [
-        ["⚙️ ADMIN"],
-        ["🛍 BUY NOW"],
+    rows = [[button.text for button in row] for row in markup.keyboard]
+    assert rows[0] == ["⚙️ ADMIN"]
+    assert rows[1] == ["👤 Account", "💰 Add funds"]
+    assert rows[2] == ["🎮 Games Service"]
+    assert rows[3] == ["🛒 My Orders", "🎥 How to Buy"]
+    assert all("Roblox" not in button for row in rows for button in row)
+
+
+def test_wallet_deposit_keyboard_has_presets_custom_and_back():
+    markup = wallet_deposit_keyboard("en")
+
+    assert [[button.text for button in row] for row in markup.inline_keyboard] == [
+        ["$1", "$5", "$10"],
+        ["$15", "$20", "$50"],
+        ["✏️ Custom amount"],
+        ["⬅️ Back"],
     ]
+
+
+def test_custom_wallet_amount_is_parsed_to_the_exact_supported_amount():
+    assert parse_wallet_deposit_amount("12.5") == Decimal("12.5")
+    assert parse_wallet_deposit_amount("500.00") == Decimal("500.00")
+
+
+def test_wallet_amount_rejects_values_outside_limits_or_precision():
+    for amount in ("0.99", "500.01", "1.001", "not-a-number", "NaN", "Infinity"):
+        try:
+            parse_wallet_deposit_amount(amount, "en")
+        except ValueError as exc:
+            assert "Amount" in str(exc) or "valid" in str(exc)
+        else:
+            raise AssertionError(f"Expected invalid amount {amount!r} to be rejected")
+
+
+def test_wallet_schema_error_detection_only_matches_missing_wallet_tables():
+    missing_wallet_table = RuntimeError(
+        "PGRST205: Could not find the table 'public.user_wallets' in the schema cache"
+    )
+    missing_product_table = RuntimeError(
+        "PGRST205: Could not find the table 'public.products' in the schema cache"
+    )
+
+    assert is_wallet_schema_missing(missing_wallet_table)
+    assert not is_wallet_schema_missing(missing_product_table)
+    assert not is_wallet_schema_missing(RuntimeError("Network timeout"))
+    assert "run the latest schema.sql" in wallet_error_message(
+        "en",
+        missing_wallet_table,
+        is_admin=True,
+    )
+    assert "shop admin" in wallet_error_message("en", missing_wallet_table)
+
+
+def test_wallet_balance_defaults_to_zero_when_supabase_returns_no_row_or_response():
+    async def run_test():
+        for response in (None, SimpleNamespace(data=None), SimpleNamespace(data={})):
+            query = Mock()
+            query.select.return_value = query
+            query.eq.return_value = query
+            query.maybe_single.return_value = query
+            query.execute = AsyncMock(return_value=response)
+            client = SimpleNamespace(table=Mock(return_value=query))
+
+            assert await Store(client).wallet_balance(12345) == "0.00"
+
+        query = Mock()
+        query.select.return_value = query
+        query.eq.return_value = query
+        query.maybe_single.return_value = query
+        query.execute = AsyncMock(return_value=SimpleNamespace(data={"balance": "12.50"}))
+        client = SimpleNamespace(table=Mock(return_value=query))
+        assert await Store(client).wallet_balance(12345) == "12.50"
+
+    asyncio.run(run_test())
+
+
+def test_wallet_deposit_completion_credits_once_and_notifies_user():
+    async def run_test():
+        bot = SimpleNamespace(delete_message=AsyncMock(), send_message=AsyncMock())
+        store = SimpleNamespace(
+            complete_wallet_deposit=AsyncMock(return_value=True),
+            wallet_deposit_message=AsyncMock(return_value={"chat_id": 123, "message_id": 456}),
+            wallet_balance=AsyncMock(return_value="6.00"),
+            clear_payment_message=AsyncMock(),
+            user_language=AsyncMock(return_value="en"),
+        )
+        deposit = {"id": "deposit-123", "chat_id": 123, "amount": "5.00"}
+
+        completed = await complete_wallet_deposit(bot, store, deposit)
+
+        assert completed is True
+        store.complete_wallet_deposit.assert_awaited_once_with("deposit-123")
+        bot.delete_message.assert_awaited_once_with(chat_id=123, message_id=456)
+        assert "$5.00 was added to your wallet!" in bot.send_message.await_args.args[1]
+        assert "New balance: $6.00" in bot.send_message.await_args.args[1]
+
+    asyncio.run(run_test())
 
 
 def test_catalog_pagination_limits_items_and_clamps_page():
@@ -268,6 +601,31 @@ def test_edit_text_message_replaces_photo_with_text_message():
         message.delete.assert_awaited_once_with()
         message.answer.assert_awaited_once_with("Choose a package", parse_mode="HTML", reply_markup=None)
         message.edit_text.assert_not_awaited()
+
+    asyncio.run(run_test())
+
+
+def test_edit_text_message_switches_wallet_prompt_without_adding_duplicate_bubble():
+    async def run_test():
+        message = SimpleNamespace(
+            text="Choose an amount",
+            answer=AsyncMock(),
+            edit_text=AsyncMock(),
+        )
+        markup = SimpleNamespace()
+
+        await edit_text_message(
+            message,
+            "Enter a custom amount",
+            reply_markup=markup,
+        )
+
+        message.edit_text.assert_awaited_once_with(
+            "Enter a custom amount",
+            parse_mode=None,
+            reply_markup=markup,
+        )
+        message.answer.assert_not_awaited()
 
     asyncio.run(run_test())
 
@@ -321,6 +679,90 @@ def test_delete_replaced_message_removes_previous_screen():
         await delete_replaced_message(message)
 
         message.delete.assert_awaited_once_with()
+
+    asyncio.run(run_test())
+
+
+def test_send_replacing_screen_deletes_previous_bot_screen_and_user_input():
+    async def run_test():
+        user_id = 23456
+        previous = SimpleNamespace(message_id=1, delete=AsyncMock())
+        sent = SimpleNamespace(message_id=3)
+        incoming = SimpleNamespace(
+            from_user=SimpleNamespace(id=user_id),
+            message_id=2,
+            answer=AsyncMock(return_value=sent),
+            delete=AsyncMock(),
+        )
+        bot_module.active_screen_messages[user_id] = previous
+        bot_module.welcome_message_ids[user_id] = previous.message_id
+
+        result = await send_replacing_screen(incoming, user_id, "Next screen")
+
+        assert result is sent
+        previous.delete.assert_awaited_once_with()
+        incoming.delete.assert_awaited_once_with()
+        assert bot_module.active_screen_messages[user_id] is sent
+        assert user_id not in bot_module.welcome_message_ids
+        bot_module.active_screen_messages.pop(user_id, None)
+
+    asyncio.run(run_test())
+
+
+def test_switch_active_screen_keeps_menu_keyboard_message_and_replaces_only_screen():
+    async def run_test():
+        user_id = 23458
+        menu_message = SimpleNamespace(message_id=10, delete=AsyncMock())
+        first_screen = SimpleNamespace(message_id=11, delete=AsyncMock())
+        second_screen = SimpleNamespace(message_id=12)
+        bot_module.menu_keyboard_messages[user_id] = menu_message
+        bot_module.welcome_message_ids[user_id] = menu_message.message_id
+        bot_module.active_screen_messages[user_id] = menu_message
+
+        await bot_module.switch_active_screen(user_id, first_screen)
+        assert menu_message.delete.await_count == 0
+        assert bot_module.menu_keyboard_messages[user_id] is menu_message
+        assert bot_module.active_screen_messages[user_id] is first_screen
+
+        await bot_module.switch_active_screen(user_id, second_screen)
+        first_screen.delete.assert_awaited_once_with()
+        assert bot_module.menu_keyboard_messages[user_id] is menu_message
+        assert bot_module.active_screen_messages[user_id] is second_screen
+
+        bot_module.active_screen_messages.pop(user_id, None)
+        bot_module.menu_keyboard_messages.pop(user_id, None)
+        bot_module.welcome_message_ids.pop(user_id, None)
+
+    asyncio.run(run_test())
+
+
+def test_update_active_screen_edits_prompt_and_deletes_user_reply():
+    async def run_test():
+        user_id = 23457
+        updated = SimpleNamespace(message_id=1, text="Updated")
+        prompt = SimpleNamespace(
+            message_id=1,
+            text="Send a value",
+            edit_text=AsyncMock(return_value=updated),
+        )
+        incoming = SimpleNamespace(
+            from_user=SimpleNamespace(id=user_id),
+            message_id=2,
+            delete=AsyncMock(),
+        )
+        bot_module.active_screen_messages[user_id] = prompt
+
+        result = await update_active_screen(
+            user_id,
+            "Saved",
+            input_message=incoming,
+        )
+
+        assert result is updated
+        prompt.edit_text.assert_awaited_once_with("Saved", parse_mode=None, reply_markup=None)
+        incoming.delete.assert_awaited_once_with()
+        assert bot_module.active_screen_messages[user_id] is updated
+        bot_module.active_screen_messages.pop(user_id, None)
 
     asyncio.run(run_test())
 
@@ -579,6 +1021,32 @@ def test_product_creation_persists_a_reseller_price():
     asyncio.run(run_test())
 
 
+def test_product_creation_saves_optional_after_order_message_and_media():
+    async def run_test():
+        query = Mock()
+        query.insert.return_value = query
+        query.select.return_value = query
+        query.execute = AsyncMock(return_value=SimpleNamespace(data=[{"id": "product-123"}]))
+        client = SimpleNamespace(table=Mock(return_value=query))
+
+        await Store(client).create_product(
+            "category-123",
+            "Game code",
+            "1.00",
+            "",
+            delivery_message="Redeem at example.com",
+            delivery_image_url="https://res.cloudinary.com/example/image/upload/delivery.png",
+            delivery_video_url="https://res.cloudinary.com/example/video/upload/guide.mp4",
+        )
+
+        values = query.insert.call_args.args[0]
+        assert values["delivery_message"] == "Redeem at example.com"
+        assert values["delivery_image_url"].endswith("delivery.png")
+        assert values["delivery_video_url"].endswith("guide.mp4")
+
+    asyncio.run(run_test())
+
+
 def test_product_update_changes_fields_and_replaces_media_only_when_requested():
     async def run_test():
         query = Mock()
@@ -608,6 +1076,63 @@ def test_product_update_changes_fields_and_replaces_media_only_when_requested():
             }
         )
         query.eq.assert_called_once_with("id", "product-123")
+
+    asyncio.run(run_test())
+
+
+def test_product_update_can_replace_and_clear_after_order_content():
+    async def run_test():
+        query = Mock()
+        query.update.return_value = query
+        query.eq.return_value = query
+        query.execute = AsyncMock(return_value=SimpleNamespace(data=[]))
+        client = SimpleNamespace(table=Mock(return_value=query))
+
+        await Store(client).update_product(
+            "product-123",
+            "Updated key",
+            "0.50",
+            "0.35",
+            "Updated details",
+            delivery_message="",
+            delivery_image_url=None,
+            delivery_video_url="https://res.cloudinary.com/example/video/upload/guide.mp4",
+            update_delivery=True,
+        )
+
+        values = query.update.call_args.args[0]
+        assert values["delivery_message"] == ""
+        assert values["delivery_image_url"] is None
+        assert values["delivery_video_url"].endswith("guide.mp4")
+
+    asyncio.run(run_test())
+
+
+def test_order_delivery_details_loads_product_delivery_content():
+    async def run_test():
+        order_query = Mock()
+        order_query.select.return_value = order_query
+        order_query.eq.return_value = order_query
+        order_query.maybe_single.return_value = order_query
+        order_query.execute = AsyncMock(
+            return_value=SimpleNamespace(data={"product_id": "product-123"})
+        )
+        product_query = Mock()
+        product_query.select.return_value = product_query
+        product_query.eq.return_value = product_query
+        product_query.maybe_single.return_value = product_query
+        delivery = {
+            "delivery_message": "Redeem now",
+            "delivery_image_url": "https://example.com/image.png",
+            "delivery_video_url": None,
+        }
+        product_query.execute = AsyncMock(return_value=SimpleNamespace(data=delivery))
+        client = SimpleNamespace(table=Mock(side_effect=[order_query, product_query]))
+
+        result = await Store(client).order_delivery_details("order-123")
+
+        assert result == delivery
+        product_query.eq.assert_called_once_with("id", "product-123")
 
     asyncio.run(run_test())
 
@@ -645,6 +1170,90 @@ def test_order_notification_details_loads_order_product_and_customer_profile():
         queries["orders"].eq.assert_called_once_with("id", "order-123")
         queries["products"].eq.assert_called_once_with("id", "product-123")
         queries["users"].eq.assert_called_once_with("telegram_id", 123)
+
+    asyncio.run(run_test())
+
+
+def test_order_history_page_fetches_ten_orders_and_product_names():
+    async def run_test():
+        orders = [
+            {
+                "id": f"order-{index}",
+                "product_id": f"product-{index % 2}",
+                "quantity": 1,
+                "total": "1.00",
+                "status": "paid",
+                "transaction_id": f"txn-{index}",
+                "created_at": "2026-10-20T09:35:00+00:00",
+            }
+            for index in range(11)
+        ]
+        orders_query = Mock()
+        orders_query.select.return_value = orders_query
+        orders_query.eq.return_value = orders_query
+        orders_query.order.return_value = orders_query
+        orders_query.range.return_value = orders_query
+        orders_query.execute = AsyncMock(return_value=SimpleNamespace(data=orders))
+
+        products_query = Mock()
+        products_query.select.return_value = products_query
+        products_query.in_.return_value = products_query
+        products_query.execute = AsyncMock(
+            return_value=SimpleNamespace(
+                data=[
+                    {"id": "product-0", "name": "Robux"},
+                    {"id": "product-1", "name": "Gift card"},
+                ]
+            )
+        )
+        client = SimpleNamespace(table=Mock(side_effect=[orders_query, products_query]))
+
+        result, has_next = await Store(client).order_history_page(12345, page=1)
+
+        assert len(result) == 10
+        assert has_next
+        assert result[0]["product_name"] == "Robux"
+        orders_query.range.assert_called_once_with(10, 20)
+        products_query.in_.assert_called_once_with("id", ["product-0", "product-1"])
+
+    asyncio.run(run_test())
+
+
+def test_scheduled_broadcast_store_operations_use_persistent_job_status():
+    async def run_test():
+        def query_with_result(result):
+            query = Mock()
+            for method in ("insert", "update", "select", "eq", "lte", "order", "limit", "maybe_single"):
+                getattr(query, method).return_value = query
+            query.execute = AsyncMock(return_value=SimpleNamespace(data=result))
+            return query
+
+        create_query = query_with_result([{"id": "job-1"}])
+        due_query = query_with_result([{"id": "job-1", "admin_id": 123, "content": []}])
+        claim_query = query_with_result([{"id": "job-1"}])
+        finish_query = query_with_result(None)
+        client = SimpleNamespace(
+            table=Mock(side_effect=[create_query, due_query, claim_query, finish_query])
+        )
+        store = Store(client)
+
+        job_id = await store.create_scheduled_broadcast(
+            123,
+            "2026-10-30T08:30:00+00:00",
+            [{"message_id": 10, "media_group_id": None}],
+            [{"text": "Shop", "url": "https://example.com"}],
+        )
+        due = await store.due_broadcast_jobs("2026-10-30T08:30:00+00:00")
+        claimed = await store.claim_broadcast_job(job_id)
+        await store.finish_broadcast_job(job_id, "sent", sent=5, failed=1)
+
+        assert job_id == "job-1"
+        assert due[0]["id"] == "job-1"
+        assert claimed
+        due_query.lte.assert_called_once_with("scheduled_at", "2026-10-30T08:30:00+00:00")
+        assert finish_query.update.call_args.args[0]["status"] == "sent"
+        assert finish_query.update.call_args.args[0]["sent_count"] == 5
+        assert finish_query.update.call_args.args[0]["failed_count"] == 1
 
     asyncio.run(run_test())
 
@@ -697,6 +1306,24 @@ def test_order_reservation_passes_telegram_id_for_database_pricing():
             "reserve_order",
             {"p_chat_id": 12345, "p_product_id": "product-123", "p_quantity": 2},
         )
+
+    asyncio.run(run_test())
+
+
+def test_wallet_order_reservation_passes_owner_product_and_quantity():
+    async def run_test():
+        query = Mock()
+        query.execute = AsyncMock(return_value=SimpleNamespace(data={"id": "order-wallet", "total": "2.00"}))
+        client = SimpleNamespace(rpc=Mock(return_value=query))
+
+        order = await Store(client).reserve_wallet_order(12345, "product-123", 2)
+
+        assert order["id"] == "order-wallet"
+        client.rpc.assert_called_once_with(
+            "reserve_wallet_order",
+            {"p_chat_id": 12345, "p_product_id": "product-123", "p_quantity": 2},
+        )
+
 
     asyncio.run(run_test())
 
@@ -876,11 +1503,12 @@ def test_delivery_deletes_payment_qr_before_fulfilling_and_sending_credentials()
         store = SimpleNamespace(
             payment_message=AsyncMock(return_value={"chat_id": 123, "message_id": 456}),
             clear_payment_message=AsyncMock(side_effect=clear_payment_message),
-            bot_settings=AsyncMock(return_value={"channel_install_link": "https://t.me/install_group"}),
+            order_delivery_details=AsyncMock(return_value={}),
+            bot_settings=AsyncMock(return_value={}),
             fulfill_order=AsyncMock(side_effect=fulfill_order),
             mark_delivered=AsyncMock(side_effect=mark_delivered),
         )
-        settings = SimpleNamespace(stock_encryption_key=key, install_group_url="")
+        settings = SimpleNamespace(stock_encryption_key=key)
 
         await deliver_order(bot, store, settings, "order-123", 123)
 
@@ -892,8 +1520,7 @@ def test_delivery_deletes_payment_qr_before_fulfilling_and_sending_credentials()
             "🔑 បញ្ជី Key របស់អ្នក [ សរុប 2 Key ]\n"
             "- <code>FF-1H-KEY-001</code>\n"
             "- <code>FF-1D-KEY-002</code>\n\n"
-            "🙏 អរគុណសម្រាប់ការទិញទំនិញ 🙏\n\n"
-            "📲 ចុចលីងខាងក្រោមដើម្បីដំឡើង 📲",
+            "🙏 អរគុណសម្រាប់ការទិញទំនិញ 🙏",
         )
         assert bot.send_message.await_args.kwargs["parse_mode"] == "HTML"
         buttons = bot.send_message.await_args.kwargs["reply_markup"].inline_keyboard
@@ -901,8 +1528,52 @@ def test_delivery_deletes_payment_qr_before_fulfilling_and_sending_credentials()
         assert buttons[0][0].copy_text.text == "FF-1H-KEY-001"
         assert buttons[1][0].text == "📋 Copy Key 2"
         assert buttons[1][0].copy_text.text == "FF-1D-KEY-002"
-        assert buttons[2][0].text == "👉 ចូលក្រុមដំឡើង"
-        assert buttons[2][0].url == "https://t.me/install_group"
+        assert len(buttons) == 2
+
+    asyncio.run(run_test())
+
+
+def test_delivery_sends_configured_product_message_and_media_before_stock_codes():
+    async def run_test():
+        events = []
+        key = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
+
+        async def send_message(chat_id, text, **kwargs):
+            events.append(("message", text))
+
+        async def send_photo(chat_id, photo, **kwargs):
+            events.append(("photo", photo))
+
+        async def send_video(chat_id, video, **kwargs):
+            events.append(("video", video))
+
+        bot = SimpleNamespace(
+            send_message=AsyncMock(side_effect=send_message),
+            send_photo=AsyncMock(side_effect=send_photo),
+            send_video=AsyncMock(side_effect=send_video),
+        )
+        store = SimpleNamespace(
+            payment_message=AsyncMock(return_value=None),
+            order_delivery_details=AsyncMock(
+                return_value={
+                    "delivery_message": "Redeem <now>",
+                    "delivery_image_url": "https://example.com/instructions.png",
+                    "delivery_video_url": "https://example.com/guide.mp4",
+                }
+            ),
+            fulfill_order=AsyncMock(return_value=[encrypt_stock("CODE-001", key)]),
+            mark_delivered=AsyncMock(),
+        )
+        settings = SimpleNamespace(stock_encryption_key=key, order_notification_chat_ids="")
+
+        await deliver_order(bot, store, settings, "order-123", 123)
+
+        assert events[0] == ("message", "Redeem &lt;now&gt;")
+        assert events[1] == ("photo", "https://example.com/instructions.png")
+        assert events[2] == ("video", "https://example.com/guide.mp4")
+        assert events[3][0] == "message"
+        assert "CODE-001" in events[3][1]
+        store.mark_delivered.assert_awaited_once_with("order-123")
 
     asyncio.run(run_test())
 
