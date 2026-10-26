@@ -1324,7 +1324,7 @@ async def send_welcome(
         return
     if immediate:
         language = normalize_language(
-            language or user_language_cache.get(user.id) or getattr(user, "language_code", None)
+            language or user_language_cache.get(user.id) or "km"
         )
     else:
         language = normalize_language(language or await safe_user_language(store, user.id))
@@ -1516,7 +1516,7 @@ async def deliver_order(bot: Bot, store: Store, settings: Settings, order_id: st
     key_lines = "\n".join(f"- <code>{html.escape(value)}</code>" for value in keys)
     text = (
         "✅ ទំនិញបានជោគជ័យ\n\n"
-        f"🔑 បញ្ជី Key របស់អ្នក [ សរុប {len(keys)} Key ]\n"
+        f"🔑 បញ្ជីទំនិញ របស់អ្នក [ សរុប {len(keys)} Key ]\n"
         f"{key_lines}\n\n"
         "🙏 អរគុណសម្រាប់ការទិញទំនិញ 🙏"
     )
@@ -3986,7 +3986,7 @@ def register_handlers(
         if text.casefold().startswith("/start"):
             language = user_language_cache.get(
                 message.from_user.id,
-                normalize_language(message.from_user.language_code),
+                "km",
             )
             if await handle_broadcast_input(message, language):
                 return
@@ -3998,6 +3998,7 @@ def register_handlers(
             if product_id:
                 product_data = await store.product(product_id)
                 if product_data:
+                    language = await safe_user_language(store, message.from_user.id)
                     await safe_upsert_user(
                         store,
                         message.from_user.id,

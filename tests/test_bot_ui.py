@@ -411,6 +411,41 @@ def test_immediate_welcome_replies_before_database_work():
     asyncio.run(run_test())
 
 
+def test_immediate_welcome_defaults_to_khmer_not_telegram_locale():
+    async def run_test():
+        user_id = 54321
+        bot_module.user_language_cache.pop(user_id, None)
+        user = SimpleNamespace(id=user_id, first_name="Jing", username="jing", language_code="en")
+        sent_message = SimpleNamespace(message_id=793, text="Welcome")
+        message = SimpleNamespace(
+            from_user=user,
+            answer=AsyncMock(return_value=sent_message),
+            delete=AsyncMock(),
+            bot=SimpleNamespace(delete_message=AsyncMock()),
+        )
+        store = SimpleNamespace(
+            user_language=AsyncMock(return_value=None),
+            upsert_user=AsyncMock(),
+            bot_settings=AsyncMock(return_value={}),
+        )
+
+        await send_welcome(message, store, SimpleNamespace(admin_ids=set()), immediate=True)
+
+        assert "សូមស្វាគមន៍មកកាន់ LngLiam Roblox!" in message.answer.call_args.args[0]
+        await asyncio.gather(*tuple(bot_module.welcome_setup_tasks))
+        if bot_module.welcome_settings_task:
+            await bot_module.welcome_settings_task
+
+        store.upsert_user.assert_awaited_once_with(user_id, "jing", "Jing", "km")
+        assert bot_module.user_language_cache[user_id] == "km"
+        bot_module.user_language_cache.pop(user_id, None)
+        bot_module.welcome_message_ids.pop(user_id, None)
+        bot_module.menu_keyboard_messages.pop(user_id, None)
+        bot_module.active_screen_messages.pop(user_id, None)
+
+    asyncio.run(run_test())
+
+
 def test_welcome_uses_configured_photo_preview():
     async def run_test():
         bot_module.welcome_message_ids.pop(12345, None)
