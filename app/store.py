@@ -1,14 +1,67 @@
+import asyncio
 from datetime import datetime, timezone
 from typing import Any
 
+import httpx
 from supabase import AsyncClient
 
 from app.security import encrypt_stock, stock_fingerprint
 
 
+class _RetryingRequestBuilder:
+    def __init__(self, builder: Any) -> None:
+        self._builder = builder
+
+    def __getattr__(self, name: str) -> Any:
+        attr = getattr(self._builder, name)
+        if not callable(attr):
+            return attr
+
+        def wrapper(*args: Any, **kwargs: Any) -> "_RetryingRequestBuilder":
+            return _RetryingRequestBuilder(attr(*args, **kwargs))
+
+        return wrapper
+
+    async def execute(self, *args: Any, **kwargs: Any) -> Any:
+        last_error: Exception | None = None
+        for attempt in range(3):
+            try:
+                return await self._builder.execute(*args, **kwargs)
+            except (
+                asyncio.TimeoutError,
+                TimeoutError,
+                OSError,
+                httpx.ReadTimeout,
+                httpx.ConnectTimeout,
+                httpx.TimeoutException,
+                httpx.TransportError,
+            ) as exc:
+                last_error = exc
+                if attempt == 2:
+                    raise
+                await asyncio.sleep(0.5 * (attempt + 1))
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError("Supabase request execution failed without an exception")
+
+
+class _RetryingSupabaseClient:
+    def __init__(self, client: AsyncClient) -> None:
+        self._client = client
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._client, name)
+
+    def table(self, *args: Any, **kwargs: Any) -> _RetryingRequestBuilder:
+        return _RetryingRequestBuilder(self._client.table(*args, **kwargs))
+
+    def rpc(self, *args: Any, **kwargs: Any) -> _RetryingRequestBuilder:
+        return _RetryingRequestBuilder(self._client.rpc(*args, **kwargs))
+
+
 class Store:
     def __init__(self, client: AsyncClient) -> None:
-        self.client = client
+        self.client = _RetryingSupabaseClient(client)
 
     async def upsert_user(self, telegram_id: int, username: str | None, first_name: str, language: str) -> None:
         await self.client.table("users").upsert(
