@@ -9,7 +9,7 @@ import uvicorn
 from aiogram import Bot, Dispatcher
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import RedirectResponse
-from supabase import acreate_client
+from supabase import AsyncClientOptions, acreate_client
 
 from app.bot import (
     complete_wallet_deposit,
@@ -19,6 +19,7 @@ from app.bot import (
     reconcile_broadcasts,
     reconcile_payments,
     register_handlers,
+    schedule_welcome_media_preload,
 )
 from app.config import get_settings
 from app.payments import KHPayClient, verify_webhook_signature
@@ -33,23 +34,30 @@ payments = KHPayClient(settings.khpay_api_key, settings.khpay_base_url, settings
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    supabase = await acreate_client(settings.supabase_url, settings.supabase_service_role_key)
+    supabase = await acreate_client(
+        settings.supabase_url,
+        settings.supabase_service_role_key,
+        options=AsyncClientOptions(postgrest_client_timeout=10),
+    )
     store = Store(supabase)
     app.state.store = store
     register_handlers(dispatcher, bot, store, payments, settings)
     polling_task = asyncio.create_task(dispatcher.start_polling(bot))
     reconcile_task = asyncio.create_task(reconcile_payments(bot, store, payments, settings))
     broadcasts_task = asyncio.create_task(reconcile_broadcasts(bot, store))
+    welcome_settings_task = schedule_welcome_media_preload(store)
     try:
         yield
     finally:
         polling_task.cancel()
         reconcile_task.cancel()
         broadcasts_task.cancel()
+        welcome_settings_task.cancel()
         await asyncio.gather(
             polling_task,
             reconcile_task,
             broadcasts_task,
+            welcome_settings_task,
             return_exceptions=True,
         )
         await bot.session.close()

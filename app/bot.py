@@ -45,6 +45,10 @@ broadcast_active_keys: dict[int, str] = {}
 welcome_message_ids: dict[int, int] = {}
 menu_keyboard_messages: dict[int, Message] = {}
 active_screen_messages: dict[int, Message] = {}
+user_language_cache: dict[int, str] = {}
+welcome_media_cache: dict[str, str] | None = None
+welcome_settings_task: asyncio.Task[None] | None = None
+welcome_setup_tasks: set[asyncio.Task[None]] = set()
 payment_message_ids: dict[str, tuple[int, int]] = {}
 PHNOM_PENH_TIMEZONE = timezone(timedelta(hours=7), "Asia/Phnom_Penh")
 CATALOG_PAGE_SIZE = 8
@@ -327,6 +331,21 @@ def normalize_language(language: str | None) -> str:
     if code.startswith("en"):
         return "en"
     return "km"
+
+
+async def warm_welcome_media_settings(store: Store) -> None:
+    global welcome_media_cache
+    try:
+        welcome_media_cache = await store.bot_settings(("welcome_video_url", "welcome_photo_url"))
+    except Exception:
+        logger.exception("Could not preload welcome media settings")
+
+
+def schedule_welcome_media_preload(store: Store) -> asyncio.Task[None]:
+    global welcome_settings_task
+    if welcome_settings_task is None or welcome_settings_task.done():
+        welcome_settings_task = asyncio.create_task(warm_welcome_media_settings(store))
+    return welcome_settings_task
 
 
 def copy(language: str | None, khmer: str, english: str) -> str:
@@ -1044,10 +1063,12 @@ async def expire_wallet_deposit(bot: Bot, store: Store, deposit: dict[str, Any],
 
 async def safe_user_language(store: Store, telegram_id: int) -> str:
     try:
-        return normalize_language(await store.user_language(telegram_id))
+        language = normalize_language(await store.user_language(telegram_id))
+        user_language_cache[telegram_id] = language
+        return language
     except Exception:
         logger.exception("Could not load language preference for Telegram user %s", telegram_id)
-        return "km"
+        return user_language_cache.get(telegram_id, "km")
 
 
 async def safe_upsert_user(store: Store, telegram_id: int, username: str | None, first_name: str, language: str) -> None:
@@ -1221,11 +1242,144 @@ async def notify_order_success(bot: Bot, store: Store, settings: Settings, order
             )
 
 
-async def send_welcome(message: Message, store: Store, settings: Settings) -> None:
+async def finish_immediate_welcome(
+    message: Message,
+    welcome_message: Message,
+    store: Store,
+    settings: Settings,
+    initial_language: str,
+    previous_message: Message | None,
+    previous_menu_message: Message | None,
+    previous_message_id: int | None,
+) -> None:
     user = message.from_user
     if not user:
         return
-    language = await safe_user_language(store, user.id)
+    if previous_message:
+        try:
+            await delete_replaced_message(previous_message)
+        except Exception:
+            logger.exception("Could not delete previous welcome screen for Telegram user %s", user.id)
+    if previous_menu_message and (
+        previous_message is None
+        or previous_menu_message.message_id != previous_message.message_id
+    ):
+        try:
+            await delete_replaced_message(previous_menu_message)
+        except Exception:
+            logger.exception("Could not delete previous menu for Telegram user %s", user.id)
+    elif not previous_menu_message and previous_message_id and (
+        previous_message is None or previous_message_id != previous_message.message_id
+    ):
+        try:
+            await message.bot.delete_message(chat_id=user.id, message_id=previous_message_id)
+        except Exception:
+            logger.exception("Could not delete previous welcome message %s", previous_message_id)
+    try:
+        await delete_replaced_message(message)
+    except Exception:
+        logger.exception("Could not delete /start command for Telegram user %s", user.id)
+
+    try:
+        saved_language = await store.user_language(user.id)
+    except Exception:
+        logger.exception("Could not load language preference for Telegram user %s", user.id)
+    else:
+        language = normalize_language(saved_language or initial_language)
+        user_language_cache[user.id] = language
+        await safe_upsert_user(store, user.id, user.username, user.first_name, language)
+        if (
+            language != initial_language
+            and active_screen_messages.get(user.id) is welcome_message
+            and welcome_message.text is not None
+        ):
+            try:
+                updated_message = await edit_text_message(
+                    welcome_message,
+                    welcome_text(user, language),
+                    parse_mode="HTML",
+                    reply_markup=welcome_keyboard(user.id, settings),
+                )
+            except Exception:
+                logger.exception("Could not update welcome language for Telegram user %s", user.id)
+            else:
+                active_screen_messages[user.id] = updated_message
+                menu_keyboard_messages[user.id] = updated_message
+                welcome_message_ids[user.id] = updated_message.message_id
+    if welcome_media_cache is None:
+        schedule_welcome_media_preload(store)
+
+
+async def send_welcome(
+    message: Message,
+    store: Store,
+    settings: Settings,
+    language: str | None = None,
+    *,
+    immediate: bool = False,
+) -> None:
+    global welcome_media_cache
+    user = message.from_user
+    if not user:
+        return
+    if immediate:
+        language = normalize_language(
+            language or user_language_cache.get(user.id) or getattr(user, "language_code", None)
+        )
+    else:
+        language = normalize_language(language or await safe_user_language(store, user.id))
+    if immediate:
+        previous_message = active_screen_messages.get(user.id)
+        previous_menu_message = menu_keyboard_messages.get(user.id)
+        previous_message_id = welcome_message_ids.get(user.id)
+        text = welcome_text(user, language)
+        reply_markup = welcome_keyboard(user.id, settings)
+        media_settings = welcome_media_cache or {}
+        if media_settings.get("welcome_video_url"):
+            welcome_message = await message.answer_video(
+                video=media_settings["welcome_video_url"],
+                caption=text,
+                parse_mode="HTML",
+                reply_markup=reply_markup,
+            )
+        elif media_settings.get("welcome_photo_url"):
+            welcome_message = await message.answer_photo(
+                photo=media_settings["welcome_photo_url"],
+                caption=text,
+                parse_mode="HTML",
+                reply_markup=reply_markup,
+            )
+        else:
+            welcome_message = await message.answer(
+                text,
+                parse_mode="HTML",
+                reply_markup=reply_markup,
+            )
+        if active_screen_messages.get(user.id) is previous_message:
+            active_screen_messages.pop(user.id, None)
+        if menu_keyboard_messages.get(user.id) is previous_menu_message:
+            menu_keyboard_messages.pop(user.id, None)
+        if welcome_message_ids.get(user.id) == previous_message_id:
+            welcome_message_ids.pop(user.id, None)
+        welcome_message_ids[user.id] = welcome_message.message_id
+        menu_keyboard_messages[user.id] = welcome_message
+        active_screen_messages[user.id] = welcome_message
+        task = asyncio.create_task(
+            finish_immediate_welcome(
+                message,
+                welcome_message,
+                store,
+                settings,
+                language,
+                previous_message,
+                previous_menu_message,
+                previous_message_id,
+            )
+        )
+        welcome_setup_tasks.add(task)
+        task.add_done_callback(welcome_setup_tasks.discard)
+        return
+
     await safe_upsert_user(store, user.id, user.username, user.first_name, language)
     previous_message = active_screen_messages.pop(user.id, None)
     previous_menu_message = menu_keyboard_messages.pop(user.id, None)
@@ -1249,6 +1403,7 @@ async def send_welcome(message: Message, store: Store, settings: Settings) -> No
     if load_settings:
         try:
             settings_data = await load_settings(("welcome_video_url", "welcome_photo_url"))
+            welcome_media_cache = settings_data
         except Exception:
             logger.exception("Could not load welcome media settings")
     text = welcome_text(user, language)
@@ -1286,6 +1441,7 @@ async def send_home_screen(
     settings: Settings,
     language: str | None = None,
 ) -> Message:
+    global welcome_media_cache
     language = normalize_language(language or await safe_user_language(store, user.id))
     previous_message = active_screen_messages.pop(user.id, None)
     previous_menu_message = menu_keyboard_messages.pop(user.id, None)
@@ -1308,6 +1464,7 @@ async def send_home_screen(
     settings_data: dict[str, str] = {}
     try:
         settings_data = await store.bot_settings(("welcome_video_url", "welcome_photo_url"))
+        welcome_media_cache = settings_data
     except Exception:
         logger.exception("Could not load welcome media settings")
     reply_markup = welcome_keyboard(user.id, settings)
@@ -2000,7 +2157,7 @@ def register_handlers(
     async def show_customer_action(message: Message, user: Any, text: str, language: str) -> bool:
         action = text.strip().casefold()
         if action in {"/start", "start", "🛍 buy now", "buy now"}:
-            await send_welcome(message, store, settings)
+            await send_welcome(message, store, settings, language, immediate=True)
         elif action in {"👤 account", "account"}:
             try:
                 balance = await store.wallet_balance(user.id)
@@ -2349,6 +2506,7 @@ def register_handlers(
         if language not in {"km", "en"}:
             await callback.answer("Unsupported language", show_alert=True)
             return
+        user_language_cache[callback.from_user.id] = language
         try:
             await store.set_user_language(callback.from_user.id, language)
         except Exception:
@@ -3186,6 +3344,7 @@ def register_handlers(
 
     @router.callback_query(F.data.startswith("admin:setting:clear:"))
     async def clear_bot_setting(callback: CallbackQuery) -> None:
+        global welcome_media_cache
         language = await safe_user_language(store, callback.from_user.id)
         if callback.from_user.id not in settings.admin_ids:
             await callback.answer(copy(language, "អ្នកមិនមានសិទ្ធិប្រើប្រាស់ទេ។", "Not authorized."), show_alert=True)
@@ -3209,6 +3368,8 @@ def register_handlers(
             logger.exception("Could not clear bot setting %s", key)
             await callback.answer(copy(language, "មិនអាចរក្សាទុកបានទេ។", "Could not save setting."), show_alert=True)
             return
+        if key in {"welcome_media", "welcome_photo_url", "welcome_video_url"}:
+            welcome_media_cache = None
         await callback.answer(copy(language, "បានលុបតម្លៃរួចរាល់។", "Setting cleared."))
         await show_admin_settings(callback.message, language, "media" if key == "welcome_media" else bot_setting_section(key))
 
@@ -3424,6 +3585,7 @@ def register_handlers(
 
     @router.message(F.photo | F.video)
     async def receive_wizard_media(message: Message) -> None:
+        global welcome_media_cache
         if not message.from_user or message.from_user.id not in settings.admin_ids:
             return
         language = await safe_user_language(store, message.from_user.id)
@@ -3460,6 +3622,7 @@ def register_handlers(
                         "welcome_photo_url" if is_video else "welcome_video_url",
                         "",
                     )
+                    welcome_media_cache = None
             except Exception:
                 logger.exception("Could not upload %s media for admin %s", kind, message.from_user.id)
                 await update_active_screen(
@@ -3816,13 +3979,17 @@ def register_handlers(
 
     @router.message(F.text)
     async def receive_admin_input(message: Message) -> None:
+        global welcome_media_cache
         if not message.from_user:
             return
         text = (message.text or "").strip()
-        language = await safe_user_language(store, message.from_user.id)
-        if await handle_broadcast_input(message, language):
-            return
         if text.casefold().startswith("/start"):
+            language = user_language_cache.get(
+                message.from_user.id,
+                normalize_language(message.from_user.language_code),
+            )
+            if await handle_broadcast_input(message, language):
+                return
             pending_wallet_amount.discard(message.from_user.id)
             pending_admin_media.pop(message.from_user.id, None)
             if pending_admin_input.get(message.from_user.id, (None, None))[0] == "bot_setting":
@@ -3849,7 +4016,10 @@ def register_handlers(
                     )
                     return
                 logger.info("Stock notification link references unavailable product %s", product_id)
-            await send_welcome(message, store, settings)
+            await send_welcome(message, store, settings, language, immediate=True)
+            return
+        language = await safe_user_language(store, message.from_user.id)
+        if await handle_broadcast_input(message, language):
             return
         customer_buttons = {
             "👤 account",
@@ -3909,7 +4079,7 @@ def register_handlers(
         if not has_pending_bot_setting and await show_customer_action(message, message.from_user, text, language):
             return
         if message.from_user.id not in settings.admin_ids:
-            await send_welcome(message, store, settings)
+            await send_welcome(message, store, settings, language)
             return
         wizard = admin_wizards.get(message.from_user.id)
         if wizard:
@@ -4014,7 +4184,7 @@ def register_handlers(
                     ),
                 )
             else:
-                await send_welcome(message, store, settings)
+                await send_welcome(message, store, settings, language)
             return
         action, target_id = pending
         try:
@@ -4035,6 +4205,8 @@ def register_handlers(
                 elif target_id in {"stock_notification_chat_ids", "order_notification_chat_ids"} and len(value) > 2000:
                     raise ValueError(copy(language, "តម្លៃវែងពេក។", "The value is too long."))
                 await store.set_bot_setting(target_id, value)
+                if target_id in {"welcome_photo_url", "welcome_video_url"}:
+                    welcome_media_cache = None
             elif action == "reseller_add":
                 if not text.isdecimal():
                     raise ValueError(copy(language, "សូមបញ្ចូល Telegram ID ជាលេខវិជ្ជមាន។", "Enter a positive numeric Telegram ID."))

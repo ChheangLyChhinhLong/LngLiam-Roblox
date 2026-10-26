@@ -345,6 +345,72 @@ def test_welcome_sends_the_new_shop_keyboard_and_saves_profile():
     asyncio.run(run_test())
 
 
+def test_welcome_uses_preloaded_language_without_a_second_database_lookup():
+    async def run_test():
+        user = SimpleNamespace(id=12345, first_name="Jing", username="jing")
+        sent_message = SimpleNamespace(message_id=791)
+        message = SimpleNamespace(
+            from_user=user,
+            answer=AsyncMock(return_value=sent_message),
+            bot=SimpleNamespace(),
+        )
+        store = SimpleNamespace(
+            user_language=AsyncMock(),
+            upsert_user=AsyncMock(),
+        )
+
+        await send_welcome(message, store, SimpleNamespace(admin_ids=set()), "en")
+
+        store.user_language.assert_not_awaited()
+        store.upsert_user.assert_awaited_once_with(12345, "jing", "Jing", "en")
+        assert "Welcome to LngLiam Roblox!" in message.answer.call_args.args[0]
+
+    asyncio.run(run_test())
+
+
+def test_immediate_welcome_replies_before_database_work():
+    async def run_test():
+        bot_module.welcome_media_cache = None
+        bot_module.user_language_cache.pop(12345, None)
+        user = SimpleNamespace(id=12345, first_name="Jing", username="jing", language_code="en")
+        edited_message = SimpleNamespace(message_id=792, text="Welcome")
+        sent_message = SimpleNamespace(
+            message_id=791,
+            text="Welcome",
+            edit_text=AsyncMock(return_value=edited_message),
+        )
+        message = SimpleNamespace(
+            from_user=user,
+            answer=AsyncMock(return_value=sent_message),
+            delete=AsyncMock(),
+            bot=SimpleNamespace(delete_message=AsyncMock()),
+        )
+        store = SimpleNamespace(
+            user_language=AsyncMock(return_value="km"),
+            upsert_user=AsyncMock(),
+            bot_settings=AsyncMock(return_value={}),
+        )
+
+        await send_welcome(message, store, SimpleNamespace(admin_ids=set()), "en", immediate=True)
+
+        message.answer.assert_awaited_once()
+        assert "Welcome to LngLiam Roblox!" in message.answer.call_args.args[0]
+        store.user_language.assert_not_awaited()
+        store.upsert_user.assert_not_awaited()
+        store.bot_settings.assert_not_awaited()
+
+        await asyncio.gather(*tuple(bot_module.welcome_setup_tasks))
+        if bot_module.welcome_settings_task:
+            await bot_module.welcome_settings_task
+
+        store.user_language.assert_awaited_once_with(12345)
+        store.upsert_user.assert_awaited_once_with(12345, "jing", "Jing", "km")
+        store.bot_settings.assert_awaited_once_with(("welcome_video_url", "welcome_photo_url"))
+        assert bot_module.user_language_cache[12345] == "km"
+
+    asyncio.run(run_test())
+
+
 def test_welcome_uses_configured_photo_preview():
     async def run_test():
         bot_module.welcome_message_ids.pop(12345, None)
