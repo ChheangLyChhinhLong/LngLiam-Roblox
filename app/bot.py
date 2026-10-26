@@ -66,8 +66,8 @@ BOT_SETTING_LABELS = {
     "how_to_buy_caption_km": ("Tutorial caption (Khmer)", "ចំណងជើងវីដេអូណែនាំ (ខ្មែរ)"),
     "how_to_buy_caption_en": ("Tutorial caption (English)", "ចំណងជើងវីដេអូណែនាំ (អង់គ្លេស)"),
     "support_username": ("Support username", "ឈ្មោះអ្នកជំនួយ"),
-    "stock_notification_chat_ids": ("Stock notification chats", "Group ទទួលដំណឹងស្តុក"),
-    "order_notification_chat_ids": ("Order log chats", "Group ទទួល Order Log"),
+    "stock_notification_chat_ids": ("Stock notification chats (groups/channels)", "Group/Channel ទទួលដំណឹងស្តុក"),
+    "order_notification_chat_ids": ("Order log chats (groups/channels)", "Group/Channel ទទួល Order Log"),
 }
 BOT_SETTING_SECTIONS = {
     "captions": (
@@ -99,6 +99,27 @@ def bot_setting_section(key: str) -> str:
 
 def keyboard(rows: list[list[InlineKeyboardButton]]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def package_id_from_start(text: str) -> str | None:
+    parts = text.split(maxsplit=1)
+    if not parts or parts[0].split("@", 1)[0].casefold() != "/start" or len(parts) < 2:
+        return None
+    payload = parts[1].strip()
+    prefix = "package_"
+    if not payload.startswith(prefix) or len(payload) > 64:
+        return None
+    if not all(
+        character in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-"
+        for character in payload
+    ):
+        return None
+    product_id = payload[len(prefix) :]
+    return product_id or None
+
+
+def stock_notification_url(bot_username: str, product_id: str) -> str:
+    return f"https://t.me/{bot_username.lstrip('@')}?start=package_{product_id}"
 
 
 def paginate(items: list[Any], page: int) -> tuple[list[Any], int, int]:
@@ -1095,7 +1116,7 @@ async def notify_stock_added(bot: Bot, store: Store, chat_ids: str, product_id: 
                 [
                     InlineKeyboardButton(
                         text=button_text,
-                        url=f"https://t.me/{bot_username.lstrip('@')}",
+                        url=stock_notification_url(bot_username, product_id),
                     )
                 ]
             ]
@@ -2474,7 +2495,7 @@ def register_handlers(
         language: str,
         edit_message: bool = True,
         is_reseller: bool = False,
-    ) -> None:
+    ) -> Message | None:
         stock = await store.available_stock(product_data["id"])
         max_quantity = quantity_limit(stock)
         quantity = min(max(quantity, 1), max_quantity) if max_quantity else 0
@@ -2542,6 +2563,7 @@ def register_handlers(
         video_url = product_data.get("video_url")
         image_url = product_data.get("image_url")
         media_url = video_url or image_url
+        sent_message: Message | None = None
         if media_url:
             if edit_message and (message.photo or message.video):
                 media = (
@@ -2554,7 +2576,7 @@ def register_handlers(
                     reply_markup=markup,
                 )
             elif video_url:
-                await message.answer_video(
+                sent_message = await message.answer_video(
                     video=video_url,
                     caption=text,
                     parse_mode="HTML",
@@ -2563,7 +2585,7 @@ def register_handlers(
                 if edit_message:
                     await delete_replaced_message(message)
             else:
-                await message.answer_photo(
+                sent_message = await message.answer_photo(
                     photo=image_url,
                     caption=text,
                     parse_mode="HTML",
@@ -2577,9 +2599,12 @@ def register_handlers(
         elif edit_message and (message.photo or message.video):
             await message.edit_caption(caption=text, parse_mode="HTML", reply_markup=markup)
         elif not edit_message:
-            await message.answer(text, parse_mode="HTML", reply_markup=markup)
+            sent_message = await message.answer(text, parse_mode="HTML", reply_markup=markup)
         else:
             await message.edit_text(text, parse_mode="HTML", reply_markup=markup)
+        if sent_message and not edit_message and message.from_user:
+            return await switch_active_screen(message.from_user.id, sent_message, message)
+        return sent_message
 
     @router.callback_query(F.data.startswith("qty:"))
     async def change_quantity(callback: CallbackQuery) -> None:
@@ -3802,6 +3827,28 @@ def register_handlers(
             pending_admin_media.pop(message.from_user.id, None)
             if pending_admin_input.get(message.from_user.id, (None, None))[0] == "bot_setting":
                 pending_admin_input.pop(message.from_user.id, None)
+            product_id = package_id_from_start(text)
+            if product_id:
+                product_data = await store.product(product_id)
+                if product_data:
+                    await safe_upsert_user(
+                        store,
+                        message.from_user.id,
+                        message.from_user.username,
+                        message.from_user.first_name,
+                        language,
+                    )
+                    is_reseller = await store.is_reseller(message.from_user.id)
+                    await show_product(
+                        message,
+                        product_data,
+                        1,
+                        language,
+                        edit_message=False,
+                        is_reseller=is_reseller,
+                    )
+                    return
+                logger.info("Stock notification link references unavailable product %s", product_id)
             await send_welcome(message, store, settings)
             return
         customer_buttons = {

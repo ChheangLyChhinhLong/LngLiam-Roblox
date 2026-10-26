@@ -31,6 +31,7 @@ from app.bot import (
     parse_wallet_deposit_amount,
     notify_order_success,
     notify_stock_added,
+    package_id_from_start,
     paginate,
     pagination_row,
     payment_caption,
@@ -42,6 +43,7 @@ from app.bot import (
     safe_user_language,
     send_replacing_screen,
     send_welcome,
+    stock_notification_url,
     track_payment_message,
     update_active_screen,
     upload_product_image,
@@ -1578,7 +1580,7 @@ def test_delivery_sends_configured_product_message_and_media_before_stock_codes(
     asyncio.run(run_test())
 
 
-def test_order_success_notification_sends_order_details_to_configured_group():
+def test_order_success_notification_sends_order_details_to_configured_group_and_channel():
     async def run_test():
         order = {
             "id": "order-123",
@@ -1592,13 +1594,13 @@ def test_order_success_notification_sends_order_details_to_configured_group():
         }
         bot = SimpleNamespace(send_message=AsyncMock())
         store = SimpleNamespace(order_notification_details=AsyncMock(return_value=order))
-        settings = SimpleNamespace(order_notification_chat_ids="-1001234567890,@adminlog")
+        settings = SimpleNamespace(order_notification_chat_ids="-1001234567890,@adminchannel")
 
         await notify_order_success(bot, store, settings, "order-123")
 
         assert [call.args[0] for call in bot.send_message.await_args_list] == [
             -1001234567890,
-            "@adminlog",
+            "@adminchannel",
         ]
         text = bot.send_message.await_args_list[0].args[1]
         assert "ChhinhLong (@chhinhlong)" in text
@@ -1648,12 +1650,23 @@ def test_stock_notification_reaches_users_and_configured_chats_once():
         assert "ចំនួនថ្មី៖ 4" in bot.send_message.await_args_list[1].args[1]
         assert "New quantity: 4" in bot.send_message.await_args_list[2].args[1]
         button = bot.send_message.await_args_list[0].kwargs["reply_markup"].inline_keyboard[0][0]
-        assert button.url == "https://t.me/JingRobloxBot"
+        assert button.url == "https://t.me/JingRobloxBot?start=package_product-123"
         assert button.callback_data is None
         assert bot.send_message.await_args_list[0].kwargs["reply_markup"].inline_keyboard[0][0].text == "🛍 View product"
         assert bot.send_message.await_args_list[1].kwargs["reply_markup"].inline_keyboard[0][0].text == "🛍 មើល Package"
 
     asyncio.run(run_test())
+
+
+def test_stock_notification_start_links_open_the_package_in_private_chat():
+    assert stock_notification_url("@JingRobloxBot", "product-123") == (
+        "https://t.me/JingRobloxBot?start=package_product-123"
+    )
+    assert package_id_from_start("/start package_product-123") == "product-123"
+    assert package_id_from_start("/start@JingRobloxBot package_product-123") == "product-123"
+    assert package_id_from_start("/start") is None
+    assert package_id_from_start("/start package_") is None
+    assert package_id_from_start("/start package_bad%20id") is None
 
 
 def test_stock_notification_skips_duplicate_stock():

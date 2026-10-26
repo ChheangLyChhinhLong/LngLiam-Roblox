@@ -69,8 +69,8 @@ notepad .env
 | `CLOUDINARY_CLOUD_NAME` | ស្រេចចិត្ត | Cloud name; ត្រូវបំពេញជាមួយ API key/secret ប្រសិនបើប្រើរូបភាព ឬវីដេអូ Package។ |
 | `CLOUDINARY_API_KEY` | ស្រេចចិត្ត | Cloudinary API key។ |
 | `CLOUDINARY_API_SECRET` | ស្រេចចិត្ត | Cloudinary API secret; រក្សាសម្ងាត់។ |
-| `STOCK_NOTIFICATION_CHAT_IDS` | ស្រេចចិត្ត | Group/channel IDs ឬ `@channelname` បំបែកដោយក្បៀស។ |
-| `ORDER_NOTIFICATION_CHAT_IDS` | ស្រេចចិត្ត | Telegram Group ID ឬ `@username` សម្រាប់ទទួល Order Log ពេលការទូទាត់ជោគជ័យ និងប្រគល់ Key រួច។ បំបែកច្រើនគោលដៅដោយក្បៀស។ |
+| `STOCK_NOTIFICATION_CHAT_IDS` | ស្រេចចិត្ត | Telegram user ID, Group/Channel chat ID ឬ public `@username` (group/channel) បំបែកដោយក្បៀស។ ប៊ូតុងក្នុងដំណឹងស្តុកនឹងបើក Bot ឯកជននៅ Package ដែលមានស្តុកថ្មី។ |
+| `ORDER_NOTIFICATION_CHAT_IDS` | ស្រេចចិត្ត | Group/Channel chat ID ឬ public `@username` (group/channel) សម្រាប់ទទួល Order Log ពេលការទូទាត់ជោគជ័យ និងប្រគល់ Key រួច។ បំបែកច្រើនគោលដៅដោយក្បៀស។ |
 | `SUPPORT_USERNAME` | ស្រេចចិត្ត | Telegram username របស់ផ្នែក support ដោយមិនចាំបាច់មាន `@`។ |
 | `POLL_INTERVAL_SECONDS` | មាន default | ចន្លោះពេលពិនិត្យ payment background; default `20` វិនាទី។ |
 | `PORT` | មាន default | Port របស់ web service; default `10000`។ Render អាចកំណត់ port ផ្ទាល់។ |
@@ -346,8 +346,9 @@ Admin panel អាចបន្ថែម/កែ Catalog និង Package, បិ
 - រក្សា bot token, Supabase service role key, KHPAY API key/webhook secret, Cloudinary API secret និង stock encryption key ជាសម្ងាត់។ ប្រសិនបើសង្ស័យថាបែកធ្លាយ សូម rotate/revoke key នោះភ្លាមៗ ហើយ update secret នៅ Render។
 - Backup `STOCK_ENCRYPTION_KEY` នៅកន្លែងសុវត្ថិភាពដាច់ពី database។ បើបាត់ key នេះ License Key ដែលបាន encrypt រួចមិនអាចយកមកប្រើបានទេ។
 - កុំបិទ Supabase RLS និងកុំបង្កើត public access policies សម្រាប់ orders/stock។ Backend ប្រើ service-role key ដោយផ្ទាល់។
-- កំណត់ `STOCK_NOTIFICATION_CHAT_IDS` ជា comma-separated IDs/usernames ឧទាហរណ៍ `-1001234567890,@myshopnews`។ បន្ថែម bot ទៅ group/channel និងអនុញ្ញាតឲ្យ post។ Bot ក៏ជូនដំណឹងទៅ users ដែលបានប្រើ bot រួច; អ្នកដែល block bot ឬ chat ដែល bot មិនអាច post បាន នឹងត្រូវរំលង។
-- កំណត់ `ORDER_NOTIFICATION_CHAT_IDS` ជា Telegram Group ID ដូចជា `-1001234567890` (ឬ `@username`) ហើយបន្ថែម bot ទៅ group ដោយអនុញ្ញាតឲ្យផ្ញើសារ។ Order Log មានអតិថិជន, Telegram ID, Package, ចំនួនទឹកប្រាក់/ប្រភេទតម្លៃ, transaction reference និងម៉ោង Asia/Phnom_Penh; ផ្ញើបន្ទាប់ពីទទួល payment និងប្រគល់ Key ជោគជ័យ។
+- `STOCK_NOTIFICATION_CHAT_IDS` និង `ORDER_NOTIFICATION_CHAT_IDS` គាំទ្រទាំង **group និង channel**។ ដាក់ chat ID ជាលេខ (ឧ. `-1001234567890`) សម្រាប់ private group/channel ឬ `@username` សម្រាប់ public group/channel; អាចបញ្ចូលច្រើន ដោយបំបែកជាមួយ comma ឧទាហរណ៍ `-1001234567890,@myshopnews`។ បន្ថែម bot ទៅ group ហើយអនុញ្ញាតឲ្យផ្ញើសារ; សម្រាប់ channel ត្រូវបន្ថែម bot ជា admin ដែលអាច post បាន។
+- `STOCK_NOTIFICATION_CHAT_IDS` ក៏អាចដាក់ Telegram user ID ដើម្បីផ្ញើដំណឹងឯកជន (អ្នកប្រើត្រូវចាប់ផ្តើម Bot មុន)។ Bot ក៏ជូនដំណឹងទៅ users ដែលបានប្រើ bot រួច។ ប៊ូតុង **View product / មើល Package** បើក private chat ជាមួយ Bot ហើយបង្ហាញ Package ដែលមានស្តុកថ្មី។
+- `ORDER_NOTIFICATION_CHAT_IDS` ទទួល Order Log បន្ទាប់ពីទទួល payment និងប្រគល់ Key ជោគជ័យ។ Log មានអតិថិជន, Telegram ID, Package, ចំនួនទឹកប្រាក់/ប្រភេទតម្លៃ, transaction reference និងម៉ោង Asia/Phnom_Penh។
 - License Key ក្នុង database ត្រូវបាន encrypt។ ឯកសារ `.txt` មុន import និងសារ stock ក្នុង Telegram នៅតែជា plaintext ដូច្នេះកុំទុក/បញ្ជូនវាក្នុងកន្លែងមិនមានសុវត្ថិភាព។
 - កុំ run bot local និង Render instance ច្រើនក្នុងពេលតែមួយដោយប្រើ bot token ដូចគ្នា ពេល long polling កំពុងដំណើរការ។
 - ការបង្កើត payment មាន idempotency key ដោយប្រើ order ID។ ការបញ្ជូន order កើតឡើងតែបន្ទាប់ពី KHPAY API បញ្ជាក់ការទូទាត់ប៉ុណ្ណោះ។
