@@ -15,6 +15,7 @@ from app.bot import (
     copy_broadcast_content,
     bot_setting_section,
     copy,
+    checkout_payment_rows,
     complete_wallet_deposit,
     delete_replaced_message,
     deliver_order,
@@ -539,6 +540,32 @@ def test_product_price_uses_reseller_price_only_for_resellers():
 
     assert product_price(product) == Decimal("0.50")
     assert product_price(product, is_reseller=True) == Decimal("0.35")
+
+
+def test_checkout_payment_buttons_show_balance_only_when_it_covers_the_total():
+    no_balance_rows = checkout_payment_rows(
+        "product-123",
+        1,
+        Decimal("1.18"),
+        Decimal("0.00"),
+        "en",
+    )
+    assert [row[0].callback_data for row in no_balance_rows] == ["b:product-123:1"]
+    assert "Pay via ABA" in no_balance_rows[0][0].text
+
+    funded_rows = checkout_payment_rows(
+        "product-123",
+        1,
+        Decimal("1.18"),
+        Decimal("2.00"),
+        "en",
+    )
+    assert [row[0].callback_data for row in funded_rows] == [
+        "bw:product-123:1",
+        "b:product-123:1",
+    ]
+    assert "Pay via balance" in funded_rows[0][0].text
+    assert "Pay via ABA" in funded_rows[1][0].text
 
 
 def test_parse_stock_add_accepts_comma_and_newline_separated_codes():

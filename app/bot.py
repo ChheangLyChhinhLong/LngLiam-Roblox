@@ -732,6 +732,34 @@ def quantity_limit(stock: int) -> int:
     return max(0, min(3, stock))
 
 
+def checkout_payment_rows(
+    product_id: str,
+    quantity: int,
+    total: Decimal,
+    wallet_balance: Decimal,
+    language: str,
+) -> list[list[InlineKeyboardButton]]:
+    rows: list[list[InlineKeyboardButton]] = []
+    if wallet_balance >= total:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=f"💰 {copy(language, 'បង់តាមសមតុល្យ', 'Pay via balance')} • {money(total)}",
+                    callback_data=f"bw:{product_id}:{quantity}",
+                )
+            ]
+        )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                text=f"💳 {copy(language, 'បង់តាម ABA', 'Pay via ABA')} • {money(total)}",
+                callback_data=f"b:{product_id}:{quantity}",
+            )
+        ]
+    )
+    return rows
+
+
 def parse_product_caption(caption: str, language: str = "km") -> tuple[str, str, str, str]:
     fields = [field.strip() for field in caption.split("|", 3)]
     if len(fields) < 2 or not fields[0] or not fields[1]:
@@ -2679,22 +2707,14 @@ def register_handlers(
             )
             total = unit_price * quantity
             wallet_balance = Decimal(str(await store.wallet_balance(message.chat.id if message.chat else 0)))
-            if wallet_balance >= total:
-                rows.append(
-                    [
-                        InlineKeyboardButton(
-                            text=f"💰 {copy(language, 'បង់ដោយសមតុល្យ', 'Pay with balance')} • {money(total)}",
-                            callback_data=f"bw:{product_data['id']}:{quantity}",
-                        )
-                    ]
+            rows.extend(
+                checkout_payment_rows(
+                    product_data["id"],
+                    quantity,
+                    total,
+                    wallet_balance,
+                    language,
                 )
-            rows.append(
-                [
-                    InlineKeyboardButton(
-                        text=f"💳 {copy(language, 'បង់ប្រាក់', 'Pay')} • {money(total)}",
-                        callback_data=f"b:{product_data['id']}:{quantity}",
-                    )
-                ]
             )
         else:
             rows.append([InlineKeyboardButton(text=copy(language, "អស់ស្តុក", "Out of stock"), callback_data="noop")])
