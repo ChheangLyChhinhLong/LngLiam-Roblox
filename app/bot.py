@@ -359,7 +359,7 @@ def payment_caption(
         f"🟢 <b>{copy(language, 'នៅសល់ត្រូវបង់៖', 'Remaining to pay:')}</b> ${total}\n"
         f"🏷 <b>{copy(language, 'លេខយោង៖', 'Ref:')}</b> <code>{html.escape(transaction_ref)}</code>\n"
         f"⏱ <b>{copy(language, 'ស្កេន KHQR ដើម្បីបញ្ចប់ការទូទាត់។', 'Scan KHQR to complete payment.')}</b>\n"
-        f"⏰ <b>{copy(language, 'អ្នកមានពេល 4 នាទីដើម្បីទូទាត់។ QR code នឹងផុតកំណត់ដោយស្វ័យប្រវត្តិ។', 'You have 4 minutes to pay. The QR refreshes itself.')}</b>"
+        f"⏰ <b>{copy(language, 'អ្នកមានពេល 10 នាទីដើម្បីទូទាត់។ QR code នឹងផុតកំណត់ដោយស្វ័យប្រវត្តិ។', 'You have 10 minutes to pay. The QR refreshes itself.')}</b>"
     )
 
 
@@ -759,11 +759,7 @@ def welcome_text(
             "🔑 Buy digital keys, codes, and other digital products quickly and securely.\n\n"
             "Choose a product from the menu below to get started."
         )
-    greeting = (
-        f"សូមស្វាគមន៍មកកាន់ {shop_name}!"
-        if shop_name
-        else "សូមស្វាគមន៍!"
-    )
+    greeting = f"សូមស្វាគមន៍មកកាន់ {shop_name}!" if shop_name else "សូមស្វាគមន៍!"
     return (
         f"💎 <b>{greeting}</b>\n\n"
         "📋 <b>ព័ត៌មានគណនី</b>\n"
@@ -1407,13 +1403,13 @@ async def notify_stock_added(
     )
 
 
-async def notify_order_success(
-    bot: Bot, store: Store, order_id: str
-) -> None:
+async def notify_order_success(bot: Bot, store: Store, order_id: str) -> None:
     try:
         destinations_setting = (
-            await store.bot_settings(("order_notification_chat_ids",))
-        ).get("order_notification_chat_ids", "").strip()
+            (await store.bot_settings(("order_notification_chat_ids",)))
+            .get("order_notification_chat_ids", "")
+            .strip()
+        )
     except Exception:
         logger.exception("Could not load order notification settings")
         return
@@ -5408,9 +5404,7 @@ def register_handlers(
                 added = await store.import_stock(
                     product_id, credentials, settings.stock_encryption_key
                 )
-                await notify_stock_added(
-                    bot, store, product_id, added
-                )
+                await notify_stock_added(bot, store, product_id, added)
                 await send_replacing_screen(
                     message,
                     message.from_user.id,
@@ -5551,9 +5545,7 @@ def register_handlers(
                 added = await store.import_stock(
                     target_id, credentials, settings.stock_encryption_key
                 )
-                await notify_stock_added(
-                    bot, store, target_id, added
-                )
+                await notify_stock_added(bot, store, target_id, added)
             elif action == "stock_remove":
                 credentials = [
                     line.strip() for line in text.splitlines() if line.strip()
@@ -5776,9 +5768,7 @@ def register_handlers(
             )
             return
         pending_stock_upload.pop(message.from_user.id, None)
-        await notify_stock_added(
-            bot, store, product_id, added
-        )
+        await notify_stock_added(bot, store, product_id, added)
         await update_active_screen(
             message.from_user.id,
             copy(
