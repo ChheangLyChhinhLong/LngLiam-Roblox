@@ -65,10 +65,12 @@ def test_welcome_text_escapes_profile_data_and_handles_missing_username():
     text = welcome_text(user)
 
     assert "&lt;Jing&gt;" in text
-    assert "LngLiam Roblox" in text
+    assert "LngLiam!" in text
+    assert "Digital" in text
     assert "ID: 12345" in text
     assert "└ ឈ្មោះ: &lt;Jing&gt;" in text
-    assert "ទិញ Robux និងសេវាកម្ម Roblox" in text
+    assert "Digital Key, Code" in text
+    assert "Roblox" not in text
     assert "Account" not in text
 
 
@@ -78,11 +80,12 @@ def test_english_welcome_promotes_the_shop_and_account_screen_is_separate():
     text = welcome_text(user, "en")
     account = account_text(user, "2.50", "en", is_reseller=True)
 
-    assert "Welcome to LngLiam Roblox!" in text
+    assert "Welcome to LngLiam Digital Shop!" in text
     assert "ID: 12345" in text
     assert "Name: Jing Long" in text
-    assert "quickly, easily, and securely" in text
-    assert "Choose a service from the menu below" in text
+    assert "digital keys, codes, and other digital products" in text
+    assert "Choose a product from the menu below" in text
+    assert "Roblox" not in text
     assert "Account" in account
     assert "Full name: Jing Long" in account
     assert "Username: @jing" in account
@@ -185,16 +188,11 @@ def test_broadcast_destinations_deduplicates_users_and_notification_chats():
             ),
         )
 
-        settings = SimpleNamespace(
-            stock_notification_chat_ids="-1001,@legacy",
-            order_notification_chat_ids="@orders",
-        )
-        assert await broadcast_destinations(store, settings) == [
+        assert await broadcast_destinations(store) == [
             123,
             456,
             -1001,
             "@shop",
-            "@legacy",
             "@orders",
         ]
 
@@ -307,6 +305,7 @@ def test_bot_setting_section_resolves_all_settings_to_their_screen():
     assert bot_setting_section("how_to_buy_caption_en") == "captions"
     assert "channel_install_link" not in bot_module.BOT_SETTING_LABELS
     assert bot_setting_section("support_username") == "shop"
+    assert bot_setting_section("install_group_url") == "shop"
     assert bot_setting_section("stock_notification_chat_ids") == "notifications"
     assert bot_setting_section("order_notification_chat_ids") == "notifications"
 
@@ -332,11 +331,11 @@ def test_welcome_sends_the_new_shop_keyboard_and_saves_profile():
         message.answer.assert_awaited_once()
         sent_text = message.answer.call_args.args[0]
         sent_markup = message.answer.call_args.kwargs["reply_markup"]
-        assert "សូមស្វាគមន៍មកកាន់ LngLiam Roblox!" in sent_text
+        assert "សូមស្វាគមន៍មកកាន់ហាង Digital របស់ LngLiam!" in sent_text
         assert "ID: 12345" in sent_text
         assert "ឈ្មោះ: Jing" in sent_text
         assert [button.text for button in sent_markup.keyboard[0]] == ["👤 Account", "💰 Add funds"]
-        assert sent_markup.keyboard[1][0].text == "🎮 Games Service"
+        assert sent_markup.keyboard[1][0].text == "🛍 Digital Products"
         assert [button.text for button in sent_markup.keyboard[2]] == ["🛒 My Orders", "🎥 How to Buy"]
         assert all("Roblox" not in button.text for row in sent_markup.keyboard for button in row)
         assert isinstance(sent_markup, bot_module.ReplyKeyboardMarkup)
@@ -364,7 +363,7 @@ def test_welcome_uses_preloaded_language_without_a_second_database_lookup():
 
         store.user_language.assert_not_awaited()
         store.upsert_user.assert_awaited_once_with(12345, "jing", "Jing", "en")
-        assert "Welcome to LngLiam Roblox!" in message.answer.call_args.args[0]
+        assert "Welcome to LngLiam Digital Shop!" in message.answer.call_args.args[0]
 
     asyncio.run(run_test())
 
@@ -395,7 +394,7 @@ def test_immediate_welcome_replies_before_database_work():
         await send_welcome(message, store, SimpleNamespace(admin_ids=set()), "en", immediate=True)
 
         message.answer.assert_awaited_once()
-        assert "Welcome to LngLiam Roblox!" in message.answer.call_args.args[0]
+        assert "Welcome to LngLiam Digital Shop!" in message.answer.call_args.args[0]
         store.user_language.assert_not_awaited()
         store.upsert_user.assert_not_awaited()
         store.bot_settings.assert_not_awaited()
@@ -432,7 +431,7 @@ def test_immediate_welcome_defaults_to_khmer_not_telegram_locale():
 
         await send_welcome(message, store, SimpleNamespace(admin_ids=set()), immediate=True)
 
-        assert "សូមស្វាគមន៍មកកាន់ LngLiam Roblox!" in message.answer.call_args.args[0]
+        assert "សូមស្វាគមន៍មកកាន់ហាង Digital របស់ LngLiam!" in message.answer.call_args.args[0]
         await asyncio.gather(*tuple(bot_module.welcome_setup_tasks))
         if bot_module.welcome_settings_task:
             await bot_module.welcome_settings_task
@@ -580,7 +579,7 @@ def test_parse_stock_add_ignores_other_text_and_rejects_missing_credentials():
     try:
         parse_stock_add("addstock product-123 |  ")
     except ValueError as exc:
-        assert "License Key" in str(exc)
+        assert "Digital Key" in str(exc)
     else:
         raise AssertionError("Expected empty stock data to be rejected")
 
@@ -598,8 +597,9 @@ def test_admin_welcome_keyboard_includes_admin_access_and_store_actions():
     rows = [[button.text for button in row] for row in markup.keyboard]
     assert rows[0] == ["⚙️ ADMIN"]
     assert rows[1] == ["👤 Account", "💰 Add funds"]
-    assert rows[2] == ["🎮 Games Service"]
+    assert rows[2] == ["🛍 Digital Products"]
     assert rows[3] == ["🛒 My Orders", "🎥 How to Buy"]
+    assert rows[4] == ["🔗 Install Group"]
     assert all("Roblox" not in button for row in rows for button in row)
 
 
@@ -1647,16 +1647,16 @@ def test_delivery_deletes_payment_qr_before_fulfilling_and_sending_credentials()
         assert bot.send_message.await_args.args == (
             123,
             "✅ ទំនិញបានជោគជ័យ\n\n"
-            "🔑 បញ្ជី Key របស់អ្នក [ សរុប 2 Key ]\n"
+            "🔑 បញ្ជីទំនិញ របស់អ្នក [ សរុប 2 កូដ ]\n"
             "- <code>FF-1H-KEY-001</code>\n"
             "- <code>FF-1D-KEY-002</code>\n\n"
             "🙏 អរគុណសម្រាប់ការទិញទំនិញ 🙏",
         )
         assert bot.send_message.await_args.kwargs["parse_mode"] == "HTML"
         buttons = bot.send_message.await_args.kwargs["reply_markup"].inline_keyboard
-        assert buttons[0][0].text == "📋 Copy Key 1"
+        assert buttons[0][0].text == "📋 ចំលងកូដ 1"
         assert buttons[0][0].copy_text.text == "FF-1H-KEY-001"
-        assert buttons[1][0].text == "📋 Copy Key 2"
+        assert buttons[1][0].text == "📋 ចំលងកូដ 2"
         assert buttons[1][0].copy_text.text == "FF-1D-KEY-002"
         assert len(buttons) == 2
 
@@ -1694,7 +1694,7 @@ def test_delivery_sends_configured_product_message_and_media_before_stock_codes(
             fulfill_order=AsyncMock(return_value=[encrypt_stock("CODE-001", key)]),
             mark_delivered=AsyncMock(),
         )
-        settings = SimpleNamespace(stock_encryption_key=key, order_notification_chat_ids="")
+        settings = SimpleNamespace(stock_encryption_key=key)
 
         await deliver_order(bot, store, settings, "order-123", 123)
 
@@ -1721,10 +1721,16 @@ def test_order_success_notification_sends_order_details_to_configured_group_and_
             "customer": {"first_name": "ChhinhLong", "username": "chhinhlong"},
         }
         bot = SimpleNamespace(send_message=AsyncMock())
-        store = SimpleNamespace(order_notification_details=AsyncMock(return_value=order))
-        settings = SimpleNamespace(order_notification_chat_ids="-1001234567890,@adminchannel")
+        store = SimpleNamespace(
+            order_notification_details=AsyncMock(return_value=order),
+            bot_settings=AsyncMock(
+                return_value={
+                    "order_notification_chat_ids": "-1001234567890,@adminchannel"
+                }
+            ),
+        )
 
-        await notify_order_success(bot, store, settings, "order-123")
+        await notify_order_success(bot, store, "order-123")
 
         assert [call.args[0] for call in bot.send_message.await_args_list] == [
             -1001234567890,
@@ -1737,7 +1743,7 @@ def test_order_success_notification_sends_order_details_to_configured_group_and_
         assert "$1.00 (Reseller Price)" in text
         assert "<code>txn_abc123456</code>" in text
         assert "2026-10-20 16:35:00 (Asia/Phnom_Penh)" in text
-        assert "បង់ប្រាក់រួចរាល់ &amp; ប្រគល់ Key រួចរាល់" in text
+        assert "បង់ប្រាក់រួចរាល់ &amp; ប្រគល់ទំនិញ រួចរាល់" in text
         assert bot.send_message.await_args.kwargs["parse_mode"] == "HTML"
 
     asyncio.run(run_test())
@@ -1765,8 +1771,13 @@ def test_stock_notification_reaches_users_and_configured_chats_once():
                     {"telegram_id": 23456, "language": "km"},
                 ]
             ),
+            bot_settings=AsyncMock(
+                return_value={
+                    "stock_notification_chat_ids": "-100987,@shopnews,-100987"
+                }
+            ),
         )
-        await notify_stock_added(bot, store, "-100987,@shopnews,-100987", "product-123", 4)
+        await notify_stock_added(bot, store, "product-123", 4)
 
         assert [call.args[0] for call in bot.send_message.await_args_list] == [
             12345,
@@ -1804,7 +1815,7 @@ def test_stock_notification_skips_duplicate_stock():
             product=AsyncMock(),
             stock_notification_users=AsyncMock(),
         )
-        await notify_stock_added(bot, store, "@shopnews", "product-123", 0)
+        await notify_stock_added(bot, store, "product-123", 0)
 
         store.product.assert_not_awaited()
         store.stock_notification_users.assert_not_awaited()

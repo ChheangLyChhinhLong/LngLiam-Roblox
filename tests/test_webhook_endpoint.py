@@ -12,7 +12,12 @@ from app import main
 def test_paid_status_webhook_confirms_and_delivers_order(monkeypatch):
     secret = "webhook-secret"
     body = json.dumps(
-        {"status": "paid", "transaction_id": "txn-123", "amount": "5.00"}
+        {
+            "event": "payment.update",
+            "id": 123,
+            "status": "Paid",
+            "amount": 5.0,
+        }
     ).encode()
     signature = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
     store = SimpleNamespace(
@@ -25,7 +30,7 @@ def test_paid_status_webhook_confirms_and_delivers_order(monkeypatch):
             }
         )
     )
-    monkeypatch.setattr(main.settings, "khpay_webhook_secret", secret)
+    monkeypatch.setattr(main.settings, "khqrpay_webhook_secret", secret)
     monkeypatch.setattr(main.app.state, "store", store, raising=False)
     monkeypatch.setattr(
         main.payments,
@@ -36,7 +41,7 @@ def test_paid_status_webhook_confirms_and_delivers_order(monkeypatch):
     monkeypatch.setattr(main, "deliver_order", deliver_order)
 
     response = TestClient(main.app).post(
-        "/webhook/khpay",
+        "/webhook/khqrpay",
         content=body,
         headers={"x-webhook-signature": signature},
     )
@@ -49,7 +54,12 @@ def test_paid_status_webhook_confirms_and_delivers_order(monkeypatch):
 def test_paid_status_webhook_credits_a_wallet_deposit(monkeypatch):
     secret = "webhook-secret"
     body = json.dumps(
-        {"status": "paid", "transaction_id": "txn-deposit", "amount": "10.00"}
+        {
+            "event": "payment.update",
+            "id": 456,
+            "status": "Paid",
+            "amount": 10.0,
+        }
     ).encode()
     signature = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
     store = SimpleNamespace(
@@ -60,11 +70,11 @@ def test_paid_status_webhook_credits_a_wallet_deposit(monkeypatch):
                 "chat_id": 456,
                 "amount": "10.00",
                 "status": "pending",
-                "transaction_id": "txn-deposit",
+                "transaction_id": "456",
             }
         ),
     )
-    monkeypatch.setattr(main.settings, "khpay_webhook_secret", secret)
+    monkeypatch.setattr(main.settings, "khqrpay_webhook_secret", secret)
     monkeypatch.setattr(main.app.state, "store", store, raising=False)
     monkeypatch.setattr(
         main.payments,
@@ -75,7 +85,7 @@ def test_paid_status_webhook_credits_a_wallet_deposit(monkeypatch):
     monkeypatch.setattr(main, "complete_wallet_deposit", credit_deposit)
 
     response = TestClient(main.app).post(
-        "/webhook/khpay",
+        "/webhook/khqrpay",
         content=body,
         headers={"x-webhook-signature": signature},
     )
@@ -88,7 +98,12 @@ def test_paid_status_webhook_credits_a_wallet_deposit(monkeypatch):
 def test_wallet_deposit_webhook_rejects_a_mismatched_payment_amount(monkeypatch):
     secret = "webhook-secret"
     body = json.dumps(
-        {"status": "paid", "transaction_id": "txn-deposit", "amount": "9.00"}
+        {
+            "event": "payment.update",
+            "id": 456,
+            "status": "Paid",
+            "amount": 9.0,
+        }
     ).encode()
     signature = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
     store = SimpleNamespace(
@@ -99,11 +114,11 @@ def test_wallet_deposit_webhook_rejects_a_mismatched_payment_amount(monkeypatch)
                 "chat_id": 456,
                 "amount": "10.00",
                 "status": "pending",
-                "transaction_id": "txn-deposit",
+                "transaction_id": "456",
             }
         ),
     )
-    monkeypatch.setattr(main.settings, "khpay_webhook_secret", secret)
+    monkeypatch.setattr(main.settings, "khqrpay_webhook_secret", secret)
     monkeypatch.setattr(main.app.state, "store", store, raising=False)
     monkeypatch.setattr(
         main.payments,
@@ -114,7 +129,7 @@ def test_wallet_deposit_webhook_rejects_a_mismatched_payment_amount(monkeypatch)
     monkeypatch.setattr(main, "complete_wallet_deposit", credit_deposit)
 
     response = TestClient(main.app).post(
-        "/webhook/khpay",
+        "/webhook/khqrpay",
         content=body,
         headers={"x-webhook-signature": signature},
     )

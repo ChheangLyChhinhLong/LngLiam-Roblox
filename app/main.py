@@ -23,14 +23,18 @@ from app.bot import (
     schedule_welcome_media_preload,
 )
 from app.config import get_settings
-from app.payments import KHPayClient, verify_webhook_signature
+from app.payments import KHQRPayClient, verify_webhook_signature
 from app.store import Store
 
 logging.basicConfig(level=logging.INFO)
 settings = get_settings()
 bot = Bot(settings.bot_token)
 dispatcher = Dispatcher()
-payments = KHPayClient(settings.khpay_api_key, settings.khpay_base_url, settings.khpay_webhook_url)
+payments = KHQRPayClient(
+    settings.khqrpay_api_key,
+    settings.khqrpay_base_url,
+    settings.khqrpay_webhook_url,
+)
 
 
 @asynccontextmanager
@@ -96,16 +100,18 @@ async def open_aba_mobile(order_id: str, request: Request) -> RedirectResponse:
     return RedirectResponse(deeplink, status_code=302)
 
 
-@app.post("/webhook/khpay")
-async def khpay_webhook(request: Request) -> dict[str, bool | str]:
-    if not settings.khpay_webhook_secret:
-        raise HTTPException(status_code=503, detail="KHPAY webhook secret is not configured")
+@app.post("/webhook/khqrpay")
+async def khqrpay_webhook(request: Request) -> dict[str, bool | str]:
+    if not settings.khqrpay_webhook_secret:
+        raise HTTPException(
+            status_code=503, detail="KHQRPay webhook secret is not configured"
+        )
 
     raw_body = await request.body()
     signature = request.headers.get("x-webhook-signature", "")
-    if not signature:
-        signature = request.headers.get("x-khpay-signature", "")
-    if not verify_webhook_signature(raw_body, signature, settings.khpay_webhook_secret):
+    if not verify_webhook_signature(
+        raw_body, signature, settings.khqrpay_webhook_secret
+    ):
         raise HTTPException(status_code=401, detail="Invalid webhook signature")
 
     try:
@@ -115,30 +121,24 @@ async def khpay_webhook(request: Request) -> dict[str, bool | str]:
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="Invalid webhook payload")
 
-    event = payload.get("event")
-    if event == "webhook.test":
-        return {"received": True, "status": "test"}
-
-    event_status = {
-        "payment.paid": "paid",
-        "payment.expired": "expired",
-        "payment.failed": "failed",
-    }.get(event)
-    event_data = payload.get("data")
-    if not isinstance(event_data, dict):
-        event_data = payload
-    reported_status = event_data.get("status") or payload.get("status")
+    if payload.get("event") != "payment.update":
+        return {"received": True, "status": "ignored"}
+    event_data = payload
+    reported_status = event_data.get("status")
     if isinstance(reported_status, str):
-        reported_status = reported_status.lower()
-    expected_status = event_status or (
-        reported_status if reported_status in {"paid", "expired", "failed"} else None
+        reported_status = reported_status.casefold()
+    expected_status = (
+        reported_status
+        if reported_status in {"paid", "expired", "failed"}
+        else None
     )
     if not expected_status:
         return {"received": True, "status": "ignored"}
 
-    transaction_id = event_data.get("transaction_id") or payload.get("transaction_id")
-    if not isinstance(transaction_id, str) or not transaction_id:
-        raise HTTPException(status_code=400, detail="Missing transaction_id")
+    transaction_id = event_data.get("id")
+    if transaction_id is None or not str(transaction_id).strip():
+        raise HTTPException(status_code=400, detail="Missing payment id")
+    transaction_id = str(transaction_id)
 
     store: Store = request.app.state.store
     order = await store.order_by_transaction(transaction_id)
@@ -152,8 +152,8 @@ async def khpay_webhook(request: Request) -> dict[str, bool | str]:
         try:
             payment = await payments.check_payment(transaction_id)
         except Exception:
-            logging.getLogger(__name__).exception("KHPAY status verification failed for %s", transaction_id)
-            raise HTTPException(status_code=503, detail="Could not verify payment with KHPAY") from None
+            logging.getLogger(__name__).exception("KHQRPay status verification failed for %s", transaction_id)
+            raise HTTPException(status_code=503, detail="Could not verify payment with KHQRPay") from None
         if payment.get("status") != expected_status:
             return {"received": True, "status": "awaiting_api_confirmation"}
 
@@ -179,8 +179,8 @@ async def khpay_webhook(request: Request) -> dict[str, bool | str]:
     try:
         payment = await payments.check_payment(transaction_id)
     except Exception:
-        logging.getLogger(__name__).exception("KHPAY status verification failed for %s", transaction_id)
-        raise HTTPException(status_code=503, detail="Could not verify payment with KHPAY") from None
+        logging.getLogger(__name__).exception("KHQRPay status verification failed for %s", transaction_id)
+        raise HTTPException(status_code=503, detail="Could not verify payment with KHQRPay") from None
     if payment.get("status") != expected_status:
         return {"received": True, "status": "awaiting_api_confirmation"}
 

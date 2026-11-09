@@ -27,7 +27,7 @@ def verify_webhook_signature(raw_body: bytes, signature: str, secret: str) -> bo
     return hmac.compare_digest(expected, signature)
 
 
-class KHPayClient:
+class KHQRPayClient:
     def __init__(self, api_key: str, base_url: str, webhook_url: str = "") -> None:
         self._webhook_url = webhook_url
         self._client = httpx.AsyncClient(
@@ -40,48 +40,86 @@ class KHPayClient:
         self,
         amount: str,
         order_id: str,
-        telegram_id: int,
     ) -> dict[str, Any]:
-        body: dict[str, Any] = {
-            "amount": amount,
-            "currency": "USD",
-            "note": f"Telegram order {order_id}",
-            "metadata": {"telegram_id": telegram_id, "order_id": order_id},
-        }
+        body: dict[str, Any] = {"amount": float(amount)}
         if self._webhook_url:
-            body["callback_url"] = self._webhook_url
+            body["webhook"] = self._webhook_url
         response = await self._client.post(
-            "/qr/generate",
+            "/aba/create",
             headers={"Idempotency-Key": order_id},
             json=body,
         )
         try:
             payload = response.json()
         except ValueError:
-            raise RuntimeError(f"KHPAY returned HTTP {response.status_code} with an invalid JSON response") from None
+            raise RuntimeError(
+                f"KHQRPay returned HTTP {response.status_code} with an invalid JSON response"
+            ) from None
         if not isinstance(payload, dict):
-            raise RuntimeError(f"KHPAY returned HTTP {response.status_code} with an invalid response")
-        if response.is_error or not payload.get("success"):
-            error = payload.get("error") or payload.get("message") or f"HTTP {response.status_code}"
-            error_code = payload.get("error_code")
-            request_id = payload.get("request_id")
-            context = ", ".join(value for value in (error_code, f"request_id={request_id}" if request_id else None) if value)
-            raise RuntimeError(f"KHPAY error: {error}" + (f" ({context})" if context else ""))
-        data = payload.get("data", {})
-        if not isinstance(data, dict):
-            raise RuntimeError("KHPAY response is missing payment data")
-        if not data.get("transaction_id"):
-            raise RuntimeError("KHPAY response is missing transaction_id")
-        if not data.get("qr_string"):
-            raise RuntimeError("KHPAY response is missing qr_string")
-        return data
+            raise RuntimeError(
+                f"KHQRPay returned HTTP {response.status_code} with an invalid response"
+            )
+        if response.is_error or payload.get("ok") is not True:
+            error = (
+                payload.get("error_text")
+                or payload.get("error")
+                or payload.get("msg")
+                or f"HTTP {response.status_code}"
+            )
+            raise RuntimeError(f"KHQRPay error: {error}")
+        payment_id = payload.get("id")
+        qr_string = payload.get("qr")
+        if (
+            isinstance(payment_id, bool)
+            or not isinstance(payment_id, (int, str))
+            or not str(payment_id).isdigit()
+        ):
+            raise RuntimeError("KHQRPay response is missing payment id")
+        if not isinstance(qr_string, str) or not qr_string.strip():
+            raise RuntimeError("KHQRPay response is missing QR data")
+        return {
+            "transaction_id": str(payment_id),
+            "qr_string": qr_string,
+            "qr_image": payload.get("qr_image"),
+            "checkout_url": payload.get("checkout_url"),
+            "aba_deeplink": payload.get("aba_deeplink"),
+            "aba_deeplink_android": payload.get("aba_deeplink_android"),
+            "amount": payload.get("amount"),
+            "status": self._normalized_status(payload.get("status")),
+        }
 
     async def check_payment(self, transaction_id: str) -> dict[str, Any]:
-        response = await self._client.get(f"/qr/check/{transaction_id}")
-        payload = response.json()
-        if response.is_error or not payload.get("success"):
-            raise RuntimeError(payload.get("error", f"KHPAY returned HTTP {response.status_code}"))
-        return payload.get("data", {})
+        response = await self._client.get("/payment", params={"id": transaction_id})
+        try:
+            payload = response.json()
+        except ValueError:
+            raise RuntimeError(
+                f"KHQRPay returned HTTP {response.status_code} with an invalid JSON response"
+            ) from None
+        if not isinstance(payload, dict):
+            raise RuntimeError(
+                f"KHQRPay returned HTTP {response.status_code} with an invalid response"
+            )
+        if response.is_error or payload.get("ok") is not True:
+            error = (
+                payload.get("error_text")
+                or payload.get("error")
+                or payload.get("msg")
+                or f"HTTP {response.status_code}"
+            )
+            raise RuntimeError(f"KHQRPay error: {error}")
+        payment = payload.get("payment")
+        if not isinstance(payment, dict):
+            raise RuntimeError("KHQRPay response is missing payment data")
+        return {
+            **payment,
+            "transaction_id": str(payment.get("id", transaction_id)),
+            "status": self._normalized_status(payment.get("status")),
+        }
+
+    @staticmethod
+    def _normalized_status(status: Any) -> str:
+        return status.casefold() if isinstance(status, str) else ""
 
     async def close(self) -> None:
         await self._client.aclose()

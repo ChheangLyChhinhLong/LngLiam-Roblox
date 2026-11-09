@@ -14,15 +14,12 @@ class Settings(BaseSettings):
     cloudinary_cloud_name: str = ""
     cloudinary_api_key: str = ""
     cloudinary_api_secret: str = ""
-    khpay_api_key: str
-    khpay_base_url: str = "https://khpay.site/api/v1"
-    khpay_webhook_secret: str = ""
-    khpay_webhook_url: str = ""
+    khqrpay_api_key: str
+    khqrpay_base_url: str = "https://khqrpay.site/api/v1"
+    khqrpay_webhook_secret: str = ""
+    khqrpay_webhook_url: str = ""
     public_base_url: str = ""
     stock_encryption_key: str
-    stock_notification_chat_ids: str = ""
-    order_notification_chat_ids: str = ""
-    support_username: str = ""
     poll_interval_seconds: int = 20
     port: int = 10000
 
@@ -32,7 +29,7 @@ class Settings(BaseSettings):
 
     @property
     def app_base_url(self) -> str | None:
-        value = self.public_base_url.strip() or self.khpay_webhook_url.strip()
+        value = self.public_base_url.strip() or self.khqrpay_webhook_url.strip()
         parsed = urlsplit(value)
         if parsed.scheme != "https" or not parsed.netloc:
             return None

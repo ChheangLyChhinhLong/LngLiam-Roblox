@@ -27,7 +27,7 @@ from aiogram.types import (
 )
 
 from app.config import Settings
-from app.payments import KHPayClient, aba_mobile_deeplink, aba_mobile_redirect_url
+from app.payments import KHQRPayClient, aba_mobile_deeplink, aba_mobile_redirect_url
 from app.security import decrypt_stock
 from app.store import Store
 
@@ -68,10 +68,20 @@ ADMIN_WIZARD_STEPS = {
 BOT_SETTING_LABELS = {
     "how_to_buy_caption": ("Default tutorial caption", "ចំណងជើងវីដេអូណែនាំលំនាំដើម"),
     "how_to_buy_caption_km": ("Tutorial caption (Khmer)", "ចំណងជើងវីដេអូណែនាំ (ខ្មែរ)"),
-    "how_to_buy_caption_en": ("Tutorial caption (English)", "ចំណងជើងវីដេអូណែនាំ (អង់គ្លេស)"),
+    "how_to_buy_caption_en": (
+        "Tutorial caption (English)",
+        "ចំណងជើងវីដេអូណែនាំ (អង់គ្លេស)",
+    ),
     "support_username": ("Support username", "ឈ្មោះអ្នកជំនួយ"),
-    "stock_notification_chat_ids": ("Stock notification chats (groups/channels)", "Group/Channel ទទួលដំណឹងស្តុក"),
-    "order_notification_chat_ids": ("Order log chats (groups/channels)", "Group/Channel ទទួល Order Log"),
+    "install_group_url": ("Install group URL", "តំណ Group ដំឡើង"),
+    "stock_notification_chat_ids": (
+        "Stock notification chats (groups/channels)",
+        "Group/Channel ទទួលដំណឹងស្តុក",
+    ),
+    "order_notification_chat_ids": (
+        "Order log chats (groups/channels)",
+        "Group/Channel ទទួល Order Log",
+    ),
 }
 BOT_SETTING_SECTIONS = {
     "captions": (
@@ -82,7 +92,7 @@ BOT_SETTING_SECTIONS = {
     "shop": (
         "🔗 Store links",
         "🔗 តំណ និងជំនួយ",
-        ("support_username",),
+        ("support_username", "install_group_url"),
     ),
     "notifications": (
         "🔔 Notifications",
@@ -133,7 +143,9 @@ def paginate(items: list[Any], page: int) -> tuple[list[Any], int, int]:
     return items[start : start + CATALOG_PAGE_SIZE], page, page_count
 
 
-def pagination_row(page: int, page_count: int, callback_prefix: str, language: str) -> list[InlineKeyboardButton]:
+def pagination_row(
+    page: int, page_count: int, callback_prefix: str, language: str
+) -> list[InlineKeyboardButton]:
     if page_count <= 1:
         return []
     row = []
@@ -144,7 +156,9 @@ def pagination_row(page: int, page_count: int, callback_prefix: str, language: s
                 callback_data=f"{callback_prefix}:{page - 1}",
             )
         )
-    row.append(InlineKeyboardButton(text=f"{page + 1} / {page_count}", callback_data="noop"))
+    row.append(
+        InlineKeyboardButton(text=f"{page + 1} / {page_count}", callback_data="noop")
+    )
     if page < page_count - 1:
         row.append(
             InlineKeyboardButton(
@@ -164,14 +178,20 @@ async def edit_text_message(
     edit_message: bool = True,
 ) -> Message:
     if not edit_message:
-        return await message.answer(text, parse_mode=parse_mode, reply_markup=reply_markup)
+        return await message.answer(
+            text, parse_mode=parse_mode, reply_markup=reply_markup
+        )
     if message.text is None:
         try:
             await message.delete()
         except TelegramBadRequest:
             logger.debug("Could not delete old photo message %s", message.message_id)
-        return await message.answer(text, parse_mode=parse_mode, reply_markup=reply_markup)
-    return await message.edit_text(text, parse_mode=parse_mode, reply_markup=reply_markup)
+        return await message.answer(
+            text, parse_mode=parse_mode, reply_markup=reply_markup
+        )
+    return await message.edit_text(
+        text, parse_mode=parse_mode, reply_markup=reply_markup
+    )
 
 
 async def delete_replaced_message(message: Message) -> None:
@@ -212,7 +232,11 @@ async def switch_active_screen(
         await delete_replaced_message(previous)
         if welcome_message_ids.get(user_id) == previous.message_id:
             welcome_message_ids.pop(user_id, None)
-    if input_message and input_message.from_user and input_message.from_user.id == user_id:
+    if (
+        input_message
+        and input_message.from_user
+        and input_message.from_user.id == user_id
+    ):
         await delete_replaced_message(input_message)
     active_screen_messages[user_id] = sent
     return sent
@@ -242,7 +266,9 @@ async def update_active_screen(
     if previous is None:
         if input_message is None:
             return None
-        sent = await input_message.answer(text, parse_mode=parse_mode, reply_markup=reply_markup)
+        sent = await input_message.answer(
+            text, parse_mode=parse_mode, reply_markup=reply_markup
+        )
     else:
         sent = await edit_text_message(
             previous,
@@ -264,7 +290,9 @@ def is_wallet_schema_missing(error: Exception) -> bool:
     )
 
 
-def wallet_error_message(language: str, error: Exception, is_admin: bool = False) -> str:
+def wallet_error_message(
+    language: str, error: Exception, is_admin: bool = False
+) -> str:
     if is_wallet_schema_missing(error):
         if is_admin:
             return copy(
@@ -289,7 +317,11 @@ def parse_wallet_deposit_amount(amount_text: str, language: str = "km") -> Decim
         amount = Decimal(amount_text.strip())
     except InvalidOperation:
         raise ValueError(
-            copy(language, "ចំនួនទឹកប្រាក់មិនត្រឹមត្រូវទេ។", "Enter a valid deposit amount.")
+            copy(
+                language,
+                "ចំនួនទឹកប្រាក់មិនត្រឹមត្រូវទេ។",
+                "Enter a valid deposit amount.",
+            )
         ) from None
     try:
         has_two_decimal_places = amount.quantize(Decimal("0.01")) == amount
@@ -311,7 +343,13 @@ def parse_wallet_deposit_amount(amount_text: str, language: str = "km") -> Decim
     return amount
 
 
-def payment_caption(product_name: str, quantity: int, amount: Any, transaction_ref: str, language: str = "en") -> str:
+def payment_caption(
+    product_name: str,
+    quantity: int,
+    amount: Any,
+    transaction_ref: str,
+    language: str = "en",
+) -> str:
     total = f"{Decimal(str(amount)):.2f}"
     return (
         f"💳 <b>{copy(language, 'ទូទាត់ $' + total, 'Pay $' + total)}</b>\n\n"
@@ -336,7 +374,9 @@ def normalize_language(language: str | None) -> str:
 async def warm_welcome_media_settings(store: Store) -> None:
     global welcome_media_cache
     try:
-        welcome_media_cache = await store.bot_settings(("welcome_video_url", "welcome_photo_url"))
+        welcome_media_cache = await store.bot_settings(
+            ("welcome_video_url", "welcome_photo_url")
+        )
     except Exception:
         logger.exception("Could not preload welcome media settings")
 
@@ -368,7 +408,9 @@ def order_history_text(orders: list[dict[str, Any]], language: str = "km") -> st
         created_at = str(order.get("created_at") or "")
         try:
             timestamp = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
-            date_text = timestamp.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+            date_text = timestamp.astimezone(timezone.utc).strftime(
+                "%Y-%m-%d %H:%M UTC"
+            )
         except ValueError:
             date_text = created_at or copy(language, "មិនស្គាល់", "Unknown")
         product_name = html.escape(
@@ -389,8 +431,7 @@ def order_history_text(orders: list[dict[str, Any]], language: str = "km") -> st
         )
     return (
         f"🛒 <b>{copy(language, 'ការបញ្ជាទិញរបស់ខ្ញុំ', 'My Orders')}</b>\n"
-        "───────────────────\n"
-        + "\n\n".join(lines)
+        "───────────────────\n" + "\n\n".join(lines)
     )
 
 
@@ -421,20 +462,22 @@ def order_history_keyboard(
     return keyboard(rows)
 
 
-def broadcast_buttons_markup(buttons: list[dict[str, str]]) -> InlineKeyboardMarkup | None:
+def broadcast_buttons_markup(
+    buttons: list[dict[str, str]],
+) -> InlineKeyboardMarkup | None:
     if not buttons:
         return None
     return keyboard(
         [
-            [
-                InlineKeyboardButton(text=button["text"], url=button["url"])
-            ]
+            [InlineKeyboardButton(text=button["text"], url=button["url"])]
             for button in buttons
         ]
     )
 
 
-def broadcast_draft_keyboard(stage: str = "content", language: str = "km") -> InlineKeyboardMarkup:
+def broadcast_draft_keyboard(
+    stage: str = "content", language: str = "km"
+) -> InlineKeyboardMarkup:
     if stage == "content":
         rows = [
             [
@@ -529,7 +572,6 @@ def parse_broadcast_buttons(text: str) -> list[dict[str, str]]:
 
 async def broadcast_destinations(
     store: Store,
-    settings: Settings | None = None,
 ) -> list[int | str]:
     users = await store.stock_notification_users()
     configured = await store.bot_settings(
@@ -540,23 +582,18 @@ async def broadcast_destinations(
         telegram_id = int(user["telegram_id"])
         destinations[str(telegram_id)] = telegram_id
     for setting_key in ("stock_notification_chat_ids", "order_notification_chat_ids"):
-        values = [
-            configured.get(setting_key, ""),
-            getattr(settings, setting_key, "") if settings else "",
-        ]
-        for chat_ids in values:
-            for raw_chat_id in chat_ids.split(","):
-                value = raw_chat_id.strip()
-                if not value:
+        for raw_chat_id in configured.get(setting_key, "").split(","):
+            value = raw_chat_id.strip()
+            if not value:
+                continue
+            try:
+                chat_id: int | str = int(value)
+            except ValueError:
+                if not value.startswith("@") or len(value) < 2:
+                    logger.warning("Ignoring invalid broadcast chat ID %r", value)
                     continue
-                try:
-                    chat_id: int | str = int(value)
-                except ValueError:
-                    if not value.startswith("@") or len(value) < 2:
-                        logger.warning("Ignoring invalid broadcast chat ID %r", value)
-                        continue
-                    chat_id = value
-                destinations[str(chat_id)] = chat_id
+                chat_id = value
+            destinations[str(chat_id)] = chat_id
     return list(destinations.values())
 
 
@@ -590,12 +627,16 @@ async def copy_broadcast_content(
     return copied_ids
 
 
-async def delete_broadcast_source(bot: Bot, source_chat_id: int, content: list[dict[str, Any]]) -> None:
+async def delete_broadcast_source(
+    bot: Bot, source_chat_id: int, content: list[dict[str, Any]]
+) -> None:
     for item in content:
         try:
             await bot.delete_message(source_chat_id, int(item["message_id"]))
         except TelegramBadRequest:
-            logger.debug("Could not delete broadcast source message %s", item.get("message_id"))
+            logger.debug(
+                "Could not delete broadcast source message %s", item.get("message_id")
+            )
 
 
 async def execute_broadcast(
@@ -606,9 +647,8 @@ async def execute_broadcast(
     buttons: list[dict[str, str]],
     progress_message: Message,
     cancel_event: asyncio.Event,
-    settings: Settings | None = None,
 ) -> tuple[int, int, bool]:
-    destinations = await broadcast_destinations(store, settings)
+    destinations = await broadcast_destinations(store)
     total = len(destinations)
     sent = 0
     failed = 0
@@ -618,7 +658,13 @@ async def execute_broadcast(
         markup = None
         if not final:
             markup = keyboard(
-                [[InlineKeyboardButton(text="⏹ Cancel", callback_data="admin:broadcast:stop")]]
+                [
+                    [
+                        InlineKeyboardButton(
+                            text="⏹ Cancel", callback_data="admin:broadcast:stop"
+                        )
+                    ]
+                ]
             )
         try:
             await progress_message.edit_text(
@@ -647,7 +693,9 @@ async def execute_broadcast(
             )
             sent += 1
         except Exception:
-            logger.exception("Broadcast delivery failed for destination %s", destination)
+            logger.exception(
+                "Broadcast delivery failed for destination %s", destination
+            )
             failed += 1
         if index % 20 == 0 or index == total:
             await update_progress(index)
@@ -656,10 +704,13 @@ async def execute_broadcast(
     done = sent + failed
     await update_progress(done, final=True)
     final_text = (
-        "📣 <b>Broadcast cancelled / បានបញ្ឈប់ការផ្សព្វផ្សាយ</b>\n"
-        if cancelled
-        else "📣 <b>Broadcast complete / ផ្ញើចប់ហើយ</b>\n"
-    ) + f"✅ Sent / បានផ្ញើ: {sent}\n❌ Failed / បរាជ័យ: {failed}\n📊 Total / សរុប: {total}"
+        (
+            "📣 <b>Broadcast cancelled / បានបញ្ឈប់ការផ្សព្វផ្សាយ</b>\n"
+            if cancelled
+            else "📣 <b>Broadcast complete / ផ្ញើចប់ហើយ</b>\n"
+        )
+        + f"✅ Sent / បានផ្ញើ: {sent}\n❌ Failed / បរាជ័យ: {failed}\n📊 Total / សរុប: {total}"
+    )
     try:
         await progress_message.edit_text(final_text, parse_mode="HTML")
     except TelegramBadRequest:
@@ -667,7 +718,9 @@ async def execute_broadcast(
     return sent, failed, cancelled
 
 
-def welcome_text(user: Any, language: str = "km", categories: list[dict[str, Any]] | None = None) -> str:
+def welcome_text(
+    user: Any, language: str = "km", categories: list[dict[str, Any]] | None = None
+) -> str:
     user_id = html.escape(str(getattr(user, "id", "")))
     full_name = " ".join(
         part.strip()
@@ -680,20 +733,20 @@ def welcome_text(user: Any, language: str = "km", categories: list[dict[str, Any
     full_name = html.escape(full_name or "—")
     if normalize_language(language) == "en":
         return (
-            "💎 <b>Welcome to LngLiam Roblox!</b>\n\n"
+            "💎 <b>Welcome to LngLiam Digital Shop!</b>\n\n"
             "📋 <b>Account information</b>\n"
             f"├ 📋 ID: {user_id}\n"
             f"└ Name: {full_name}\n\n"
-            "🎮 Get your Roblox services quickly, easily, and securely.\n\n"
-            "Choose a service from the menu below to get started."
+            "🔑 Buy digital keys, codes, and other digital products quickly and securely.\n\n"
+            "Choose a product from the menu below to get started."
         )
     return (
-        "💎 <b>សូមស្វាគមន៍មកកាន់ LngLiam Roblox!</b>\n\n"
+        "💎 <b>សូមស្វាគមន៍មកកាន់ហាង Digital របស់ LngLiam!</b>\n\n"
         "📋 <b>ព័ត៌មានគណនី</b>\n"
         f"├ ID: {user_id}\n"
         f"└ ឈ្មោះ: {full_name}\n\n"
-        "🎮 ទិញ Robux និងសេវាកម្ម Roblox បានងាយស្រួល រហ័ស និងមានសុវត្ថិភាព។\n\n"
-        "សូមជ្រើសរើសសេវាកម្មពីម៉ឺនុយខាងក្រោម ដើម្បីចាប់ផ្តើម។"
+        "🔑 ទិញ Digital Key, Code និងផលិតផល Digital ផ្សេងៗបានងាយស្រួល រហ័ស និងមានសុវត្ថិភាព។\n\n"
+        "សូមជ្រើសរើសផលិតផលពីម៉ឺនុយខាងក្រោម ដើម្បីចាប់ផ្តើម។"
     )
 
 
@@ -760,7 +813,9 @@ def checkout_payment_rows(
     return rows
 
 
-def parse_product_caption(caption: str, language: str = "km") -> tuple[str, str, str, str]:
+def parse_product_caption(
+    caption: str, language: str = "km"
+) -> tuple[str, str, str, str]:
     fields = [field.strip() for field in caption.split("|", 3)]
     if len(fields) < 2 or not fields[0] or not fields[1]:
         raise ValueError(
@@ -773,17 +828,31 @@ def parse_product_caption(caption: str, language: str = "km") -> tuple[str, str,
     try:
         price = Decimal(fields[1])
     except InvalidOperation:
-        raise ValueError(copy(language, "តម្លៃមិនត្រឹមត្រូវទេ។", "The price is invalid.")) from None
+        raise ValueError(
+            copy(language, "តម្លៃមិនត្រឹមត្រូវទេ។", "The price is invalid.")
+        ) from None
     if not price.is_finite() or price <= 0:
-        raise ValueError(copy(language, "តម្លៃត្រូវតែធំជាង 0។", "The price must be greater than 0."))
+        raise ValueError(
+            copy(language, "តម្លៃត្រូវតែធំជាង 0។", "The price must be greater than 0.")
+        )
     reseller_price = price
     description = ""
     if len(fields) == 4:
         try:
             reseller_price = Decimal(fields[2])
         except InvalidOperation:
-            raise ValueError(copy(language, "តម្លៃ Reseller មិនត្រឹមត្រូវទេ។", "The reseller price is invalid.")) from None
-        if not reseller_price.is_finite() or reseller_price <= 0 or reseller_price >= price:
+            raise ValueError(
+                copy(
+                    language,
+                    "តម្លៃ Reseller មិនត្រឹមត្រូវទេ។",
+                    "The reseller price is invalid.",
+                )
+            ) from None
+        if (
+            not reseller_price.is_finite()
+            or reseller_price <= 0
+            or reseller_price >= price
+        ):
             raise ValueError(
                 copy(
                     language,
@@ -810,10 +879,26 @@ def parse_stock_add(text: str, language: str = "km") -> tuple[str, list[str]] | 
     if not parts or parts[0].lower() != "addstock":
         return None
     if len(parts) != 2 or not separator:
-        raise ValueError(copy(language, "សូមប្រើទម្រង់ addstock <product_id> | key1, key2។", "Use the format addstock <product_id> | key1, key2."))
-    credentials = [item.strip() for item in stock_text.replace("\n", ",").split(",") if item.strip()]
+        raise ValueError(
+            copy(
+                language,
+                "សូមប្រើទម្រង់ addstock <product_id> | key1, key2។",
+                "Use the format addstock <product_id> | key1, key2.",
+            )
+        )
+    credentials = [
+        item.strip()
+        for item in stock_text.replace("\n", ",").split(",")
+        if item.strip()
+    ]
     if not credentials:
-        raise ValueError(copy(language, "សូមបញ្ចូល License Key យ៉ាងហោចណាស់មួយ។", "Enter at least one license key."))
+        raise ValueError(
+            copy(
+                language,
+                "សូមបញ្ចូល Digital Key ឬ Code យ៉ាងហោចណាស់មួយ។",
+                "Enter at least one digital key or code.",
+            )
+        )
     return parts[1], credentials
 
 
@@ -836,11 +921,17 @@ def payment_qr(payment: dict[str, Any]) -> BufferedInputFile | str:
     image_url = payment.get("qr_image_url")
     if image_url:
         return image_url
-    image_data = payment.get("qr_image_base64") or payment.get("image_base64") or payment.get("qr_image")
+    image_data = (
+        payment.get("qr_image_base64")
+        or payment.get("image_base64")
+        or payment.get("qr_image")
+    )
     if image_data:
         if image_data.startswith("data:image"):
             image_data = image_data.split(",", 1)[-1]
-        return BufferedInputFile(base64.b64decode(image_data), filename="payment-qr.png")
+        return BufferedInputFile(
+            base64.b64decode(image_data), filename="payment-qr.png"
+        )
     payload = (
         payment.get("qr_payload")
         or payment.get("qr_string")
@@ -850,7 +941,7 @@ def payment_qr(payment: dict[str, Any]) -> BufferedInputFile | str:
         or payment.get("khqr")
     )
     if not payload:
-        raise ValueError("KHPAY response is missing QR data")
+        raise ValueError("KHQRPay response is missing QR data")
     image = qrcode.make(str(payload))
     output = io.BytesIO()
     image.save(output, format="PNG")
@@ -865,8 +956,16 @@ async def upload_product_video(bot: Bot, settings: Settings, file_id: str) -> st
     return await upload_product_media(bot, settings, file_id, "video")
 
 
-async def upload_product_media(bot: Bot, settings: Settings, file_id: str, media_type: str) -> str:
-    if not all((settings.cloudinary_cloud_name, settings.cloudinary_api_key, settings.cloudinary_api_secret)):
+async def upload_product_media(
+    bot: Bot, settings: Settings, file_id: str, media_type: str
+) -> str:
+    if not all(
+        (
+            settings.cloudinary_cloud_name,
+            settings.cloudinary_api_key,
+            settings.cloudinary_api_secret,
+        )
+    ):
         raise RuntimeError("Cloudinary credentials are not configured")
     if media_type not in {"image", "video"}:
         raise ValueError("Unsupported product media type")
@@ -888,7 +987,9 @@ async def upload_product_media(bot: Bot, settings: Settings, file_id: str, media
     return secure_url
 
 
-def menu(settings: Settings, user_id: int, language: str = "km") -> InlineKeyboardMarkup:
+def menu(
+    settings: Settings, user_id: int, language: str = "km"
+) -> InlineKeyboardMarkup:
     labels = {
         "shop": copy(language, "🛍 ហាងលក់", "🛍 Shop"),
         "orders": copy(language, "🛒 ការបញ្ជាទិញ", "🛒 My orders"),
@@ -907,7 +1008,12 @@ def menu(settings: Settings, user_id: int, language: str = "km") -> InlineKeyboa
     ]
     if user_id in settings.admin_ids:
         rows.append(
-            [InlineKeyboardButton(text=copy(language, "⚙️ គ្រប់គ្រងហាង", "⚙️ Store admin"), callback_data="admin")]
+            [
+                InlineKeyboardButton(
+                    text=copy(language, "⚙️ គ្រប់គ្រងហាង", "⚙️ Store admin"),
+                    callback_data="admin",
+                )
+            ]
         )
     return keyboard(rows)
 
@@ -919,14 +1025,17 @@ def welcome_keyboard(user_id: int, settings: Settings) -> ReplyKeyboardMarkup:
     rows.extend(
         [
             [KeyboardButton(text="👤 Account"), KeyboardButton(text="💰 Add funds")],
-            [KeyboardButton(text="🎮 Games Service")],
+            [KeyboardButton(text="🛍 Digital Products")],
             [KeyboardButton(text="🛒 My Orders"), KeyboardButton(text="🎥 How to Buy")],
+            [KeyboardButton(text="🔗 Install Group")],
         ]
     )
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, is_persistent=True)
 
 
-def back_button(target: str = "home", language: str = "km") -> list[InlineKeyboardButton]:
+def back_button(
+    target: str = "home", language: str = "km"
+) -> list[InlineKeyboardButton]:
     return [
         InlineKeyboardButton(
             text=copy(language, "⬅️ ត្រឡប់", "⬅️ Back"),
@@ -935,28 +1044,60 @@ def back_button(target: str = "home", language: str = "km") -> list[InlineKeyboa
     ]
 
 
-def admin_category_actions(category_id: str, language: str = "km") -> list[list[InlineKeyboardButton]]:
+def admin_category_actions(
+    category_id: str, language: str = "km"
+) -> list[list[InlineKeyboardButton]]:
     return [
-        [InlineKeyboardButton(text=copy(language, "➕ បន្ថែម Package", "➕ Add package"), callback_data=f"admin:product-add:{category_id}")],
         [
-            InlineKeyboardButton(text=copy(language, "✏️ កែ Catalog", "✏️ Edit catalog"), callback_data=f"admin:category-edit:{category_id}"),
-            InlineKeyboardButton(text=copy(language, "🗑 បិទ Catalog", "🗑 Disable catalog"), callback_data=f"admin:category-disable:{category_id}"),
+            InlineKeyboardButton(
+                text=copy(language, "➕ បន្ថែម Package", "➕ Add package"),
+                callback_data=f"admin:product-add:{category_id}",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text=copy(language, "✏️ កែ Catalog", "✏️ Edit catalog"),
+                callback_data=f"admin:category-edit:{category_id}",
+            ),
+            InlineKeyboardButton(
+                text=copy(language, "🗑 បិទ Catalog", "🗑 Disable catalog"),
+                callback_data=f"admin:category-disable:{category_id}",
+            ),
         ],
         back_button("admin:catalogs", language),
     ]
 
 
-def admin_product_actions(product_id: str, category_id: str, language: str = "km") -> list[list[InlineKeyboardButton]]:
+def admin_product_actions(
+    product_id: str, category_id: str, language: str = "km"
+) -> list[list[InlineKeyboardButton]]:
     return [
         [
-            InlineKeyboardButton(text=copy(language, "✏️ កែ Package", "✏️ Edit package"), callback_data=f"admin:product-edit:{product_id}"),
-            InlineKeyboardButton(text=copy(language, "🗑 បិទ Package", "🗑 Disable package"), callback_data=f"admin:product-disable:{product_id}"),
+            InlineKeyboardButton(
+                text=copy(language, "✏️ កែ Package", "✏️ Edit package"),
+                callback_data=f"admin:product-edit:{product_id}",
+            ),
+            InlineKeyboardButton(
+                text=copy(language, "🗑 បិទ Package", "🗑 Disable package"),
+                callback_data=f"admin:product-disable:{product_id}",
+            ),
         ],
         [
-            InlineKeyboardButton(text=copy(language, "➕ បន្ថែមស្តុក", "➕ Add stock"), callback_data=f"admin:stock-add:{product_id}"),
-            InlineKeyboardButton(text=copy(language, "➖ ដកស្តុក", "➖ Remove stock"), callback_data=f"admin:stock-remove:{product_id}"),
+            InlineKeyboardButton(
+                text=copy(language, "➕ បន្ថែមស្តុក", "➕ Add stock"),
+                callback_data=f"admin:stock-add:{product_id}",
+            ),
+            InlineKeyboardButton(
+                text=copy(language, "➖ ដកស្តុក", "➖ Remove stock"),
+                callback_data=f"admin:stock-remove:{product_id}",
+            ),
         ],
-        [InlineKeyboardButton(text=copy(language, "📥 បញ្ចូលស្តុក (.txt)", "📥 Import stock (.txt)"), callback_data=f"au:{product_id}")],
+        [
+            InlineKeyboardButton(
+                text=copy(language, "📥 បញ្ចូលស្តុក (.txt)", "📥 Import stock (.txt)"),
+                callback_data=f"au:{product_id}",
+            )
+        ],
         back_button(f"ac:{category_id}", language),
     ]
 
@@ -968,8 +1109,24 @@ def payment_keyboard(
 ) -> InlineKeyboardMarkup:
     return keyboard(
         [
-            [InlineKeyboardButton(text=copy(language, "🏦 បើកក្នុង ABA Mobile", "🏦 Open in ABA Mobile"), url=open_url)],
-            [InlineKeyboardButton(text=copy(language, "✅ ខ្ញុំបានទូទាត់ · ពិនិត្យ", "✅ I have paid · Check"), callback_data=f"check_payment_{order_id}")],
+            [
+                InlineKeyboardButton(
+                    text=copy(
+                        language, "🏦 បើកក្នុង ABA Mobile", "🏦 Open in ABA Mobile"
+                    ),
+                    url=open_url,
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=copy(
+                        language,
+                        "✅ ខ្ញុំបានទូទាត់ · ពិនិត្យ",
+                        "✅ I have paid · Check",
+                    ),
+                    callback_data=f"check_payment_{order_id}",
+                )
+            ],
         ]
     )
 
@@ -1008,18 +1165,26 @@ def wallet_custom_amount_prompt(language: str) -> str:
     )
 
 
-def wallet_payment_keyboard(deposit_id: str, open_url: str, language: str = "km") -> InlineKeyboardMarkup:
+def wallet_payment_keyboard(
+    deposit_id: str, open_url: str, language: str = "km"
+) -> InlineKeyboardMarkup:
     return keyboard(
         [
             [
                 InlineKeyboardButton(
-                    text=copy(language, "🏦 បើកក្នុង ABA Mobile", "🏦 Open in ABA Mobile"),
+                    text=copy(
+                        language, "🏦 បើកក្នុង ABA Mobile", "🏦 Open in ABA Mobile"
+                    ),
                     url=open_url,
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text=copy(language, "✅ ខ្ញុំបានទូទាត់ · ពិនិត្យ", "✅ I have paid · Check"),
+                    text=copy(
+                        language,
+                        "✅ ខ្ញុំបានទូទាត់ · ពិនិត្យ",
+                        "✅ I have paid · Check",
+                    ),
                     callback_data=f"wallet:check:{deposit_id}",
                 )
             ],
@@ -1053,7 +1218,9 @@ async def complete_wallet_deposit(
     if not completed:
         return False
     await close_wallet_deposit_message(bot, store, str(deposit["id"]))
-    user_language = normalize_language(language or await safe_user_language(store, int(deposit["chat_id"])))
+    user_language = normalize_language(
+        language or await safe_user_language(store, int(deposit["chat_id"]))
+    )
     try:
         balance = money(await store.wallet_balance(int(deposit["chat_id"])))
         message = copy(
@@ -1062,7 +1229,10 @@ async def complete_wallet_deposit(
             f"✅ {money(deposit['amount'])} was added to your wallet!\n💰 New balance: {balance}",
         )
     except Exception:
-        logger.exception("Wallet deposit %s was credited but the new balance could not be loaded", deposit["id"])
+        logger.exception(
+            "Wallet deposit %s was credited but the new balance could not be loaded",
+            deposit["id"],
+        )
         message = copy(
             user_language,
             f"✅ បានបញ្ចូលប្រាក់ {money(deposit['amount'])} ជោគជ័យ!",
@@ -1071,11 +1241,16 @@ async def complete_wallet_deposit(
     try:
         await bot.send_message(int(deposit["chat_id"]), message)
     except Exception:
-        logger.exception("Wallet deposit %s was credited but the user notification could not be sent", deposit["id"])
+        logger.exception(
+            "Wallet deposit %s was credited but the user notification could not be sent",
+            deposit["id"],
+        )
     return True
 
 
-async def expire_wallet_deposit(bot: Bot, store: Store, deposit: dict[str, Any], status: str) -> None:
+async def expire_wallet_deposit(
+    bot: Bot, store: Store, deposit: dict[str, Any], status: str
+) -> None:
     await store.close_wallet_deposit(str(deposit["id"]), status)
     await close_wallet_deposit_message(bot, store, str(deposit["id"]))
     language = await safe_user_language(store, int(deposit["chat_id"]))
@@ -1095,35 +1270,42 @@ async def safe_user_language(store: Store, telegram_id: int) -> str:
         user_language_cache[telegram_id] = language
         return language
     except Exception:
-        logger.exception("Could not load language preference for Telegram user %s", telegram_id)
+        logger.exception(
+            "Could not load language preference for Telegram user %s", telegram_id
+        )
         return user_language_cache.get(telegram_id, "km")
 
 
-async def safe_upsert_user(store: Store, telegram_id: int, username: str | None, first_name: str, language: str) -> None:
+async def safe_upsert_user(
+    store: Store, telegram_id: int, username: str | None, first_name: str, language: str
+) -> None:
     try:
         await store.upsert_user(telegram_id, username, first_name, language)
     except Exception:
         logger.exception("Could not save profile for Telegram user %s", telegram_id)
 
 
-async def notify_stock_added(bot: Bot, store: Store, chat_ids: str, product_id: str, added: int) -> None:
+async def notify_stock_added(
+    bot: Bot, store: Store, product_id: str, added: int
+) -> None:
     if added < 1:
         return
     try:
-        load_settings = getattr(store, "bot_settings", None)
-        if load_settings:
-            chat_ids = (await load_settings(("stock_notification_chat_ids",))).get(
-                "stock_notification_chat_ids",
-                chat_ids,
-            )
+        chat_ids = (await store.bot_settings(("stock_notification_chat_ids",))).get(
+            "stock_notification_chat_ids", ""
+        )
         product = await store.product(product_id)
         if not product:
-            logger.warning("Skipping stock notification for unavailable product %s", product_id)
+            logger.warning(
+                "Skipping stock notification for unavailable product %s", product_id
+            )
             return
         users = await store.stock_notification_users()
         bot_username = (await bot.get_me()).username
     except Exception:
-        logger.exception("Could not prepare stock notification for product %s", product_id)
+        logger.exception(
+            "Could not prepare stock notification for product %s", product_id
+        )
         return
     if not bot_username:
         logger.warning("Skipping stock notification without a bot username")
@@ -1175,7 +1357,9 @@ async def notify_stock_added(bot: Bot, store: Store, chat_ids: str, product_id: 
             sent += 1
         except Exception:
             failed += 1
-            logger.debug("Could not send stock notification to %s", chat_id, exc_info=True)
+            logger.debug(
+                "Could not send stock notification to %s", chat_id, exc_info=True
+            )
         if index % 20 == 0:
             await asyncio.sleep(1)
     logger.info(
@@ -1186,31 +1370,37 @@ async def notify_stock_added(bot: Bot, store: Store, chat_ids: str, product_id: 
     )
 
 
-async def notify_order_success(bot: Bot, store: Store, settings: Settings, order_id: str) -> None:
-    destinations_setting = getattr(settings, "order_notification_chat_ids", "").strip()
-    load_settings = getattr(store, "bot_settings", None)
-    if load_settings:
-        try:
-            destinations_setting = (
-                await load_settings(("order_notification_chat_ids",))
-            ).get("order_notification_chat_ids", destinations_setting).strip()
-        except Exception:
-            logger.exception("Could not load order notification settings")
+async def notify_order_success(
+    bot: Bot, store: Store, order_id: str
+) -> None:
+    try:
+        destinations_setting = (
+            await store.bot_settings(("order_notification_chat_ids",))
+        ).get("order_notification_chat_ids", "").strip()
+    except Exception:
+        logger.exception("Could not load order notification settings")
+        return
     if not destinations_setting:
         return
     try:
         order = await store.order_notification_details(order_id)
         if not order:
-            logger.error("Could not find completed order %s for admin notification", order_id)
+            logger.error(
+                "Could not find completed order %s for admin notification", order_id
+            )
             return
     except Exception:
-        logger.exception("Could not load completed order %s for admin notification", order_id)
+        logger.exception(
+            "Could not load completed order %s for admin notification", order_id
+        )
         return
 
     product = order.get("product") or {}
     customer = order.get("customer") or {}
     username = customer.get("username")
-    customer_name = customer.get("first_name") or (f"@{username}" if username else "Unknown")
+    customer_name = customer.get("first_name") or (
+        f"@{username}" if username else "Unknown"
+    )
     customer_label = html.escape(customer_name)
     if username and customer.get("first_name"):
         customer_label += f" (@{html.escape(username)})"
@@ -1220,13 +1410,19 @@ async def notify_order_success(bot: Bot, store: Store, settings: Settings, order
         timestamp = datetime.fromisoformat(str(created_at).replace("Z", "+00:00"))
         if timestamp.tzinfo is None:
             timestamp = timestamp.replace(tzinfo=timezone.utc)
-        date_text = timestamp.astimezone(timezone(timedelta(hours=7))).strftime("%Y-%m-%d %H:%M:%S")
+        date_text = timestamp.astimezone(timezone(timedelta(hours=7))).strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
     except (TypeError, ValueError):
-        logger.warning("Invalid created_at for completed order %s: %r", order_id, created_at)
+        logger.warning(
+            "Invalid created_at for completed order %s: %r", order_id, created_at
+        )
         date_text = str(created_at or "Unknown")
 
     quantity = int(order["quantity"])
-    reseller_price = Decimal(str(product.get("reseller_price", product.get("price", "0"))))
+    reseller_price = Decimal(
+        str(product.get("reseller_price", product.get("price", "0")))
+    )
     regular_price = Decimal(str(product.get("price", "0")))
     reseller_order = (
         reseller_price < regular_price
@@ -1258,7 +1454,9 @@ async def notify_order_success(bot: Bot, store: Store, settings: Settings, order
             if destination.startswith("@"):
                 destinations.append(destination)
             else:
-                logger.warning("Ignoring invalid order notification destination %r", destination)
+                logger.warning(
+                    "Ignoring invalid order notification destination %r", destination
+                )
     for destination in destinations:
         try:
             await bot.send_message(destination, text, parse_mode="HTML")
@@ -1287,7 +1485,9 @@ async def finish_immediate_welcome(
         try:
             await delete_replaced_message(previous_message)
         except Exception:
-            logger.exception("Could not delete previous welcome screen for Telegram user %s", user.id)
+            logger.exception(
+                "Could not delete previous welcome screen for Telegram user %s", user.id
+            )
     if previous_menu_message and (
         previous_message is None
         or previous_menu_message.message_id != previous_message.message_id
@@ -1295,23 +1495,38 @@ async def finish_immediate_welcome(
         try:
             await delete_replaced_message(previous_menu_message)
         except Exception:
-            logger.exception("Could not delete previous menu for Telegram user %s", user.id)
-    elif not previous_menu_message and previous_message_id and (
-        previous_message is None or previous_message_id != previous_message.message_id
+            logger.exception(
+                "Could not delete previous menu for Telegram user %s", user.id
+            )
+    elif (
+        not previous_menu_message
+        and previous_message_id
+        and (
+            previous_message is None
+            or previous_message_id != previous_message.message_id
+        )
     ):
         try:
-            await message.bot.delete_message(chat_id=user.id, message_id=previous_message_id)
+            await message.bot.delete_message(
+                chat_id=user.id, message_id=previous_message_id
+            )
         except Exception:
-            logger.exception("Could not delete previous welcome message %s", previous_message_id)
+            logger.exception(
+                "Could not delete previous welcome message %s", previous_message_id
+            )
     try:
         await delete_replaced_message(message)
     except Exception:
-        logger.exception("Could not delete /start command for Telegram user %s", user.id)
+        logger.exception(
+            "Could not delete /start command for Telegram user %s", user.id
+        )
 
     try:
         saved_language = await store.user_language(user.id)
     except Exception:
-        logger.exception("Could not load language preference for Telegram user %s", user.id)
+        logger.exception(
+            "Could not load language preference for Telegram user %s", user.id
+        )
     else:
         language = normalize_language(saved_language or initial_language)
         user_language_cache[user.id] = language
@@ -1329,7 +1544,9 @@ async def finish_immediate_welcome(
                     reply_markup=welcome_keyboard(user.id, settings),
                 )
             except Exception:
-                logger.exception("Could not update welcome language for Telegram user %s", user.id)
+                logger.exception(
+                    "Could not update welcome language for Telegram user %s", user.id
+                )
             else:
                 active_screen_messages[user.id] = updated_message
                 menu_keyboard_messages[user.id] = updated_message
@@ -1352,10 +1569,14 @@ async def send_welcome(
         return
     if immediate:
         language = normalize_language(
-            language or user_language_cache.get(user.id) or getattr(user, "language_code", None)
+            language
+            or user_language_cache.get(user.id)
+            or getattr(user, "language_code", None)
         )
     else:
-        language = normalize_language(language or await safe_user_language(store, user.id))
+        language = normalize_language(
+            language or await safe_user_language(store, user.id)
+        )
     if immediate:
         previous_message = active_screen_messages.get(user.id)
         previous_menu_message = menu_keyboard_messages.get(user.id)
@@ -1419,18 +1640,29 @@ async def send_welcome(
         or previous_menu_message.message_id != previous_message.message_id
     ):
         await delete_replaced_message(previous_menu_message)
-    elif not previous_menu_message and previous_message_id and (
-        previous_message is None or previous_message_id != previous_message.message_id
+    elif (
+        not previous_menu_message
+        and previous_message_id
+        and (
+            previous_message is None
+            or previous_message_id != previous_message.message_id
+        )
     ):
         try:
-            await message.bot.delete_message(chat_id=user.id, message_id=previous_message_id)
+            await message.bot.delete_message(
+                chat_id=user.id, message_id=previous_message_id
+            )
         except TelegramBadRequest:
-            logger.debug("Could not delete previous welcome message %s", previous_message_id)
+            logger.debug(
+                "Could not delete previous welcome message %s", previous_message_id
+            )
     settings_data: dict[str, str] = {}
     load_settings = getattr(store, "bot_settings", None)
     if load_settings:
         try:
-            settings_data = await load_settings(("welcome_video_url", "welcome_photo_url"))
+            settings_data = await load_settings(
+                ("welcome_video_url", "welcome_photo_url")
+            )
             welcome_media_cache = settings_data
         except Exception:
             logger.exception("Could not load welcome media settings")
@@ -1481,17 +1713,26 @@ async def send_home_screen(
         or previous_menu_message.message_id != previous_message.message_id
     ):
         await delete_replaced_message(previous_menu_message)
-    elif not previous_menu_message and previous_message_id and (
-        previous_message is None or previous_message_id != previous_message.message_id
+    elif (
+        not previous_menu_message
+        and previous_message_id
+        and (
+            previous_message is None
+            or previous_message_id != previous_message.message_id
+        )
     ):
         try:
             await bot.delete_message(chat_id=user.id, message_id=previous_message_id)
         except TelegramBadRequest:
-            logger.debug("Could not delete previous welcome message %s", previous_message_id)
+            logger.debug(
+                "Could not delete previous welcome message %s", previous_message_id
+            )
     text = welcome_text(user, language)
     settings_data: dict[str, str] = {}
     try:
-        settings_data = await store.bot_settings(("welcome_video_url", "welcome_photo_url"))
+        settings_data = await store.bot_settings(
+            ("welcome_video_url", "welcome_photo_url")
+        )
         welcome_media_cache = settings_data
     except Exception:
         logger.exception("Could not load welcome media settings")
@@ -1527,16 +1768,22 @@ async def send_home_screen(
     return sent
 
 
-async def deliver_order(bot: Bot, store: Store, settings: Settings, order_id: str, chat_id: int) -> None:
+async def deliver_order(
+    bot: Bot, store: Store, settings: Settings, order_id: str, chat_id: int
+) -> None:
     await delete_payment_message(bot, store, order_id)
     delivery = await store.order_delivery_details(order_id)
     credentials = await store.fulfill_order(order_id)
     if not credentials:
         return
-    keys = [decrypt_stock(value, settings.stock_encryption_key) for value in credentials]
+    keys = [
+        decrypt_stock(value, settings.stock_encryption_key) for value in credentials
+    ]
     delivery_message = (delivery or {}).get("delivery_message", "").strip()
     if delivery_message:
-        await bot.send_message(chat_id, html.escape(delivery_message), parse_mode="HTML")
+        await bot.send_message(
+            chat_id, html.escape(delivery_message), parse_mode="HTML"
+        )
     if delivery and delivery.get("delivery_image_url"):
         await bot.send_photo(chat_id, photo=delivery["delivery_image_url"])
     if delivery and delivery.get("delivery_video_url"):
@@ -1564,7 +1811,7 @@ async def deliver_order(bot: Bot, store: Store, settings: Settings, order_id: st
         reply_markup=keyboard(delivery_rows),
     )
     await store.mark_delivered(order_id)
-    await notify_order_success(bot, store, settings, order_id)
+    await notify_order_success(bot, store, order_id)
 
 
 async def delete_payment_message(bot: Bot, store: Store, order_id: str) -> None:
@@ -1637,7 +1884,7 @@ def register_handlers(
     dispatcher: Dispatcher,
     bot: Bot,
     store: Store,
-    payments: KHPayClient,
+    payments: KHQRPayClient,
     settings: Settings,
 ) -> None:
     async def replace_callback_screen(
@@ -1681,12 +1928,16 @@ def register_handlers(
         if not draft["content"]:
             await show_broadcast_prompt(
                 user_id,
-                copy(language, "⚠️ សូមផ្ញើអត្ថបទ ឬ Media យ៉ាងហោចណាស់មួយសិន។", "⚠️ Send at least one text or media item first."),
+                copy(
+                    language,
+                    "⚠️ សូមផ្ញើអត្ថបទ ឬ Media យ៉ាងហោចណាស់មួយសិន។",
+                    "⚠️ Send at least one text or media item first.",
+                ),
             )
             return
         await delete_broadcast_preview(user_id, draft)
         try:
-            destinations = await broadcast_destinations(store, settings)
+            destinations = await broadcast_destinations(store)
             preview_ids = await copy_broadcast_content(
                 bot,
                 user_id,
@@ -1695,10 +1946,16 @@ def register_handlers(
                 draft["buttons"],
             )
         except Exception:
-            logger.exception("Could not prepare broadcast preview for admin %s", user_id)
+            logger.exception(
+                "Could not prepare broadcast preview for admin %s", user_id
+            )
             await show_broadcast_prompt(
                 user_id,
-                copy(language, "មិនអាចបង្កើត Preview បានទេ។ សូមសាកល្បងម្តងទៀត។", "Could not prepare the preview. Please try again."),
+                copy(
+                    language,
+                    "មិនអាចបង្កើត Preview បានទេ។ សូមសាកល្បងម្តងទៀត។",
+                    "Could not prepare the preview. Please try again.",
+                ),
             )
             return
         draft["preview_message_ids"] = preview_ids
@@ -1761,7 +2018,11 @@ def register_handlers(
             if len(draft["content"]) >= 100:
                 await show_broadcast_prompt(
                     user_id,
-                    copy(language, "ដល់កំណត់ 100 សារ/ឯកសារហើយ។ ចុច Preview ដើម្បីបន្ត។", "Broadcast content is limited to 100 messages/files. Preview it to continue."),
+                    copy(
+                        language,
+                        "ដល់កំណត់ 100 សារ/ឯកសារហើយ។ ចុច Preview ដើម្បីបន្ត។",
+                        "Broadcast content is limited to 100 messages/files. Preview it to continue.",
+                    ),
                 )
                 await delete_replaced_message(message)
                 return True
@@ -1772,10 +2033,14 @@ def register_handlers(
                 }
             )
             draft["stage"] = "content"
-            if message.media_group_id and sum(
-                item.get("media_group_id") == message.media_group_id
-                for item in draft["content"]
-            ) > 1:
+            if (
+                message.media_group_id
+                and sum(
+                    item.get("media_group_id") == message.media_group_id
+                    for item in draft["content"]
+                )
+                > 1
+            ):
                 return True
             await show_broadcast_prompt(
                 user_id,
@@ -1809,7 +2074,11 @@ def register_handlers(
             except ValueError:
                 await show_broadcast_prompt(
                     user_id,
-                    copy(language, "ទម្រង់ថ្ងៃ/ម៉ោងមិនត្រឹមត្រូវ។ ប្រើ YYYY-MM-DD HH:MM (ម៉ោងភ្នំពេញ)។", "Invalid date/time. Use YYYY-MM-DD HH:MM (Phnom Penh time)."),
+                    copy(
+                        language,
+                        "ទម្រង់ថ្ងៃ/ម៉ោងមិនត្រឹមត្រូវ។ ប្រើ YYYY-MM-DD HH:MM (ម៉ោងភ្នំពេញ)។",
+                        "Invalid date/time. Use YYYY-MM-DD HH:MM (Phnom Penh time).",
+                    ),
                     "schedule",
                     input_message=message,
                 )
@@ -1817,7 +2086,11 @@ def register_handlers(
             if scheduled_local <= datetime.now(PHNOM_PENH_TIMEZONE):
                 await show_broadcast_prompt(
                     user_id,
-                    copy(language, "ពេលវេលាត្រូវនៅអនាគត។ សូមបញ្ចូលម្ដងទៀត។", "The scheduled time must be in the future. Enter it again."),
+                    copy(
+                        language,
+                        "ពេលវេលាត្រូវនៅអនាគត។ សូមបញ្ចូលម្ដងទៀត។",
+                        "The scheduled time must be in the future. Enter it again.",
+                    ),
                     "schedule",
                     input_message=message,
                 )
@@ -1833,7 +2106,11 @@ def register_handlers(
                 logger.exception("Could not schedule broadcast for admin %s", user_id)
                 await show_broadcast_prompt(
                     user_id,
-                    copy(language, "មិនអាចរក្សាទុក Schedule បានទេ។ សូមព្យាយាមម្ដងទៀត។", "Could not save the schedule. Please try again."),
+                    copy(
+                        language,
+                        "មិនអាចរក្សាទុក Schedule បានទេ។ សូមព្យាយាមម្ដងទៀត។",
+                        "Could not save the schedule. Please try again.",
+                    ),
                     "schedule",
                     input_message=message,
                 )
@@ -1849,12 +2126,16 @@ def register_handlers(
                 ),
                 input_message=message,
                 parse_mode="HTML",
-                reply_markup=keyboard([back_button("admin:broadcast:scheduled", language)]),
+                reply_markup=keyboard(
+                    [back_button("admin:broadcast:scheduled", language)]
+                ),
             )
             return True
         return False
 
-    async def show_catalogs(message: Message, page: int, language: str, edit_message: bool = True) -> None:
+    async def show_catalogs(
+        message: Message, page: int, language: str, edit_message: bool = True
+    ) -> None:
         async def render(text: str, **kwargs: Any) -> None:
             if edit_message:
                 await edit_text_message(message, text, **kwargs)
@@ -1881,7 +2162,11 @@ def register_handlers(
             return
         visible_categories, page, page_count = paginate(categories, page)
         rows = [
-            [InlineKeyboardButton(text=f"🛍 {item['name']}", callback_data=f"c:{item['id']}")]
+            [
+                InlineKeyboardButton(
+                    text=f"🛍 {item['name']}", callback_data=f"c:{item['id']}"
+                )
+            ]
             for item in visible_categories
         ]
         navigation = pagination_row(page, page_count, "shop:catalogs", language)
@@ -1914,7 +2199,11 @@ def register_handlers(
         if not category_data:
             await edit_text_message(
                 message,
-                copy(language, "ប្រភេទផលិតផលនេះមិនមានទៀតទេ។", "This category is no longer available."),
+                copy(
+                    language,
+                    "ប្រភេទផលិតផលនេះមិនមានទៀតទេ។",
+                    "This category is no longer available.",
+                ),
                 reply_markup=keyboard([back_button("shop", language)]),
             )
             return
@@ -1924,13 +2213,19 @@ def register_handlers(
                 message,
                 f"🛍 <b>{html.escape(category_data['name'])}</b>\n"
                 "───────────────────\n"
-                + copy(language, "ប្រភេទនេះមិនទាន់មាន Package ទេ។", "There are no packages in this category yet."),
+                + copy(
+                    language,
+                    "ប្រភេទនេះមិនទាន់មាន Package ទេ។",
+                    "There are no packages in this category yet.",
+                ),
                 parse_mode="HTML",
                 reply_markup=keyboard([back_button("shop", language)]),
             )
             return
         visible_products, page, page_count = paginate(products, page)
-        stock_counts = await asyncio.gather(*(store.available_stock(item["id"]) for item in visible_products))
+        stock_counts = await asyncio.gather(
+            *(store.available_stock(item["id"]) for item in visible_products)
+        )
         rows = []
         for item, stock in zip(visible_products, stock_counts):
             stock_label = str(stock) if stock else copy(language, "អស់ស្តុក", "Out")
@@ -1943,7 +2238,9 @@ def register_handlers(
                     )
                 ]
             )
-        navigation = pagination_row(page, page_count, f"shop:packages:{category_id}", language)
+        navigation = pagination_row(
+            page, page_count, f"shop:packages:{category_id}", language
+        )
         if navigation:
             rows.append(navigation)
         rows.append(back_button("shop", language))
@@ -1958,7 +2255,9 @@ def register_handlers(
             "───────────────────\n"
             f"{intro + chr(10) if intro else ''}Choose a package below:",
         )
-        await edit_text_message(message, text, parse_mode="HTML", reply_markup=keyboard(rows))
+        await edit_text_message(
+            message, text, parse_mode="HTML", reply_markup=keyboard(rows)
+        )
 
     async def show_how_to_buy(
         message: Message,
@@ -1975,24 +2274,44 @@ def register_handlers(
 
         try:
             settings_data = await store.bot_settings(
-                ("how_to_buy_video_url", "how_to_buy_caption", "how_to_buy_caption_km", "how_to_buy_caption_en")
+                (
+                    "how_to_buy_video_url",
+                    "how_to_buy_caption",
+                    "how_to_buy_caption_km",
+                    "how_to_buy_caption_en",
+                )
             )
         except Exception:
             logger.exception("Could not load tutorial settings")
-            await answer(copy(language, "មិនអាចទាញយកវីដេអូណែនាំបានទេ។", "Could not load the tutorial video."))
+            await answer(
+                copy(
+                    language,
+                    "មិនអាចទាញយកវីដេអូណែនាំបានទេ។",
+                    "Could not load the tutorial video.",
+                )
+            )
             return
         video = settings_data.get("how_to_buy_video_url")
         if not video:
-            await answer(copy(language, "មិនទាន់មានវីដេអូណែនាំទេ។", "The tutorial video is not configured yet."))
+            await answer(
+                copy(
+                    language,
+                    "មិនទាន់មានវីដេអូណែនាំទេ។",
+                    "The tutorial video is not configured yet.",
+                )
+            )
             return
         caption = (
-            settings_data.get(f"how_to_buy_caption_{language}") or settings_data.get("how_to_buy_caption", "")
+            settings_data.get(f"how_to_buy_caption_{language}")
+            or settings_data.get("how_to_buy_caption", "")
         ).strip()[:1024]
         sent = await message.answer_video(video=video, caption=caption or None)
         if replace_user_screen and user_id is not None:
             await switch_active_screen(user_id, sent, message)
 
-    async def show_admin_settings(message: Message, language: str, section: str | None = None) -> None:
+    async def show_admin_settings(
+        message: Message, language: str, section: str | None = None
+    ) -> None:
         if section is None:
             rows = [
                 [
@@ -2036,7 +2355,11 @@ def register_handlers(
         else:
             await edit_text_message(
                 message,
-                copy(language, "រកមិនឃើញផ្នែក Settings ទេ។", "Settings section not found."),
+                copy(
+                    language,
+                    "រកមិនឃើញផ្នែក Settings ទេ។",
+                    "Settings section not found.",
+                ),
                 reply_markup=keyboard([back_button("admin:settings", language)]),
             )
             return
@@ -2047,7 +2370,11 @@ def register_handlers(
             logger.exception("Could not load bot settings for admin")
             await edit_text_message(
                 message,
-                copy(language, "មិនអាចទាញយក Bot settings បានទេ។", "Could not load bot settings."),
+                copy(
+                    language,
+                    "មិនអាចទាញយក Bot settings បានទេ។",
+                    "Could not load bot settings.",
+                ),
                 reply_markup=keyboard([back_button("admin", language)]),
             )
             return
@@ -2062,7 +2389,9 @@ def register_handlers(
         rows: list[list[InlineKeyboardButton]] = []
         if section == "media":
             welcome_media_state = state(
-                "welcome_photo_url" if values.get("welcome_photo_url") else "welcome_video_url"
+                "welcome_photo_url"
+                if values.get("welcome_photo_url")
+                else "welcome_video_url"
             )
             rows.extend(
                 [
@@ -2080,12 +2409,16 @@ def register_handlers(
                     ],
                 ]
             )
-            welcome_media_is_configured = bool(values.get("welcome_photo_url") or values.get("welcome_video_url"))
+            welcome_media_is_configured = bool(
+                values.get("welcome_photo_url") or values.get("welcome_video_url")
+            )
             if welcome_media_is_configured:
                 rows.append(
                     [
                         InlineKeyboardButton(
-                            text=copy(language, "🗑 លុប Welcome media", "🗑 Clear Welcome media"),
+                            text=copy(
+                                language, "🗑 លុប Welcome media", "🗑 Clear Welcome media"
+                            ),
                             callback_data="admin:setting:clear:welcome_media",
                         )
                     ]
@@ -2094,7 +2427,11 @@ def register_handlers(
                 rows.append(
                     [
                         InlineKeyboardButton(
-                            text=copy(language, "🗑 លុប Tutorial video", "🗑 Clear Tutorial video"),
+                            text=copy(
+                                language,
+                                "🗑 លុប Tutorial video",
+                                "🗑 Clear Tutorial video",
+                            ),
                             callback_data="admin:setting:clear:how_to_buy_video_url",
                         )
                     ]
@@ -2115,7 +2452,11 @@ def register_handlers(
                     rows.append(
                         [
                             InlineKeyboardButton(
-                                text=copy(language, f"🗑 លុប {khmer_label}", f"🗑 Clear {english_label}"),
+                                text=copy(
+                                    language,
+                                    f"🗑 លុប {khmer_label}",
+                                    f"🗑 Clear {english_label}",
+                                ),
                                 callback_data=f"admin:setting:clear:{key}",
                             )
                         ]
@@ -2134,14 +2475,16 @@ def register_handlers(
 
         deposit = await store.create_wallet_deposit(user.id, f"{amount:.2f}")
         deposit_id = str(deposit["id"])
-        payment = await payments.create_payment(f"{amount:.2f}", deposit_id, user.id)
+        payment = await payments.create_payment(f"{amount:.2f}", deposit_id)
         deeplink = aba_mobile_deeplink(payment["qr_string"])
         open_url = aba_mobile_redirect_url(settings.app_base_url or "", deposit_id)
-        await store.set_wallet_deposit_payment(deposit_id, str(payment["transaction_id"]), deeplink)
+        await store.set_wallet_deposit_payment(
+            deposit_id, str(payment["transaction_id"]), deeplink
+        )
         caption = copy(
             language,
-            f"💰 <b>បញ្ចូលប្រាក់ {money(amount)}</b>\n\nសូមស្កេន KHQR ដើម្បីបញ្ចូលប្រាក់ទៅក្នុង Wallet។ សមតុល្យនឹងកើនឡើងបន្ទាប់ពី KHPAY បញ្ជាក់ការទូទាត់។",
-            f"💰 <b>Add {money(amount)} to your wallet</b>\n\nScan the KHQR to add funds. Your balance is credited after KHPAY confirms payment.",
+            f"💰 <b>បញ្ចូលប្រាក់ {money(amount)}</b>\n\nសូមស្កេន KHQR ដើម្បីបញ្ចូលប្រាក់ទៅក្នុង Wallet។ សមតុល្យនឹងកើនឡើងបន្ទាប់ពី KHQRPay បញ្ជាក់ការទូទាត់។",
+            f"💰 <b>Add {money(amount)} to your wallet</b>\n\nScan the KHQR to add funds. Your balance is credited after KHQRPay confirms payment.",
         )
         sent = await bot.send_photo(
             user.id,
@@ -2182,7 +2525,9 @@ def register_handlers(
             sent if isinstance(sent, Message) else message,
         )
 
-    async def show_customer_action(message: Message, user: Any, text: str, language: str) -> bool:
+    async def show_customer_action(
+        message: Message, user: Any, text: str, language: str
+    ) -> bool:
         action = text.strip().casefold()
         if action in {"/start", "start", "🛍 buy now", "buy now"}:
             await send_welcome(message, store, settings, language, immediate=True)
@@ -2191,7 +2536,9 @@ def register_handlers(
                 balance = await store.wallet_balance(user.id)
                 is_reseller = await store.is_reseller(user.id)
             except Exception as exc:
-                logger.exception("Could not load account wallet for Telegram user %s", user.id)
+                logger.exception(
+                    "Could not load account wallet for Telegram user %s", user.id
+                )
                 await send_replacing_screen(
                     message,
                     user.id,
@@ -2229,16 +2576,79 @@ def register_handlers(
             await send_replacing_screen(
                 message,
                 user.id,
-                copy(language, "💰 <b>ជ្រើសរើសចំនួនទឹកប្រាក់ដែលអ្នកចង់បញ្ចូល៖</b>", "💰 <b>Choose the amount you want to deposit:</b>"),
+                copy(
+                    language,
+                    "💰 <b>ជ្រើសរើសចំនួនទឹកប្រាក់ដែលអ្នកចង់បញ្ចូល៖</b>",
+                    "💰 <b>Choose the amount you want to deposit:</b>",
+                ),
                 parse_mode="HTML",
                 reply_markup=wallet_deposit_keyboard(language),
             )
-        elif action in {"🎮 games service", "games service"}:
+        elif action in {
+            "🛍 digital products",
+            "digital products",
+            "🎮 games service",
+            "games service",
+        }:
             await show_catalogs(message, 0, language, edit_message=False)
         elif action in {"🛒 my orders", "my orders", "orders"}:
-            await show_order_history(message, user.id, 0, language, replace_user_screen=True)
+            await show_order_history(
+                message, user.id, 0, language, replace_user_screen=True
+            )
         elif action in {"🎥 how to buy", "how to buy"}:
             await show_how_to_buy(message, language, replace_user_screen=True)
+        elif action in {"🔗 install group", "install group"}:
+            try:
+                install_group_url = (
+                    await store.bot_settings(("install_group_url",))
+                ).get("install_group_url", "")
+            except Exception:
+                logger.exception("Could not load install group URL")
+                await send_replacing_screen(
+                    message,
+                    user.id,
+                    copy(
+                        language,
+                        "មិនអាចទាញយកតំណ Group បានទេ។",
+                        "Could not load the install group link.",
+                    ),
+                )
+                return True
+            if not install_group_url:
+                await send_replacing_screen(
+                    message,
+                    user.id,
+                    copy(
+                        language,
+                        "មិនទាន់មានតំណ Group ដំឡើងទេ។",
+                        "The install group link is not configured yet.",
+                    ),
+                )
+            else:
+                await send_replacing_screen(
+                    message,
+                    user.id,
+                    copy(
+                        language,
+                        "ចូល Group ដំឡើងតាមតំណខាងក្រោម៖",
+                        "Join the install group using the link below:",
+                    ),
+                    reply_markup=keyboard(
+                        [
+                            [
+                                InlineKeyboardButton(
+                                    text=copy(
+                                        language,
+                                        "🔗 ចូល Group",
+                                        "🔗 Open install group",
+                                    ),
+                                    url=install_group_url,
+                                )
+                            ],
+                            back_button(language=language),
+                        ]
+                    ),
+                )
         else:
             return False
         return True
@@ -2351,19 +2761,47 @@ def register_handlers(
             "description": copy(language, "ព័ត៌មានលម្អិត", "Details"),
             "price": copy(language, "តម្លៃទូទៅ", "Customer price"),
             "reseller_price": copy(language, "តម្លៃ Reseller", "Reseller price"),
-            "delivery_message": copy(language, "សារ/របៀបប្រើក្រោយទិញ", "After-order message/instructions"),
+            "delivery_message": copy(
+                language, "សារ/របៀបប្រើក្រោយទិញ", "After-order message/instructions"
+            ),
             "delivery_image": copy(language, "រូបភាពក្រោយទិញ", "After-order image"),
             "delivery_video": copy(language, "វីដេអូក្រោយទិញ", "After-order video"),
         }
         prompts = {
-            "media": copy(language, "សូមផ្ញើរូបភាព ឬវីដេអូ Package។", "Send a package photo or video."),
+            "media": copy(
+                language,
+                "សូមផ្ញើរូបភាព ឬវីដេអូ Package។",
+                "Send a package photo or video.",
+            ),
             "name": copy(language, "សូមបញ្ចូលឈ្មោះផលិតផល។", "Enter the product name."),
-            "description": copy(language, "សូមបញ្ចូលព័ត៌មានលម្អិត។", "Enter the details."),
-            "price": copy(language, "សូមបញ្ចូលតម្លៃអតិថិជន (USD)។", "Enter the customer price (USD)."),
-            "reseller_price": copy(language, "សូមបញ្ចូលតម្លៃ Reseller (USD) ដែលទាបជាងតម្លៃទូទៅ។", "Enter a reseller price (USD) lower than the customer price."),
-            "delivery_message": copy(language, "ផ្ញើសារ ឬរបៀបប្រើដែលចង់ឲ្យអតិថិជនទទួលក្រោយ Order។ ផ្ញើ - ដើម្បីលុប។", "Send the message or usage instructions customers should receive after ordering. Send - to clear."),
-            "delivery_image": copy(language, "ផ្ញើរូបភាពសម្រាប់ផ្ញើក្រោយ Order។", "Send the image customers should receive after ordering."),
-            "delivery_video": copy(language, "ផ្ញើវីដេអូសម្រាប់ផ្ញើក្រោយ Order។", "Send the video customers should receive after ordering."),
+            "description": copy(
+                language, "សូមបញ្ចូលព័ត៌មានលម្អិត។", "Enter the details."
+            ),
+            "price": copy(
+                language,
+                "សូមបញ្ចូលតម្លៃអតិថិជន (USD)។",
+                "Enter the customer price (USD).",
+            ),
+            "reseller_price": copy(
+                language,
+                "សូមបញ្ចូលតម្លៃ Reseller (USD) ដែលទាបជាងតម្លៃទូទៅ។",
+                "Enter a reseller price (USD) lower than the customer price.",
+            ),
+            "delivery_message": copy(
+                language,
+                "ផ្ញើសារ ឬរបៀបប្រើដែលចង់ឲ្យអតិថិជនទទួលក្រោយ Order។ ផ្ញើ - ដើម្បីលុប។",
+                "Send the message or usage instructions customers should receive after ordering. Send - to clear.",
+            ),
+            "delivery_image": copy(
+                language,
+                "ផ្ញើរូបភាពសម្រាប់ផ្ញើក្រោយ Order។",
+                "Send the image customers should receive after ordering.",
+            ),
+            "delivery_video": copy(
+                language,
+                "ផ្ញើវីដេអូសម្រាប់ផ្ញើក្រោយ Order។",
+                "Send the video customers should receive after ordering.",
+            ),
         }
         wizard["step_index"] = step_number - 1
         rows: list[list[InlineKeyboardButton]] = []
@@ -2382,7 +2820,9 @@ def register_handlers(
             rows.append(
                 [
                     InlineKeyboardButton(
-                        text=copy(language, "⏩ រំលង / ទុកដដែល", "⏩ Skip / Keep current"),
+                        text=copy(
+                            language, "⏩ រំលង / ទុកដដែល", "⏩ Skip / Keep current"
+                        ),
                         callback_data=f"admin:wizard-skip:{step}",
                     )
                 ]
@@ -2427,7 +2867,13 @@ def register_handlers(
         kind = wizard["kind"]
         if kind == "product":
             if not values.get("name") or not values.get("price"):
-                raise ValueError(copy(language, "ឈ្មោះ និងតម្លៃទូទៅត្រូវតែបញ្ចូល។", "Product name and customer price are required."))
+                raise ValueError(
+                    copy(
+                        language,
+                        "ឈ្មោះ និងតម្លៃទូទៅត្រូវតែបញ្ចូល។",
+                        "Product name and customer price are required.",
+                    )
+                )
             price = Decimal(str(values["price"]))
             reseller_price = Decimal(str(values.get("reseller_price") or price))
             if (
@@ -2437,13 +2883,21 @@ def register_handlers(
                 or reseller_price <= 0
                 or reseller_price > price
             ):
-                raise ValueError(copy(language, "តម្លៃមិនត្រឹមត្រូវទេ។ តម្លៃ Reseller ត្រូវមិនលើសតម្លៃអតិថិជន។", "Invalid prices. Reseller price must not exceed the customer price."))
+                raise ValueError(
+                    copy(
+                        language,
+                        "តម្លៃមិនត្រឹមត្រូវទេ។ តម្លៃ Reseller ត្រូវមិនលើសតម្លៃអតិថិជន។",
+                        "Invalid prices. Reseller price must not exceed the customer price.",
+                    )
+                )
 
             media_url = None
             media_type = None
             if values.get("media_file_id"):
                 media_type = values["media_type"]
-                media_url = await upload_product_media(bot, settings, values["media_file_id"], media_type)
+                media_url = await upload_product_media(
+                    bot, settings, values["media_file_id"], media_type
+                )
             delivery_image_url = values.get("delivery_image_url")
             if values.get("delivery_image_file_id"):
                 delivery_image_url = await upload_product_media(
@@ -2462,7 +2916,13 @@ def register_handlers(
                 )
             if wizard["action"] == "product_add":
                 if wizard.get("category_id") is None:
-                    raise ValueError(copy(language, "សូមជ្រើសរើស Catalog ជាមុនសិន។", "Choose a catalog first."))
+                    raise ValueError(
+                        copy(
+                            language,
+                            "សូមជ្រើសរើស Catalog ជាមុនសិន។",
+                            "Choose a catalog first.",
+                        )
+                    )
                 await store.create_product(
                     wizard["category_id"],
                     values["name"],
@@ -2494,7 +2954,13 @@ def register_handlers(
             return f"ap:{wizard['target_id']}"
 
         if not values.get("name"):
-            raise ValueError(copy(language, "ឈ្មោះ Catalog ត្រូវតែបញ្ចូល។", "Catalog name is required."))
+            raise ValueError(
+                copy(
+                    language,
+                    "ឈ្មោះ Catalog ត្រូវតែបញ្ចូល។",
+                    "Catalog name is required.",
+                )
+            )
         category_values = {
             "name": values["name"],
             "description": values.get("description", ""),
@@ -2502,7 +2968,9 @@ def register_handlers(
         if wizard["action"] == "category_add":
             await store.client.table("categories").insert(category_values).execute()
             return "admin:catalogs"
-        await store.client.table("categories").update(category_values).eq("id", wizard["target_id"]).execute()
+        await store.client.table("categories").update(category_values).eq(
+            "id", wizard["target_id"]
+        ).execute()
         return f"ac:{wizard['target_id']}"
 
     @router.callback_query(F.data == "home")
@@ -2511,7 +2979,9 @@ def register_handlers(
         pending_wallet_amount.discard(callback.from_user.id)
         pending_admin_media.pop(callback.from_user.id, None)
         language = await safe_user_language(store, callback.from_user.id)
-        welcome_message = await send_home_screen(bot, callback.from_user, store, settings, language)
+        welcome_message = await send_home_screen(
+            bot, callback.from_user, store, settings, language
+        )
         welcome_message_ids[callback.from_user.id] = welcome_message.message_id
 
     @router.callback_query(F.data == "language")
@@ -2538,7 +3008,10 @@ def register_handlers(
         try:
             await store.set_user_language(callback.from_user.id, language)
         except Exception:
-            logger.exception("Could not save language preference for Telegram user %s", callback.from_user.id)
+            logger.exception(
+                "Could not save language preference for Telegram user %s",
+                callback.from_user.id,
+            )
         await safe_upsert_user(
             store,
             callback.from_user.id,
@@ -2547,7 +3020,9 @@ def register_handlers(
             language,
         )
         await callback.answer()
-        welcome_message = await send_home_screen(bot, callback.from_user, store, settings, language)
+        welcome_message = await send_home_screen(
+            bot, callback.from_user, store, settings, language
+        )
         welcome_message_ids[callback.from_user.id] = welcome_message.message_id
 
     @router.callback_query(F.data.in_({"how_to_buy", "guide"}))
@@ -2563,7 +3038,11 @@ def register_handlers(
         language = await safe_user_language(store, callback.from_user.id)
         sent = await edit_text_message(
             callback.message,
-            copy(language, "💰 <b>ជ្រើសរើសចំនួនទឹកប្រាក់ដែលអ្នកចង់បញ្ចូល៖</b>", "💰 <b>Choose the amount you want to deposit:</b>"),
+            copy(
+                language,
+                "💰 <b>ជ្រើសរើសចំនួនទឹកប្រាក់ដែលអ្នកចង់បញ្ចូល៖</b>",
+                "💰 <b>Choose the amount you want to deposit:</b>",
+            ),
             parse_mode="HTML",
             reply_markup=wallet_deposit_keyboard(language),
         )
@@ -2591,7 +3070,10 @@ def register_handlers(
         try:
             await start_wallet_deposit(callback.from_user, amount, language)
         except Exception as exc:
-            logger.exception("Could not start wallet deposit for Telegram user %s", callback.from_user.id)
+            logger.exception(
+                "Could not start wallet deposit for Telegram user %s",
+                callback.from_user.id,
+            )
             await bot.send_message(
                 callback.from_user.id,
                 wallet_error_message(
@@ -2608,29 +3090,69 @@ def register_handlers(
         language = await safe_user_language(store, callback.from_user.id)
         deposit = await store.wallet_deposit_for_user(deposit_id, callback.from_user.id)
         if not deposit:
-            await callback.answer(copy(language, "រកមិនឃើញការបញ្ចូលប្រាក់នេះទេ។", "Deposit not found."), show_alert=True)
+            await callback.answer(
+                copy(language, "រកមិនឃើញការបញ្ចូលប្រាក់នេះទេ។", "Deposit not found."),
+                show_alert=True,
+            )
             return
         try:
             payment = await payments.check_payment(str(deposit["transaction_id"]))
             status = payment.get("status")
             if status == "paid":
-                if Decimal(str(payment.get("amount"))) != Decimal(str(deposit["amount"])):
-                    await callback.answer(copy(language, "ចំនួនទឹកប្រាក់មិនត្រូវគ្នា។", "Payment amount mismatch."), show_alert=True)
+                if Decimal(str(payment.get("amount"))) != Decimal(
+                    str(deposit["amount"])
+                ):
+                    await callback.answer(
+                        copy(
+                            language,
+                            "ចំនួនទឹកប្រាក់មិនត្រូវគ្នា។",
+                            "Payment amount mismatch.",
+                        ),
+                        show_alert=True,
+                    )
                     return
                 completed = await complete_wallet_deposit(bot, store, deposit, language)
                 await callback.answer(
-                    copy(language, "បានបញ្ចូលប្រាក់ជោគជ័យ។", "Wallet credited successfully.")
-                    if completed else copy(language, "ការបញ្ចូលប្រាក់នេះបានដំណើរការរួចហើយ។", "This deposit was already processed."),
+                    (
+                        copy(
+                            language,
+                            "បានបញ្ចូលប្រាក់ជោគជ័យ។",
+                            "Wallet credited successfully.",
+                        )
+                        if completed
+                        else copy(
+                            language,
+                            "ការបញ្ចូលប្រាក់នេះបានដំណើរការរួចហើយ។",
+                            "This deposit was already processed.",
+                        )
+                    ),
                     show_alert=True,
                 )
             elif status in {"expired", "failed"}:
                 await expire_wallet_deposit(bot, store, deposit, status)
-                await callback.answer(copy(language, "ការទូទាត់មិនបានបញ្ចប់។", "Payment was not completed."), show_alert=True)
+                await callback.answer(
+                    copy(
+                        language, "ការទូទាត់មិនបានបញ្ចប់។", "Payment was not completed."
+                    ),
+                    show_alert=True,
+                )
             else:
-                await callback.answer(copy(language, "មិនទាន់ទទួលបានការទូទាត់ទេ។", "Payment has not been received yet."), show_alert=True)
+                await callback.answer(
+                    copy(
+                        language,
+                        "មិនទាន់ទទួលបានការទូទាត់ទេ។",
+                        "Payment has not been received yet.",
+                    ),
+                    show_alert=True,
+                )
         except Exception:
             logger.exception("Could not check wallet deposit %s", deposit_id)
-            await callback.answer(copy(language, "មិនអាចពិនិត្យការទូទាត់បានទេ។", "Could not check payment."), show_alert=True)
+            await callback.answer(
+                copy(
+                    language, "មិនអាចពិនិត្យការទូទាត់បានទេ។", "Could not check payment."
+                ),
+                show_alert=True,
+            )
 
     @router.callback_query(F.data == "shop")
     async def shop(callback: CallbackQuery) -> None:
@@ -2642,7 +3164,9 @@ def register_handlers(
     async def shop_catalog_page(callback: CallbackQuery) -> None:
         await callback.answer()
         language = await safe_user_language(store, callback.from_user.id)
-        await show_catalogs(callback.message, int(callback.data.rsplit(":", 1)[1]), language)
+        await show_catalogs(
+            callback.message, int(callback.data.rsplit(":", 1)[1]), language
+        )
 
     @router.callback_query(F.data.startswith("shop:packages:"))
     async def shop_package_page(callback: CallbackQuery) -> None:
@@ -2650,7 +3174,9 @@ def register_handlers(
         language = await safe_user_language(store, callback.from_user.id)
         category_id, page = callback.data[len("shop:packages:") :].rsplit(":", 1)
         is_reseller = await store.is_reseller(callback.from_user.id)
-        await show_packages(callback.message, category_id, int(page), language, is_reseller)
+        await show_packages(
+            callback.message, category_id, int(page), language, is_reseller
+        )
 
     @router.callback_query(F.data.startswith("c:"))
     async def category(callback: CallbackQuery) -> None:
@@ -2667,12 +3193,18 @@ def register_handlers(
         product_data = await store.product(callback.data[2:])
         if not product_data:
             await callback.message.edit_text(
-                copy(language, "ផលិតផលនេះមិនមានទៀតទេ។", "This product is no longer available."),
+                copy(
+                    language,
+                    "ផលិតផលនេះមិនមានទៀតទេ។",
+                    "This product is no longer available.",
+                ),
                 reply_markup=keyboard([back_button("shop", language)]),
             )
             return
         is_reseller = await store.is_reseller(callback.from_user.id)
-        await show_product(callback.message, product_data, 1, language, is_reseller=is_reseller)
+        await show_product(
+            callback.message, product_data, 1, language, is_reseller=is_reseller
+        )
 
     async def show_product(
         message: Message,
@@ -2693,7 +3225,11 @@ def register_handlers(
                 [
                     InlineKeyboardButton(
                         text="➖" if quantity > 1 else "·",
-                        callback_data=f"qty:{product_data['id']}:{quantity - 1}" if quantity > 1 else "noop",
+                        callback_data=(
+                            f"qty:{product_data['id']}:{quantity - 1}"
+                            if quantity > 1
+                            else "noop"
+                        ),
                     ),
                     InlineKeyboardButton(
                         text=f"{copy(language, 'ចំនួន', 'Qty')}: {quantity}",
@@ -2701,12 +3237,18 @@ def register_handlers(
                     ),
                     InlineKeyboardButton(
                         text="➕" if quantity < max_quantity else "·",
-                        callback_data=f"qty:{product_data['id']}:{quantity + 1}" if quantity < max_quantity else "noop",
+                        callback_data=(
+                            f"qty:{product_data['id']}:{quantity + 1}"
+                            if quantity < max_quantity
+                            else "noop"
+                        ),
                     ),
                 ]
             )
             total = unit_price * quantity
-            wallet_balance = Decimal(str(await store.wallet_balance(message.chat.id if message.chat else 0)))
+            wallet_balance = Decimal(
+                str(await store.wallet_balance(message.chat.id if message.chat else 0))
+            )
             rows.extend(
                 checkout_payment_rows(
                     product_data["id"],
@@ -2717,10 +3259,21 @@ def register_handlers(
                 )
             )
         else:
-            rows.append([InlineKeyboardButton(text=copy(language, "អស់ស្តុក", "Out of stock"), callback_data="noop")])
+            rows.append(
+                [
+                    InlineKeyboardButton(
+                        text=copy(language, "អស់ស្តុក", "Out of stock"),
+                        callback_data="noop",
+                    )
+                ]
+            )
         rows.append(back_button(f"c:{product_data['category_id']}", language))
-        category_title = f"🛍 {html.escape(category_data['name'])}\n" if category_data else ""
-        description = description_preview(product_data.get("description") or "", language)
+        category_title = (
+            f"🛍 {html.escape(category_data['name'])}\n" if category_data else ""
+        )
+        description = description_preview(
+            product_data.get("description") or "", language
+        )
         unit_price_label = (
             copy(language, "តម្លៃឯកតា Reseller", "Reseller unit price")
             if is_reseller
@@ -2747,7 +3300,9 @@ def register_handlers(
                 media = (
                     InputMediaVideo(media=media_url, caption=text, parse_mode="HTML")
                     if video_url
-                    else InputMediaPhoto(media=media_url, caption=text, parse_mode="HTML")
+                    else InputMediaPhoto(
+                        media=media_url, caption=text, parse_mode="HTML"
+                    )
                 )
                 await message.edit_media(
                     media=media,
@@ -2773,15 +3328,24 @@ def register_handlers(
                     try:
                         await message.delete()
                     except TelegramBadRequest:
-                        logger.debug("Could not delete previous product message %s", message.message_id)
+                        logger.debug(
+                            "Could not delete previous product message %s",
+                            message.message_id,
+                        )
         elif edit_message and (message.photo or message.video):
-            await message.edit_caption(caption=text, parse_mode="HTML", reply_markup=markup)
+            await message.edit_caption(
+                caption=text, parse_mode="HTML", reply_markup=markup
+            )
         elif not edit_message:
-            sent_message = await message.answer(text, parse_mode="HTML", reply_markup=markup)
+            sent_message = await message.answer(
+                text, parse_mode="HTML", reply_markup=markup
+            )
         else:
             await message.edit_text(text, parse_mode="HTML", reply_markup=markup)
         if sent_message and not edit_message and message.from_user:
-            return await switch_active_screen(message.from_user.id, sent_message, message)
+            return await switch_active_screen(
+                message.from_user.id, sent_message, message
+            )
         return sent_message
 
     @router.callback_query(F.data.startswith("qty:"))
@@ -2792,7 +3356,11 @@ def register_handlers(
         product_data = await store.product(product_id)
         if not product_data:
             await callback.message.edit_text(
-                copy(language, "ផលិតផលនេះមិនមានទៀតទេ។", "This product is no longer available."),
+                copy(
+                    language,
+                    "ផលិតផលនេះមិនមានទៀតទេ។",
+                    "This product is no longer available.",
+                ),
                 reply_markup=keyboard([back_button("shop", language)]),
             )
             return
@@ -2812,29 +3380,42 @@ def register_handlers(
     @router.callback_query(F.data.startswith("b:"))
     async def buy(callback: CallbackQuery) -> None:
         language = await safe_user_language(store, callback.from_user.id)
-        await callback.answer(copy(language, "កំពុងបង្កើតការទូទាត់...", "Creating payment..."))
+        await callback.answer(
+            copy(language, "កំពុងបង្កើតការទូទាត់...", "Creating payment...")
+        )
         _, product_id, quantity_text = callback.data.split(":")
         order = None
         try:
             product_data = await store.product(product_id)
             if not product_data:
                 raise RuntimeError("Product is no longer available")
-            order = await store.reserve_order(callback.from_user.id, product_id, int(quantity_text))
+            order = await store.reserve_order(
+                callback.from_user.id, product_id, int(quantity_text)
+            )
             payment = await payments.create_payment(
                 str(order["total"]),
                 str(order["id"]),
-                callback.from_user.id,
             )
             aba_deeplink = aba_mobile_deeplink(payment["qr_string"])
-            open_url = aba_mobile_redirect_url(settings.app_base_url or "", str(order["id"]))
-            await store.set_payment(order["id"], payment["transaction_id"], aba_deeplink)
+            open_url = aba_mobile_redirect_url(
+                settings.app_base_url or "", str(order["id"])
+            )
+            await store.set_payment(
+                order["id"], payment["transaction_id"], aba_deeplink
+            )
         except Exception:
-            logger.exception("Could not create checkout for Telegram user %s", callback.from_user.id)
+            logger.exception(
+                "Could not create checkout for Telegram user %s", callback.from_user.id
+            )
             if order:
                 await store.release_order(str(order["id"]))
             await edit_text_message(
                 callback.message,
-                copy(language, "មិនអាចបង្កើតការទូទាត់បានទេ។ សូមព្យាយាមម្ដងទៀត។", "Could not create payment. Please try again."),
+                copy(
+                    language,
+                    "មិនអាចបង្កើតការទូទាត់បានទេ។ សូមព្យាយាមម្ដងទៀត។",
+                    "Could not create payment. Please try again.",
+                ),
                 reply_markup=welcome_keyboard(callback.from_user.id, settings),
             )
             return
@@ -2853,12 +3434,16 @@ def register_handlers(
             reply_markup=payment_keyboard(str(order["id"]), open_url, language),
         )
         await delete_replaced_message(callback.message)
-        await track_payment_message(bot, store, order["id"], callback.from_user.id, payment_message.message_id)
+        await track_payment_message(
+            bot, store, order["id"], callback.from_user.id, payment_message.message_id
+        )
 
     @router.callback_query(F.data.startswith("bw:"))
     async def buy_with_wallet(callback: CallbackQuery) -> None:
         language = await safe_user_language(store, callback.from_user.id)
-        await callback.answer(copy(language, "កំពុងបញ្ជាក់សមតុល្យ...", "Checking wallet balance..."))
+        await callback.answer(
+            copy(language, "កំពុងបញ្ជាក់សមតុល្យ...", "Checking wallet balance...")
+        )
         _, product_id, quantity_text = callback.data.split(":")
         try:
             order = await store.reserve_wallet_order(
@@ -2867,11 +3452,20 @@ def register_handlers(
                 int(quantity_text),
             )
             await delete_replaced_message(callback.message)
-            await deliver_order(bot, store, settings, str(order["id"]), callback.from_user.id)
+            await deliver_order(
+                bot, store, settings, str(order["id"]), callback.from_user.id
+            )
         except Exception:
-            logger.exception("Could not complete wallet purchase for Telegram user %s", callback.from_user.id)
+            logger.exception(
+                "Could not complete wallet purchase for Telegram user %s",
+                callback.from_user.id,
+            )
             await callback.message.answer(
-                copy(language, "ការទិញដោយសមតុល្យមិនបានសម្រេចទេ។ សូមពិនិត្យសមតុល្យ/ស្តុក ឬទាក់ទងជំនួយ។", "Wallet purchase failed. Check your balance/stock or contact support."),
+                copy(
+                    language,
+                    "ការទិញដោយសមតុល្យមិនបានសម្រេចទេ។ សូមពិនិត្យសមតុល្យ/ស្តុក ឬទាក់ទងជំនួយ។",
+                    "Wallet purchase failed. Check your balance/stock or contact support.",
+                ),
                 reply_markup=welcome_keyboard(callback.from_user.id, settings),
             )
 
@@ -2890,24 +3484,41 @@ def register_handlers(
         data = result.data
         language = await safe_user_language(store, callback.from_user.id)
         if not data:
-            await callback.message.answer(copy(language, "រកមិនឃើញការបញ្ជាទិញទេ។", "Order not found."))
+            await callback.message.answer(
+                copy(language, "រកមិនឃើញការបញ្ជាទិញទេ។", "Order not found.")
+            )
             return
         if data["status"] != "pending":
             await callback.message.answer(
-                copy(language, "ការបញ្ជាទិញនេះមិនអាចលុបចោលបានទេ។", "This order can no longer be cancelled.")
+                copy(
+                    language,
+                    "ការបញ្ជាទិញនេះមិនអាចលុបចោលបានទេ។",
+                    "This order can no longer be cancelled.",
+                )
             )
             return
         if data.get("transaction_id"):
             try:
-                payment_status = (await payments.check_payment(data["transaction_id"])).get("status")
+                payment_status = (
+                    await payments.check_payment(data["transaction_id"])
+                ).get("status")
             except Exception:
-                logger.exception("Could not verify payment before cancellation for order %s", order_id)
+                logger.exception(
+                    "Could not verify payment before cancellation for order %s",
+                    order_id,
+                )
                 await callback.message.answer(
-                    copy(language, "មិនអាចផ្ទៀងផ្ទាត់ការទូទាត់បានទេ។ សូមសាកល្បងម្ដងទៀត។", "Could not verify payment. Please try again.")
+                    copy(
+                        language,
+                        "មិនអាចផ្ទៀងផ្ទាត់ការទូទាត់បានទេ។ សូមសាកល្បងម្ដងទៀត។",
+                        "Could not verify payment. Please try again.",
+                    )
                 )
                 return
             if payment_status == "paid":
-                await deliver_order(bot, store, settings, order_id, callback.from_user.id)
+                await deliver_order(
+                    bot, store, settings, order_id, callback.from_user.id
+                )
                 return
         await delete_payment_message(bot, store, order_id)
         await store.release_order(order_id)
@@ -2919,7 +3530,9 @@ def register_handlers(
     @router.callback_query(F.data.startswith("check_payment_"))
     async def check_order(callback: CallbackQuery) -> None:
         language = await safe_user_language(store, callback.from_user.id)
-        await callback.answer(copy(language, "កំពុងពិនិត្យការទូទាត់…", "Checking payment…"))
+        await callback.answer(
+            copy(language, "កំពុងពិនិត្យការទូទាត់…", "Checking payment…")
+        )
         order_id = callback.data.removeprefix("check_payment_")
         try:
             result = await (
@@ -2932,30 +3545,50 @@ def register_handlers(
             )
             data = result.data
             if not data:
-                await callback.message.answer(copy(language, "រកមិនឃើញការបញ្ជាទិញទេ។", "Order not found."))
+                await callback.message.answer(
+                    copy(language, "រកមិនឃើញការបញ្ជាទិញទេ។", "Order not found.")
+                )
                 return
             if data["status"] == "paid":
-                await deliver_order(bot, store, settings, order_id, callback.from_user.id)
+                await deliver_order(
+                    bot, store, settings, order_id, callback.from_user.id
+                )
                 return
             if data["status"] != "pending":
                 await callback.message.answer(
-                    copy(language, "ការបញ្ជាទិញនេះមិនសកម្មទៀតទេ។", "This order is no longer active.")
+                    copy(
+                        language,
+                        "ការបញ្ជាទិញនេះមិនសកម្មទៀតទេ។",
+                        "This order is no longer active.",
+                    )
                 )
                 return
             payment = await payments.check_payment(data["transaction_id"])
             status = payment.get("status")
             if status == "paid":
-                await deliver_order(bot, store, settings, order_id, callback.from_user.id)
+                await deliver_order(
+                    bot, store, settings, order_id, callback.from_user.id
+                )
             elif status in {"expired", "failed"}:
-                await expire_payment(bot, store, order_id, callback.from_user.id, status)
+                await expire_payment(
+                    bot, store, order_id, callback.from_user.id, status
+                )
             else:
                 await callback.message.answer(
-                    copy(language, "មិនទាន់ទទួលបានការទូទាត់ទេ។ សូមបញ្ចប់ការទូទាត់តាម KHPAY។", "Payment has not arrived yet. Please complete payment with KHPAY.")
+                    copy(
+                        language,
+                        "មិនទាន់ទទួលបានការទូទាត់ទេ។ សូមបញ្ចប់ការទូទាត់តាម KHQRPay។",
+                        "Payment has not arrived yet. Please complete payment with KHQRPay.",
+                    )
                 )
         except Exception:
             logger.exception("Payment check failed for order %s", order_id)
             await callback.message.answer(
-                copy(language, "មិនអាចពិនិត្យការទូទាត់បានទេ។ សូមព្យាយាមម្ដងទៀតបន្តិចក្រោយ។", "Could not check payment. Please try again shortly.")
+                copy(
+                    language,
+                    "មិនអាចពិនិត្យការទូទាត់បានទេ។ សូមព្យាយាមម្ដងទៀតបន្តិចក្រោយ។",
+                    "Could not check payment. Please try again shortly.",
+                )
             )
 
     @router.callback_query(F.data == "history")
@@ -2978,25 +3611,36 @@ def register_handlers(
             )
             return
         await callback.answer()
-        await show_order_history(callback.message, callback.from_user.id, page, language)
+        await show_order_history(
+            callback.message, callback.from_user.id, page, language
+        )
 
     @router.callback_query(F.data == "support")
     async def support(callback: CallbackQuery) -> None:
         await callback.answer()
         language = await safe_user_language(store, callback.from_user.id)
-        support_username = settings.support_username
         try:
             support_username = (await store.bot_settings(("support_username",))).get(
-                "support_username",
-                support_username,
+                "support_username", ""
             )
         except Exception:
             logger.exception("Could not load support username from bot settings")
+            await callback.message.edit_text(
+                copy(
+                    language,
+                    "មិនអាចទាញយកការកំណត់ជំនួយបានទេ។",
+                    "Could not load support settings.",
+                ),
+                reply_markup=keyboard([back_button(language=language)]),
+            )
+            return
         if support_username:
             rows = [
                 [
                     InlineKeyboardButton(
-                        text=copy(language, "បើកការជជែកជាមួយជំនួយ", "Chat with support"),
+                        text=copy(
+                            language, "បើកការជជែកជាមួយជំនួយ", "Chat with support"
+                        ),
                         url=f"https://t.me/{support_username.lstrip('@')}",
                     )
                 ],
@@ -3008,7 +3652,11 @@ def register_handlers(
             )
         else:
             await callback.message.edit_text(
-                copy(language, "សូមទាក់ទងអ្នកគ្រប់គ្រងហាង។", "Please contact the store administrator."),
+                copy(
+                    language,
+                    "សូមទាក់ទងអ្នកគ្រប់គ្រងហាង។",
+                    "Please contact the store administrator.",
+                ),
                 reply_markup=keyboard([back_button(language=language)]),
             )
 
@@ -3017,30 +3665,91 @@ def register_handlers(
         await callback.answer()
         language = await safe_user_language(store, callback.from_user.id)
         if callback.from_user.id not in settings.admin_ids:
-            await callback.message.edit_text(copy(language, "អ្នកមិនមានសិទ្ធិប្រើប្រាស់ទេ។", "You are not authorized to use this."), reply_markup=keyboard([back_button(language=language)]))
+            await callback.message.edit_text(
+                copy(
+                    language,
+                    "អ្នកមិនមានសិទ្ធិប្រើប្រាស់ទេ។",
+                    "You are not authorized to use this.",
+                ),
+                reply_markup=keyboard([back_button(language=language)]),
+            )
             return
-        result = await store.client.table("products").select("id,name").eq("active", True).order("sort_order").execute()
+        result = (
+            await store.client.table("products")
+            .select("id,name")
+            .eq("active", True)
+            .order("sort_order")
+            .execute()
+        )
         products = result.data or []
-        stock_counts = await asyncio.gather(*(store.available_stock(item["id"]) for item in products))
+        stock_counts = await asyncio.gather(
+            *(store.available_stock(item["id"]) for item in products)
+        )
         lines = [
             f"• {html.escape(item['name'])}: {stock} {copy(language, 'នៅសល់', 'available')}"
             for item, stock in zip(products, stock_counts)
         ]
         total_stock = sum(stock_counts)
         rows = [
-            [InlineKeyboardButton(text=copy(language, "🗂 គ្រប់គ្រង Catalog និង Package", "🗂 Manage catalogs and packages"), callback_data="admin:catalogs")],
-            [InlineKeyboardButton(text=copy(language, "👥 គ្រប់គ្រង Reseller", "👥 Manage resellers"), callback_data="admin:resellers")],
-            [InlineKeyboardButton(text=copy(language, "📥 បញ្ចូលស្តុក (.txt)", "📥 Import stock (.txt)"), callback_data="admin:upload")],
-            [InlineKeyboardButton(text=copy(language, "📣 Broadcast", "📣 Broadcast"), callback_data="admin:broadcast")],
-            [InlineKeyboardButton(text=copy(language, "🕒 Scheduled Broadcasts", "🕒 Scheduled Broadcasts"), callback_data="admin:broadcast:scheduled")],
-            [InlineKeyboardButton(text=copy(language, "⚙️ Settings", "⚙️ Settings"), callback_data="admin:settings")],
-            [InlineKeyboardButton(text=copy(language, "📊 ស្ថិតិការលក់", "📊 Sales summary"), callback_data="admin:sales")],
+            [
+                InlineKeyboardButton(
+                    text=copy(
+                        language,
+                        "🗂 គ្រប់គ្រង Catalog និង Package",
+                        "🗂 Manage catalogs and packages",
+                    ),
+                    callback_data="admin:catalogs",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=copy(language, "👥 គ្រប់គ្រង Reseller", "👥 Manage resellers"),
+                    callback_data="admin:resellers",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=copy(
+                        language, "📥 បញ្ចូលស្តុក (.txt)", "📥 Import stock (.txt)"
+                    ),
+                    callback_data="admin:upload",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=copy(language, "📣 Broadcast", "📣 Broadcast"),
+                    callback_data="admin:broadcast",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=copy(
+                        language, "🕒 Scheduled Broadcasts", "🕒 Scheduled Broadcasts"
+                    ),
+                    callback_data="admin:broadcast:scheduled",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=copy(language, "⚙️ Settings", "⚙️ Settings"),
+                    callback_data="admin:settings",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=copy(language, "📊 ស្ថិតិការលក់", "📊 Sales summary"),
+                    callback_data="admin:sales",
+                )
+            ],
             back_button(language=language),
         ]
         await callback.message.edit_text(
             f"⚙️ <b>{copy(language, 'ផ្ទាំងគ្រប់គ្រងហាង', 'Store admin')}</b>\n"
             f"📦 <b>{copy(language, 'ស្តុកដែលអាចលក់បាន៖', 'Available stock:')} {total_stock}</b>\n"
-            + ("\n".join(lines) or copy(language, "មិនមាន Package សកម្មទេ។", "No active packages.")),
+            + (
+                "\n".join(lines)
+                or copy(language, "មិនមាន Package សកម្មទេ។", "No active packages.")
+            ),
             parse_mode="HTML",
             reply_markup=keyboard(rows),
         )
@@ -3049,18 +3758,27 @@ def register_handlers(
     async def start_broadcast(callback: CallbackQuery) -> None:
         language = await safe_user_language(store, callback.from_user.id)
         if callback.from_user.id not in settings.admin_ids:
-            await callback.answer(copy(language, "អ្នកមិនមានសិទ្ធិប្រើប្រាស់ទេ។", "Not authorized."), show_alert=True)
+            await callback.answer(
+                copy(language, "អ្នកមិនមានសិទ្ធិប្រើប្រាស់ទេ។", "Not authorized."),
+                show_alert=True,
+            )
             return
         if callback.from_user.id in broadcast_active_keys:
             await callback.answer(
-                copy(language, "Broadcast កំពុងដំណើរការរួចហើយ។", "A broadcast is already running for this admin."),
+                copy(
+                    language,
+                    "Broadcast កំពុងដំណើរការរួចហើយ។",
+                    "A broadcast is already running for this admin.",
+                ),
                 show_alert=True,
             )
             return
         old_draft = broadcast_drafts.pop(callback.from_user.id, None)
         if old_draft:
             await delete_broadcast_preview(callback.from_user.id, old_draft)
-            await delete_broadcast_source(bot, callback.from_user.id, old_draft["content"])
+            await delete_broadcast_source(
+                bot, callback.from_user.id, old_draft["content"]
+            )
         broadcast_drafts[callback.from_user.id] = {
             "stage": "content",
             "content": [],
@@ -3086,10 +3804,18 @@ def register_handlers(
     async def broadcast_preview_callback(callback: CallbackQuery) -> None:
         language = await safe_user_language(store, callback.from_user.id)
         if callback.from_user.id not in settings.admin_ids:
-            await callback.answer(copy(language, "អ្នកមិនមានសិទ្ធិប្រើប្រាស់ទេ។", "Not authorized."), show_alert=True)
+            await callback.answer(
+                copy(language, "អ្នកមិនមានសិទ្ធិប្រើប្រាស់ទេ។", "Not authorized."),
+                show_alert=True,
+            )
             return
         if callback.from_user.id not in broadcast_drafts:
-            await callback.answer(copy(language, "មិនមាន Broadcast draft ទេ។", "No active broadcast draft."), show_alert=True)
+            await callback.answer(
+                copy(
+                    language, "មិនមាន Broadcast draft ទេ។", "No active broadcast draft."
+                ),
+                show_alert=True,
+            )
             return
         await callback.answer()
         await preview_broadcast(callback.from_user.id, language)
@@ -3098,11 +3824,19 @@ def register_handlers(
     async def broadcast_buttons_callback(callback: CallbackQuery) -> None:
         language = await safe_user_language(store, callback.from_user.id)
         if callback.from_user.id not in settings.admin_ids:
-            await callback.answer(copy(language, "អ្នកមិនមានសិទ្ធិប្រើប្រាស់ទេ។", "Not authorized."), show_alert=True)
+            await callback.answer(
+                copy(language, "អ្នកមិនមានសិទ្ធិប្រើប្រាស់ទេ។", "Not authorized."),
+                show_alert=True,
+            )
             return
         draft = broadcast_drafts.get(callback.from_user.id)
         if not draft:
-            await callback.answer(copy(language, "មិនមាន Broadcast draft ទេ។", "No active broadcast draft."), show_alert=True)
+            await callback.answer(
+                copy(
+                    language, "មិនមាន Broadcast draft ទេ។", "No active broadcast draft."
+                ),
+                show_alert=True,
+            )
             return
         await delete_broadcast_preview(callback.from_user.id, draft)
         draft["stage"] = "buttons"
@@ -3123,14 +3857,25 @@ def register_handlers(
         language = await safe_user_language(store, callback.from_user.id)
         draft = broadcast_drafts.get(callback.from_user.id)
         if callback.from_user.id not in settings.admin_ids or not draft:
-            await callback.answer(copy(language, "រកមិនឃើញ Broadcast draft ទេ។", "Broadcast draft not found."), show_alert=True)
+            await callback.answer(
+                copy(
+                    language,
+                    "រកមិនឃើញ Broadcast draft ទេ។",
+                    "Broadcast draft not found.",
+                ),
+                show_alert=True,
+            )
             return
         await delete_broadcast_preview(callback.from_user.id, draft)
         draft["stage"] = "content"
         await callback.answer()
         await replace_callback_screen(
             callback,
-            copy(language, "បន្តផ្ញើមាតិកា Broadcast ឬចុច Preview ពេលរួច។", "Send more broadcast content or choose Preview when finished."),
+            copy(
+                language,
+                "បន្តផ្ញើមាតិកា Broadcast ឬចុច Preview ពេលរួច។",
+                "Send more broadcast content or choose Preview when finished.",
+            ),
             broadcast_draft_keyboard("content", language),
         )
 
@@ -3139,7 +3884,10 @@ def register_handlers(
         language = await safe_user_language(store, callback.from_user.id)
         draft = broadcast_drafts.pop(callback.from_user.id, None)
         if callback.from_user.id not in settings.admin_ids:
-            await callback.answer(copy(language, "អ្នកមិនមានសិទ្ធិប្រើប្រាស់ទេ។", "Not authorized."), show_alert=True)
+            await callback.answer(
+                copy(language, "អ្នកមិនមានសិទ្ធិប្រើប្រាស់ទេ។", "Not authorized."),
+                show_alert=True,
+            )
             return
         await callback.answer(copy(language, "បានបោះបង់", "Cancelled"))
         if draft:
@@ -3155,14 +3903,29 @@ def register_handlers(
     async def schedule_broadcast_callback(callback: CallbackQuery) -> None:
         language = await safe_user_language(store, callback.from_user.id)
         draft = broadcast_drafts.get(callback.from_user.id)
-        if callback.from_user.id not in settings.admin_ids or not draft or draft.get("stage") != "preview":
-            await callback.answer(copy(language, "មិនអាចកំណត់ពេល Broadcast នេះបានទេ។", "This broadcast cannot be scheduled."), show_alert=True)
+        if (
+            callback.from_user.id not in settings.admin_ids
+            or not draft
+            or draft.get("stage") != "preview"
+        ):
+            await callback.answer(
+                copy(
+                    language,
+                    "មិនអាចកំណត់ពេល Broadcast នេះបានទេ។",
+                    "This broadcast cannot be scheduled.",
+                ),
+                show_alert=True,
+            )
             return
         draft["stage"] = "schedule"
         await callback.answer()
         await replace_callback_screen(
             callback,
-            copy(language, "បញ្ចូលថ្ងៃ និងម៉ោងតាមទម្រង់ <code>YYYY-MM-DD HH:MM</code> ម៉ោងភ្នំពេញ (Asia/Phnom_Penh)។", "Enter the date and time as <code>YYYY-MM-DD HH:MM</code> in Phnom Penh time (Asia/Phnom_Penh)."),
+            copy(
+                language,
+                "បញ្ចូលថ្ងៃ និងម៉ោងតាមទម្រង់ <code>YYYY-MM-DD HH:MM</code> ម៉ោងភ្នំពេញ (Asia/Phnom_Penh)។",
+                "Enter the date and time as <code>YYYY-MM-DD HH:MM</code> in Phnom Penh time (Asia/Phnom_Penh).",
+            ),
             broadcast_draft_keyboard("schedule", language),
             parse_mode="HTML",
         )
@@ -3172,11 +3935,29 @@ def register_handlers(
         language = await safe_user_language(store, callback.from_user.id)
         user_id = callback.from_user.id
         draft = broadcast_drafts.get(user_id)
-        if user_id not in settings.admin_ids or not draft or draft.get("stage") != "preview":
-            await callback.answer(copy(language, "មិនអាចចាប់ផ្តើម Broadcast នេះបានទេ។", "This broadcast cannot be started."), show_alert=True)
+        if (
+            user_id not in settings.admin_ids
+            or not draft
+            or draft.get("stage") != "preview"
+        ):
+            await callback.answer(
+                copy(
+                    language,
+                    "មិនអាចចាប់ផ្តើម Broadcast នេះបានទេ។",
+                    "This broadcast cannot be started.",
+                ),
+                show_alert=True,
+            )
             return
         if user_id in broadcast_active_keys:
-            await callback.answer(copy(language, "Broadcast កំពុងដំណើរការរួចហើយ។", "A broadcast is already running."), show_alert=True)
+            await callback.answer(
+                copy(
+                    language,
+                    "Broadcast កំពុងដំណើរការរួចហើយ។",
+                    "A broadcast is already running.",
+                ),
+                show_alert=True,
+            )
             return
         await callback.answer()
         await delete_broadcast_preview(user_id, draft)
@@ -3187,9 +3968,20 @@ def register_handlers(
         draft["stage"] = "sending"
         progress_message = await replace_callback_screen(
             callback,
-            copy(language, "⏳ Broadcast កំពុងចាប់ផ្តើម...", "⏳ Broadcast is starting..."),
+            copy(
+                language,
+                "⏳ Broadcast កំពុងចាប់ផ្តើម...",
+                "⏳ Broadcast is starting...",
+            ),
             keyboard(
-                [[InlineKeyboardButton(text=copy(language, "⏹ បញ្ឈប់", "⏹ Stop"), callback_data="admin:broadcast:stop")]]
+                [
+                    [
+                        InlineKeyboardButton(
+                            text=copy(language, "⏹ បញ្ឈប់", "⏹ Stop"),
+                            callback_data="admin:broadcast:stop",
+                        )
+                    ]
+                ]
             ),
         )
 
@@ -3203,7 +3995,6 @@ def register_handlers(
                     draft["buttons"],
                     progress_message,
                     cancel_event,
-                    settings,
                 )
                 await delete_broadcast_source(bot, user_id, draft["content"])
                 broadcast_drafts.pop(user_id, None)
@@ -3220,13 +4011,21 @@ def register_handlers(
                     draft["stage"] = "preview"
                     await preview_broadcast(user_id, language)
                 except Exception:
-                    logger.exception("Could not restore failed broadcast draft for admin %s", user_id)
+                    logger.exception(
+                        "Could not restore failed broadcast draft for admin %s", user_id
+                    )
                     try:
                         await progress_message.edit_text(
-                            copy(language, "❌ Broadcast មិនអាចបញ្ចប់បានទេ។ សូមពិនិត្យ Log។", "❌ Broadcast could not complete. Check the application logs.")
+                            copy(
+                                language,
+                                "❌ Broadcast មិនអាចបញ្ចប់បានទេ។ សូមពិនិត្យ Log។",
+                                "❌ Broadcast could not complete. Check the application logs.",
+                            )
                         )
                     except TelegramBadRequest:
-                        logger.debug("Could not show broadcast failure to admin %s", user_id)
+                        logger.debug(
+                            "Could not show broadcast failure to admin %s", user_id
+                        )
             finally:
                 broadcast_cancel_events.pop(run_key, None)
                 if broadcast_active_keys.get(user_id) == run_key:
@@ -3242,22 +4041,44 @@ def register_handlers(
         key = broadcast_active_keys.get(callback.from_user.id)
         event = broadcast_cancel_events.get(key or "")
         if callback.from_user.id not in settings.admin_ids or event is None:
-            await callback.answer(copy(language, "រកមិនឃើញ Broadcast កំពុងដំណើរការទេ។", "No running broadcast found."), show_alert=True)
+            await callback.answer(
+                copy(
+                    language,
+                    "រកមិនឃើញ Broadcast កំពុងដំណើរការទេ។",
+                    "No running broadcast found.",
+                ),
+                show_alert=True,
+            )
             return
         event.set()
-        await callback.answer(copy(language, "កំពុងបញ្ឈប់ Broadcast...", "Stopping broadcast..."))
+        await callback.answer(
+            copy(language, "កំពុងបញ្ឈប់ Broadcast...", "Stopping broadcast...")
+        )
 
     @router.callback_query(F.data == "admin:broadcast:scheduled")
     async def show_scheduled_broadcasts(callback: CallbackQuery) -> None:
         language = await safe_user_language(store, callback.from_user.id)
         if callback.from_user.id not in settings.admin_ids:
-            await callback.answer(copy(language, "អ្នកមិនមានសិទ្ធិប្រើប្រាស់ទេ។", "Not authorized."), show_alert=True)
+            await callback.answer(
+                copy(language, "អ្នកមិនមានសិទ្ធិប្រើប្រាស់ទេ។", "Not authorized."),
+                show_alert=True,
+            )
             return
         try:
             jobs = await store.scheduled_broadcasts(callback.from_user.id)
         except Exception:
-            logger.exception("Could not load scheduled broadcasts for admin %s", callback.from_user.id)
-            await callback.answer(copy(language, "មិនអាចទាញយក Schedule បានទេ។", "Could not load scheduled broadcasts."), show_alert=True)
+            logger.exception(
+                "Could not load scheduled broadcasts for admin %s",
+                callback.from_user.id,
+            )
+            await callback.answer(
+                copy(
+                    language,
+                    "មិនអាចទាញយក Schedule បានទេ។",
+                    "Could not load scheduled broadcasts.",
+                ),
+                show_alert=True,
+            )
             return
         rows = []
         lines = []
@@ -3275,8 +4096,16 @@ def register_handlers(
                 ]
             )
         rows.append(back_button("admin", language))
-        text = copy(language, "🕒 <b>Broadcast ដែលបានកំណត់ពេល</b>\n", "🕒 <b>Scheduled broadcasts</b>\n")
-        text += "\n".join(lines) if lines else copy(language, "មិនមាន Schedule ទេ។", "No scheduled broadcasts.")
+        text = copy(
+            language,
+            "🕒 <b>Broadcast ដែលបានកំណត់ពេល</b>\n",
+            "🕒 <b>Scheduled broadcasts</b>\n",
+        )
+        text += (
+            "\n".join(lines)
+            if lines
+            else copy(language, "មិនមាន Schedule ទេ។", "No scheduled broadcasts.")
+        )
         await callback.answer()
         await replace_callback_screen(callback, text, keyboard(rows), parse_mode="HTML")
 
@@ -3284,28 +4113,57 @@ def register_handlers(
     async def cancel_scheduled_broadcast_callback(callback: CallbackQuery) -> None:
         language = await safe_user_language(store, callback.from_user.id)
         if callback.from_user.id not in settings.admin_ids:
-            await callback.answer(copy(language, "អ្នកមិនមានសិទ្ធិប្រើប្រាស់ទេ។", "Not authorized."), show_alert=True)
+            await callback.answer(
+                copy(language, "អ្នកមិនមានសិទ្ធិប្រើប្រាស់ទេ។", "Not authorized."),
+                show_alert=True,
+            )
             return
         job_id = callback.data.removeprefix("bcs:")
         try:
             job = await store.cancel_scheduled_broadcast(job_id, callback.from_user.id)
         except Exception:
             logger.exception("Could not cancel scheduled broadcast %s", job_id)
-            await callback.answer(copy(language, "មិនអាចលុប Schedule បានទេ។", "Could not cancel the scheduled broadcast."), show_alert=True)
+            await callback.answer(
+                copy(
+                    language,
+                    "មិនអាចលុប Schedule បានទេ។",
+                    "Could not cancel the scheduled broadcast.",
+                ),
+                show_alert=True,
+            )
             return
         if not job:
-            await callback.answer(copy(language, "Schedule នេះមិនមាន ឬបានចាប់ផ្តើមរួចហើយ។", "Schedule not found or already started."), show_alert=True)
+            await callback.answer(
+                copy(
+                    language,
+                    "Schedule នេះមិនមាន ឬបានចាប់ផ្តើមរួចហើយ។",
+                    "Schedule not found or already started.",
+                ),
+                show_alert=True,
+            )
             return
-        await delete_broadcast_source(bot, callback.from_user.id, job.get("content") or [])
-        await callback.answer(copy(language, "បានលុប Schedule រួចរាល់។", "Scheduled broadcast cancelled."))
+        await delete_broadcast_source(
+            bot, callback.from_user.id, job.get("content") or []
+        )
+        await callback.answer(
+            copy(language, "បានលុប Schedule រួចរាល់។", "Scheduled broadcast cancelled.")
+        )
         await replace_callback_screen(
             callback,
-            copy(language, "✅ បានលុប Schedule រួចរាល់។", "✅ Scheduled broadcast cancelled."),
+            copy(
+                language,
+                "✅ បានលុប Schedule រួចរាល់។",
+                "✅ Scheduled broadcast cancelled.",
+            ),
             keyboard(
                 [
                     [
                         InlineKeyboardButton(
-                            text=copy(language, "🔄 ធ្វើបច្ចុប្បន្នភាពបញ្ជី", "🔄 Refresh list"),
+                            text=copy(
+                                language,
+                                "🔄 ធ្វើបច្ចុប្បន្នភាពបញ្ជី",
+                                "🔄 Refresh list",
+                            ),
                             callback_data="admin:broadcast:scheduled",
                         )
                     ],
@@ -3318,7 +4176,10 @@ def register_handlers(
     async def admin_settings(callback: CallbackQuery) -> None:
         language = await safe_user_language(store, callback.from_user.id)
         if callback.from_user.id not in settings.admin_ids:
-            await callback.answer(copy(language, "អ្នកមិនមានសិទ្ធិប្រើប្រាស់ទេ។", "Not authorized."), show_alert=True)
+            await callback.answer(
+                copy(language, "អ្នកមិនមានសិទ្ធិប្រើប្រាស់ទេ។", "Not authorized."),
+                show_alert=True,
+            )
             return
         pending_admin_media.pop(callback.from_user.id, None)
         pending = pending_admin_input.get(callback.from_user.id)
@@ -3331,11 +4192,21 @@ def register_handlers(
     async def admin_settings_section(callback: CallbackQuery) -> None:
         language = await safe_user_language(store, callback.from_user.id)
         if callback.from_user.id not in settings.admin_ids:
-            await callback.answer(copy(language, "អ្នកមិនមានសិទ្ធិប្រើប្រាស់ទេ។", "Not authorized."), show_alert=True)
+            await callback.answer(
+                copy(language, "អ្នកមិនមានសិទ្ធិប្រើប្រាស់ទេ។", "Not authorized."),
+                show_alert=True,
+            )
             return
         section = callback.data.removeprefix("admin:settings:section:")
         if section not in {"media", *BOT_SETTING_SECTIONS}:
-            await callback.answer(copy(language, "រកមិនឃើញផ្នែក Settings ទេ។", "Settings section not found."), show_alert=True)
+            await callback.answer(
+                copy(
+                    language,
+                    "រកមិនឃើញផ្នែក Settings ទេ។",
+                    "Settings section not found.",
+                ),
+                show_alert=True,
+            )
             return
         await callback.answer()
         await show_admin_settings(callback.message, language, section)
@@ -3344,11 +4215,17 @@ def register_handlers(
     async def set_bot_setting_prompt(callback: CallbackQuery) -> None:
         language = await safe_user_language(store, callback.from_user.id)
         if callback.from_user.id not in settings.admin_ids:
-            await callback.answer(copy(language, "អ្នកមិនមានសិទ្ធិប្រើប្រាស់ទេ។", "Not authorized."), show_alert=True)
+            await callback.answer(
+                copy(language, "អ្នកមិនមានសិទ្ធិប្រើប្រាស់ទេ។", "Not authorized."),
+                show_alert=True,
+            )
             return
         key = callback.data.removeprefix("admin:setting:set:")
         if key not in BOT_SETTING_LABELS:
-            await callback.answer(copy(language, "Setting មិនត្រឹមត្រូវទេ។", "Invalid setting."), show_alert=True)
+            await callback.answer(
+                copy(language, "Setting មិនត្រឹមត្រូវទេ។", "Invalid setting."),
+                show_alert=True,
+            )
             return
         pending_admin_input[callback.from_user.id] = ("bot_setting", key)
         await callback.answer()
@@ -3359,7 +4236,13 @@ def register_handlers(
                 "ផ្ញើតម្លៃថ្មី។ ផ្ញើសញ្ញា - ដើម្បីលុបតម្លៃ។",
                 "Send the new value. Send - to clear it.",
             ),
-            keyboard([back_button(f"admin:settings:section:{bot_setting_section(key)}", language)]),
+            keyboard(
+                [
+                    back_button(
+                        f"admin:settings:section:{bot_setting_section(key)}", language
+                    )
+                ]
+            ),
         )
 
     @router.callback_query(F.data.startswith("admin:setting:clear:"))
@@ -3367,7 +4250,10 @@ def register_handlers(
         global welcome_media_cache
         language = await safe_user_language(store, callback.from_user.id)
         if callback.from_user.id not in settings.admin_ids:
-            await callback.answer(copy(language, "អ្នកមិនមានសិទ្ធិប្រើប្រាស់ទេ។", "Not authorized."), show_alert=True)
+            await callback.answer(
+                copy(language, "អ្នកមិនមានសិទ្ធិប្រើប្រាស់ទេ។", "Not authorized."),
+                show_alert=True,
+            )
             return
         key = callback.data.removeprefix("admin:setting:clear:")
         if key not in BOT_SETTING_LABELS and key not in {
@@ -3376,7 +4262,10 @@ def register_handlers(
             "how_to_buy_video_url",
             "welcome_media",
         }:
-            await callback.answer(copy(language, "Setting មិនត្រឹមត្រូវទេ។", "Invalid setting."), show_alert=True)
+            await callback.answer(
+                copy(language, "Setting មិនត្រឹមត្រូវទេ។", "Invalid setting."),
+                show_alert=True,
+            )
             return
         try:
             if key == "welcome_media":
@@ -3386,22 +4275,35 @@ def register_handlers(
                 await store.set_bot_setting(key, "")
         except Exception:
             logger.exception("Could not clear bot setting %s", key)
-            await callback.answer(copy(language, "មិនអាចរក្សាទុកបានទេ។", "Could not save setting."), show_alert=True)
+            await callback.answer(
+                copy(language, "មិនអាចរក្សាទុកបានទេ។", "Could not save setting."),
+                show_alert=True,
+            )
             return
         if key in {"welcome_media", "welcome_photo_url", "welcome_video_url"}:
             welcome_media_cache = None
         await callback.answer(copy(language, "បានលុបតម្លៃរួចរាល់។", "Setting cleared."))
-        await show_admin_settings(callback.message, language, "media" if key == "welcome_media" else bot_setting_section(key))
+        await show_admin_settings(
+            callback.message,
+            language,
+            "media" if key == "welcome_media" else bot_setting_section(key),
+        )
 
     @router.callback_query(F.data.startswith("admin:media:"))
     async def request_admin_media(callback: CallbackQuery) -> None:
         language = await safe_user_language(store, callback.from_user.id)
         if callback.from_user.id not in settings.admin_ids:
-            await callback.answer(copy(language, "អ្នកមិនមានសិទ្ធិប្រើប្រាស់ទេ។", "Not authorized."), show_alert=True)
+            await callback.answer(
+                copy(language, "អ្នកមិនមានសិទ្ធិប្រើប្រាស់ទេ។", "Not authorized."),
+                show_alert=True,
+            )
             return
         kind = callback.data.removeprefix("admin:media:")
         if kind not in {"welcome", "tutorial"}:
-            await callback.answer(copy(language, "ប្រភេទ media មិនត្រឹមត្រូវទេ។", "Invalid media type."), show_alert=True)
+            await callback.answer(
+                copy(language, "ប្រភេទ media មិនត្រឹមត្រូវទេ។", "Invalid media type."),
+                show_alert=True,
+            )
             return
         pending_admin_media[callback.from_user.id] = kind
         await callback.answer()
@@ -3409,8 +4311,16 @@ def register_handlers(
             callback,
             copy(
                 language,
-                "សូមផ្ញើរូបភាព ឬវីដេអូ Welcome។" if kind == "welcome" else "សូមផ្ញើវីដេអូ How to Buy។",
-                "Send the welcome photo or video." if kind == "welcome" else "Send the How to Buy video.",
+                (
+                    "សូមផ្ញើរូបភាព ឬវីដេអូ Welcome។"
+                    if kind == "welcome"
+                    else "សូមផ្ញើវីដេអូ How to Buy។"
+                ),
+                (
+                    "Send the welcome photo or video."
+                    if kind == "welcome"
+                    else "Send the How to Buy video."
+                ),
             ),
             keyboard([back_button("admin:settings:section:media", language)]),
         )
@@ -3449,7 +4359,10 @@ def register_handlers(
         try:
             telegram_id = int(callback.data.removeprefix("admin:reseller-remove:"))
         except ValueError:
-            await callback.answer(copy(language, "Telegram ID មិនត្រឹមត្រូវទេ។", "Invalid Telegram ID."), show_alert=True)
+            await callback.answer(
+                copy(language, "Telegram ID មិនត្រឹមត្រូវទេ។", "Invalid Telegram ID."),
+                show_alert=True,
+            )
             return
         removed = await store.remove_reseller(telegram_id)
         await callback.answer(
@@ -3465,24 +4378,47 @@ def register_handlers(
         language = await safe_user_language(store, callback.from_user.id)
         if callback.from_user.id not in settings.admin_ids:
             return
-        result = await store.client.table("categories").select("id,name").eq("active", True).order("sort_order").execute()
+        result = (
+            await store.client.table("categories")
+            .select("id,name")
+            .eq("active", True)
+            .order("sort_order")
+            .execute()
+        )
         categories = result.data or []
         rows = [
-            [InlineKeyboardButton(text=f"🛍 {item['name']}", callback_data=f"ac:{item['id']}")]
+            [
+                InlineKeyboardButton(
+                    text=f"🛍 {item['name']}", callback_data=f"ac:{item['id']}"
+                )
+            ]
             for item in categories
         ]
         rows.extend(
             [
-                [InlineKeyboardButton(text=copy(language, "➕ បន្ថែម Catalog", "➕ Add catalog"), callback_data="admin:category-add")],
+                [
+                    InlineKeyboardButton(
+                        text=copy(language, "➕ បន្ថែម Catalog", "➕ Add catalog"),
+                        callback_data="admin:category-add",
+                    )
+                ],
                 back_button("admin", language),
             ]
         )
         await callback.message.edit_text(
             f"🗂 <b>{copy(language, 'គ្រប់គ្រង Catalog', 'Manage catalogs')} ({len(categories)})</b>\n"
             + (
-                copy(language, "ជ្រើសរើស Catalog ដើម្បីមើល Package និងសកម្មភាព៖", "Choose a catalog to view its packages and actions:")
+                copy(
+                    language,
+                    "ជ្រើសរើស Catalog ដើម្បីមើល Package និងសកម្មភាព៖",
+                    "Choose a catalog to view its packages and actions:",
+                )
                 if categories
-                else copy(language, "មិនទាន់មាន Catalog ទេ។ ចុចបន្ថែម Catalog ដើម្បីចាប់ផ្តើម។", "No catalogs yet. Add a catalog to get started.")
+                else copy(
+                    language,
+                    "មិនទាន់មាន Catalog ទេ។ ចុចបន្ថែម Catalog ដើម្បីចាប់ផ្តើម។",
+                    "No catalogs yet. Add a catalog to get started.",
+                )
             ),
             parse_mode="HTML",
             reply_markup=keyboard(rows),
@@ -3514,11 +4450,23 @@ def register_handlers(
         category_id = callback.data[3:]
         category_data = await store.category(category_id)
         if not category_data:
-            await callback.message.edit_text(copy(language, "រកមិនឃើញ Catalog ទេ។", "Catalog not found."), reply_markup=keyboard([back_button("admin:catalogs", language)]))
+            await callback.message.edit_text(
+                copy(language, "រកមិនឃើញ Catalog ទេ។", "Catalog not found."),
+                reply_markup=keyboard([back_button("admin:catalogs", language)]),
+            )
             return
-        result = await store.client.table("products").select("id,name").eq("category_id", category_id).eq("active", True).order("sort_order").execute()
+        result = (
+            await store.client.table("products")
+            .select("id,name")
+            .eq("category_id", category_id)
+            .eq("active", True)
+            .order("sort_order")
+            .execute()
+        )
         products = result.data or []
-        stock_counts = await asyncio.gather(*(store.available_stock(item["id"]) for item in products))
+        stock_counts = await asyncio.gather(
+            *(store.available_stock(item["id"]) for item in products)
+        )
         rows = [
             [
                 InlineKeyboardButton(
@@ -3532,7 +4480,11 @@ def register_handlers(
         product_summary = (
             f"📦 {copy(language, 'Package សកម្ម៖', 'Active packages:')} {len(products)}"
             if products
-            else copy(language, "មិនទាន់មាន Package ទេ។ ចុចបន្ថែម Package ដើម្បីចាប់ផ្តើម។", "No packages yet. Add a package to get started.")
+            else copy(
+                language,
+                "មិនទាន់មាន Package ទេ។ ចុចបន្ថែម Package ដើម្បីចាប់ផ្តើម។",
+                "No packages yet. Add a package to get started.",
+            )
         )
         await callback.message.edit_text(
             f"🗂 <b>{html.escape(category_data['name'])}</b>\n"
@@ -3549,10 +4501,15 @@ def register_handlers(
             return
         product_data = await store.product(callback.data[3:])
         if not product_data:
-            await callback.message.edit_text(copy(language, "រកមិនឃើញ Package ទេ។", "Package not found."), reply_markup=keyboard([back_button("admin:catalogs", language)]))
+            await callback.message.edit_text(
+                copy(language, "រកមិនឃើញ Package ទេ។", "Package not found."),
+                reply_markup=keyboard([back_button("admin:catalogs", language)]),
+            )
             return
         stock = await store.available_stock(product_data["id"])
-        rows = admin_product_actions(product_data["id"], product_data["category_id"], language)
+        rows = admin_product_actions(
+            product_data["id"], product_data["category_id"], language
+        )
         delivery_status = (
             f"{copy(language, 'សារក្រោយ Order៖', 'After-order message:')} "
             f"{'✅' if product_data.get('delivery_message') else '—'} · "
@@ -3573,33 +4530,72 @@ def register_handlers(
             reply_markup=keyboard(rows),
         )
 
-    @router.message(F.photo | F.video, F.caption.startswith(("setphoto", "setvideo", "setmedia")))
+    @router.message(
+        F.photo | F.video, F.caption.startswith(("setphoto", "setvideo", "setmedia"))
+    )
     async def set_product_media(message: Message) -> None:
         if not message.from_user or message.from_user.id not in settings.admin_ids:
             return
         language = await safe_user_language(store, message.from_user.id)
         parts = (message.caption or "").strip().split(maxsplit=1)
-        if not parts or parts[0] not in {"setphoto", "setvideo", "setmedia"} or len(parts) != 2 or not parts[1].strip():
-            await send_replacing_screen(message, message.from_user.id, copy(language, "ទម្រង់មិនត្រឹមត្រូវ។ សូមប្រើ setmedia <product_id> ជាមួយរូបភាព ឬវីដេអូ។", "Invalid format. Use setmedia <product_id> with an image or video."))
+        if (
+            not parts
+            or parts[0] not in {"setphoto", "setvideo", "setmedia"}
+            or len(parts) != 2
+            or not parts[1].strip()
+        ):
+            await send_replacing_screen(
+                message,
+                message.from_user.id,
+                copy(
+                    language,
+                    "ទម្រង់មិនត្រឹមត្រូវ។ សូមប្រើ setmedia <product_id> ជាមួយរូបភាព ឬវីដេអូ។",
+                    "Invalid format. Use setmedia <product_id> with an image or video.",
+                ),
+            )
             return
         product_id = parts[1].strip()
         is_video = message.video is not None
         try:
             file_id = message.video.file_id if is_video else message.photo[-1].file_id
-            media_url = await upload_product_media(bot, settings, file_id, "video" if is_video else "image")
-            update_media = store.update_product_video if is_video else store.update_product_image
+            media_url = await upload_product_media(
+                bot, settings, file_id, "video" if is_video else "image"
+            )
+            update_media = (
+                store.update_product_video if is_video else store.update_product_image
+            )
             updated = await update_media(product_id, media_url)
         except Exception:
             logger.exception("Could not update product media %s", product_id)
-            await send_replacing_screen(message, message.from_user.id, copy(language, "មិនអាចធ្វើបច្ចុប្បន្នភាពរូបភាព/វីដេអូ Package បានទេ។", "Could not update the package image/video."))
+            await send_replacing_screen(
+                message,
+                message.from_user.id,
+                copy(
+                    language,
+                    "មិនអាចធ្វើបច្ចុប្បន្នភាពរូបភាព/វីដេអូ Package បានទេ។",
+                    "Could not update the package image/video.",
+                ),
+            )
             return
         if not updated:
-            await send_replacing_screen(message, message.from_user.id, copy(language, f"រកមិនឃើញ Package ID {html.escape(product_id)} ទេ។", f"Package ID {html.escape(product_id)} not found."))
+            await send_replacing_screen(
+                message,
+                message.from_user.id,
+                copy(
+                    language,
+                    f"រកមិនឃើញ Package ID {html.escape(product_id)} ទេ។",
+                    f"Package ID {html.escape(product_id)} not found.",
+                ),
+            )
             return
         await send_replacing_screen(
             message,
             message.from_user.id,
-            copy(language, f"✅ បាន Upload {'វីដេអូ' if is_video else 'រូបភាព'} ទៅ Cloudinary និងបច្ចុប្បន្នភាព Package ID <code>{html.escape(product_id)}</code> ជោគជ័យ!", f"✅ {'Video' if is_video else 'Image'} uploaded to Cloudinary and package ID <code>{html.escape(product_id)}</code> updated."),
+            copy(
+                language,
+                f"✅ បាន Upload {'វីដេអូ' if is_video else 'រូបភាព'} ទៅ Cloudinary និងបច្ចុប្បន្នភាព Package ID <code>{html.escape(product_id)}</code> ជោគជ័យ!",
+                f"✅ {'Video' if is_video else 'Image'} uploaded to Cloudinary and package ID <code>{html.escape(product_id)}</code> updated.",
+            ),
             parse_mode="HTML",
         )
 
@@ -3618,9 +4614,15 @@ def register_handlers(
             if kind == "tutorial" and not is_video:
                 await update_active_screen(
                     message.from_user.id,
-                    copy(language, "⚠️ Tutorial ត្រូវជាវីដេអូ។", "⚠️ The tutorial must be a video."),
+                    copy(
+                        language,
+                        "⚠️ Tutorial ត្រូវជាវីដេអូ។",
+                        "⚠️ The tutorial must be a video.",
+                    ),
                     input_message=message,
-                    reply_markup=keyboard([back_button("admin:settings:section:media", language)]),
+                    reply_markup=keyboard(
+                        [back_button("admin:settings:section:media", language)]
+                    ),
                 )
                 return
             media = message.video if is_video else message.photo[-1]
@@ -3644,12 +4646,20 @@ def register_handlers(
                     )
                     welcome_media_cache = None
             except Exception:
-                logger.exception("Could not upload %s media for admin %s", kind, message.from_user.id)
+                logger.exception(
+                    "Could not upload %s media for admin %s", kind, message.from_user.id
+                )
                 await update_active_screen(
                     message.from_user.id,
-                    copy(language, "⚠️ Upload ឬរក្សាទុក media មិនបានសម្រេចទេ។ សូមព្យាយាមម្ដងទៀត។", "⚠️ Media upload or save failed. Please try again."),
+                    copy(
+                        language,
+                        "⚠️ Upload ឬរក្សាទុក media មិនបានសម្រេចទេ។ សូមព្យាយាមម្ដងទៀត។",
+                        "⚠️ Media upload or save failed. Please try again.",
+                    ),
                     input_message=message,
-                    reply_markup=keyboard([back_button("admin:settings:section:media", language)]),
+                    reply_markup=keyboard(
+                        [back_button("admin:settings:section:media", language)]
+                    ),
                 )
                 return
             pending_admin_media.pop(message.from_user.id, None)
@@ -3661,7 +4671,9 @@ def register_handlers(
                     f"✅ The {'video' if is_video else 'image'} was uploaded to Cloudinary and saved in Supabase.",
                 ),
                 input_message=message,
-                reply_markup=keyboard([back_button("admin:settings:section:media", language)]),
+                reply_markup=keyboard(
+                    [back_button("admin:settings:section:media", language)]
+                ),
             )
             return
         wizard = admin_wizards.get(message.from_user.id)
@@ -3680,8 +4692,16 @@ def register_handlers(
                     edit_message=False,
                     notice=copy(
                         language,
-                        "ជំហាននេះត្រូវការវីដេអូ។" if expected_type == "video" else "ជំហាននេះត្រូវការរូបភាព។",
-                        "This step requires a video." if expected_type == "video" else "This step requires an image.",
+                        (
+                            "ជំហាននេះត្រូវការវីដេអូ។"
+                            if expected_type == "video"
+                            else "ជំហាននេះត្រូវការរូបភាព។"
+                        ),
+                        (
+                            "This step requires a video."
+                            if expected_type == "video"
+                            else "This step requires an image."
+                        ),
                     ),
                 )
                 return
@@ -3690,11 +4710,17 @@ def register_handlers(
             wizard["values"][f"{step}_url"] = None
             steps = ADMIN_WIZARD_STEPS[wizard["kind"]]
             current_index = steps.index(step)
-            wizard["step"] = steps[current_index + 1] if current_index + 1 < len(steps) else None
-            await show_admin_wizard(message, message.from_user.id, language, edit_message=False)
+            wizard["step"] = (
+                steps[current_index + 1] if current_index + 1 < len(steps) else None
+            )
+            await show_admin_wizard(
+                message, message.from_user.id, language, edit_message=False
+            )
             return
         if step != "media":
-            await show_admin_wizard(message, message.from_user.id, language, edit_message=False)
+            await show_admin_wizard(
+                message, message.from_user.id, language, edit_message=False
+            )
             return
         is_video = message.video is not None
         media = message.video if is_video else message.photo[-1]
@@ -3702,7 +4728,9 @@ def register_handlers(
         wizard["values"]["media_type"] = "video" if is_video else "image"
         steps = ADMIN_WIZARD_STEPS[wizard["kind"]]
         wizard["step"] = steps[1]
-        await show_admin_wizard(message, message.from_user.id, language, edit_message=False)
+        await show_admin_wizard(
+            message, message.from_user.id, language, edit_message=False
+        )
 
     @router.callback_query(F.data.startswith("admin:product-add:"))
     async def add_product_prompt(callback: CallbackQuery) -> None:
@@ -3744,7 +4772,10 @@ def register_handlers(
             "target_id": category_id,
             "edit": True,
             "step": "name",
-            "values": {"name": category["name"], "description": category.get("description") or ""},
+            "values": {
+                "name": category["name"],
+                "description": category.get("description") or "",
+            },
         }
         await show_admin_wizard(callback.message, callback.from_user.id, language)
 
@@ -3774,7 +4805,9 @@ def register_handlers(
                 "name": product["name"],
                 "description": product.get("description") or "",
                 "price": str(product["price"]),
-                "reseller_price": str(product.get("reseller_price") or product["price"]),
+                "reseller_price": str(
+                    product.get("reseller_price") or product["price"]
+                ),
                 "image_url": product.get("image_url"),
                 "video_url": product.get("video_url"),
                 "delivery_message": product.get("delivery_message") or "",
@@ -3792,10 +4825,22 @@ def register_handlers(
             return
         category_id = callback.data.removeprefix("admin:category-disable:")
         rows = [
-            [InlineKeyboardButton(text=copy(language, "✅ បិទ Catalog", "✅ Disable catalog"), callback_data=f"adc:{category_id}")],
+            [
+                InlineKeyboardButton(
+                    text=copy(language, "✅ បិទ Catalog", "✅ Disable catalog"),
+                    callback_data=f"adc:{category_id}",
+                )
+            ],
             back_button(f"ac:{category_id}", language),
         ]
-        await callback.message.edit_text(copy(language, "បិទ Catalog នេះ និងផលិតផលសកម្មរបស់វា?", "Disable this catalog and all its active packages?"), reply_markup=keyboard(rows))
+        await callback.message.edit_text(
+            copy(
+                language,
+                "បិទ Catalog នេះ និងផលិតផលសកម្មរបស់វា?",
+                "Disable this catalog and all its active packages?",
+            ),
+            reply_markup=keyboard(rows),
+        )
 
     @router.callback_query(F.data.startswith("adc:"))
     async def disable_category(callback: CallbackQuery) -> None:
@@ -3804,9 +4849,20 @@ def register_handlers(
         if callback.from_user.id not in settings.admin_ids:
             return
         category_id = callback.data[4:]
-        await store.client.table("categories").update({"active": False}).eq("id", category_id).execute()
-        await store.client.table("products").update({"active": False}).eq("category_id", category_id).execute()
-        await callback.message.edit_text(copy(language, "បានបិទ Catalog និងផលិតផលរបស់វា។", "Catalog and its packages disabled."), reply_markup=keyboard([back_button("admin:catalogs", language)]))
+        await store.client.table("categories").update({"active": False}).eq(
+            "id", category_id
+        ).execute()
+        await store.client.table("products").update({"active": False}).eq(
+            "category_id", category_id
+        ).execute()
+        await callback.message.edit_text(
+            copy(
+                language,
+                "បានបិទ Catalog និងផលិតផលរបស់វា។",
+                "Catalog and its packages disabled.",
+            ),
+            reply_markup=keyboard([back_button("admin:catalogs", language)]),
+        )
 
     @router.callback_query(F.data.startswith("admin:product-disable:"))
     async def confirm_product_disable(callback: CallbackQuery) -> None:
@@ -3816,10 +4872,18 @@ def register_handlers(
             return
         product_id = callback.data.removeprefix("admin:product-disable:")
         rows = [
-            [InlineKeyboardButton(text=copy(language, "✅ បិទ Package", "✅ Disable package"), callback_data=f"adp:{product_id}")],
+            [
+                InlineKeyboardButton(
+                    text=copy(language, "✅ បិទ Package", "✅ Disable package"),
+                    callback_data=f"adp:{product_id}",
+                )
+            ],
             back_button(f"ap:{product_id}", language),
         ]
-        await callback.message.edit_text(copy(language, "បិទ Package នេះ?", "Disable this package?"), reply_markup=keyboard(rows))
+        await callback.message.edit_text(
+            copy(language, "បិទ Package នេះ?", "Disable this package?"),
+            reply_markup=keyboard(rows),
+        )
 
     @router.callback_query(F.data.startswith("adp:"))
     async def disable_product(callback: CallbackQuery) -> None:
@@ -3828,8 +4892,13 @@ def register_handlers(
         if callback.from_user.id not in settings.admin_ids:
             return
         product_id = callback.data[4:]
-        await store.client.table("products").update({"active": False}).eq("id", product_id).execute()
-        await callback.message.edit_text(copy(language, "បានបិទ Package។", "Package disabled."), reply_markup=keyboard([back_button("admin:catalogs", language)]))
+        await store.client.table("products").update({"active": False}).eq(
+            "id", product_id
+        ).execute()
+        await callback.message.edit_text(
+            copy(language, "បានបិទ Package។", "Package disabled."),
+            reply_markup=keyboard([back_button("admin:catalogs", language)]),
+        )
 
     @router.callback_query(F.data.startswith("admin:wizard-skip:"))
     async def skip_admin_wizard_step(callback: CallbackQuery) -> None:
@@ -3839,12 +4908,20 @@ def register_handlers(
             return
         wizard = admin_wizards.get(callback.from_user.id)
         if not wizard:
-            await callback.answer(copy(language, "Wizard មិនសកម្មទេ។", "No active wizard."), show_alert=True)
+            await callback.answer(
+                copy(language, "Wizard មិនសកម្មទេ។", "No active wizard."),
+                show_alert=True,
+            )
             return
         step = wizard.get("step")
         requested_step = callback.data.removeprefix("admin:wizard-skip:")
         if step != requested_step:
-            await callback.answer(copy(language, "ជំហាននេះលែងសកម្មហើយ។", "This step is no longer active."), show_alert=True)
+            await callback.answer(
+                copy(
+                    language, "ជំហាននេះលែងសកម្មហើយ។", "This step is no longer active."
+                ),
+                show_alert=True,
+            )
             return
         optional_steps = {
             "media",
@@ -3855,11 +4932,20 @@ def register_handlers(
             "delivery_video",
         }
         if not step or (step not in optional_steps and not wizard["edit"]):
-            await callback.answer(copy(language, "ជំហាននេះមិនអាចរំលងបានទេ។", "This step cannot be skipped."), show_alert=True)
+            await callback.answer(
+                copy(
+                    language, "ជំហាននេះមិនអាចរំលងបានទេ។", "This step cannot be skipped."
+                ),
+                show_alert=True,
+            )
             return
         if step == "reseller_price" and wizard.get("must_set_reseller_price"):
             await callback.answer(
-                copy(language, "សូមបញ្ចូលតម្លៃ Reseller ថ្មី ព្រោះតម្លៃទូទៅត្រូវបានបន្ថយ។", "Enter a new reseller price because the customer price was reduced."),
+                copy(
+                    language,
+                    "សូមបញ្ចូលតម្លៃ Reseller ថ្មី ព្រោះតម្លៃទូទៅត្រូវបានបន្ថយ។",
+                    "Enter a new reseller price because the customer price was reduced.",
+                ),
                 show_alert=True,
             )
             return
@@ -3867,7 +4953,9 @@ def register_handlers(
             wizard["values"]["reseller_price"] = wizard["values"].get("price")
         steps = ADMIN_WIZARD_STEPS[wizard["kind"]]
         current_index = steps.index(step)
-        wizard["step"] = steps[current_index + 1] if current_index + 1 < len(steps) else None
+        wizard["step"] = (
+            steps[current_index + 1] if current_index + 1 < len(steps) else None
+        )
         await callback.answer()
         await show_admin_wizard(callback.message, callback.from_user.id, language)
 
@@ -3883,15 +4971,27 @@ def register_handlers(
             "delivery_image": ("delivery_image_url", "delivery_image_file_id"),
             "delivery_video": ("delivery_video_url", "delivery_video_file_id"),
         }
-        if not wizard or not wizard["edit"] or wizard.get("step") != step or step not in fields:
-            await callback.answer(copy(language, "ជំហាននេះលែងសកម្មហើយ។", "This step is no longer active."), show_alert=True)
+        if (
+            not wizard
+            or not wizard["edit"]
+            or wizard.get("step") != step
+            or step not in fields
+        ):
+            await callback.answer(
+                copy(
+                    language, "ជំហាននេះលែងសកម្មហើយ។", "This step is no longer active."
+                ),
+                show_alert=True,
+            )
             return
         url_field, file_field = fields[step]
         wizard["values"][url_field] = None
         wizard["values"].pop(file_field, None)
         steps = ADMIN_WIZARD_STEPS[wizard["kind"]]
         current_index = steps.index(step)
-        wizard["step"] = steps[current_index + 1] if current_index + 1 < len(steps) else None
+        wizard["step"] = (
+            steps[current_index + 1] if current_index + 1 < len(steps) else None
+        )
         await callback.answer(copy(language, "បានលុប Media នេះ។", "Media cleared."))
         await show_admin_wizard(callback.message, callback.from_user.id, language)
 
@@ -3925,7 +5025,14 @@ def register_handlers(
             return
         wizard = admin_wizards.get(callback.from_user.id)
         if not wizard or wizard.get("step") is not None:
-            await callback.answer(copy(language, "Wizard មិនទាន់រួចរាល់សម្រាប់រក្សាទុកទេ។", "The wizard is not ready to save."), show_alert=True)
+            await callback.answer(
+                copy(
+                    language,
+                    "Wizard មិនទាន់រួចរាល់សម្រាប់រក្សាទុកទេ។",
+                    "The wizard is not ready to save.",
+                ),
+                show_alert=True,
+            )
             return
         try:
             target = await finish_admin_wizard(callback.from_user.id, language)
@@ -3933,16 +5040,28 @@ def register_handlers(
             await callback.answer(str(exc), show_alert=True)
             return
         except Exception:
-            logger.exception("Admin wizard save failed for user %s", callback.from_user.id)
+            logger.exception(
+                "Admin wizard save failed for user %s", callback.from_user.id
+            )
             await callback.answer(
-                copy(language, "រក្សាទុកមិនបានទេ។ សូមពិនិត្យ Cloudinary/Supabase រួចព្យាយាមម្ដងទៀត។", "Could not save. Check Cloudinary/Supabase and try again."),
+                copy(
+                    language,
+                    "រក្សាទុកមិនបានទេ។ សូមពិនិត្យ Cloudinary/Supabase រួចព្យាយាមម្ដងទៀត។",
+                    "Could not save. Check Cloudinary/Supabase and try again.",
+                ),
                 show_alert=True,
             )
             return
         admin_wizards.pop(callback.from_user.id, None)
-        await callback.answer(copy(language, "បានរក្សាទុកដោយជោគជ័យ។", "Saved successfully."))
+        await callback.answer(
+            copy(language, "បានរក្សាទុកដោយជោគជ័យ។", "Saved successfully.")
+        )
         await callback.message.edit_text(
-            copy(language, "✅ បានរក្សាទុក Package/Catalog ដោយជោគជ័យ។", "✅ Package/catalog saved successfully."),
+            copy(
+                language,
+                "✅ បានរក្សាទុក Package/Catalog ដោយជោគជ័យ។",
+                "✅ Package/catalog saved successfully.",
+            ),
             reply_markup=keyboard([back_button(target, language)]),
         )
 
@@ -3955,13 +5074,19 @@ def register_handlers(
         target = (
             f"ap:{pending[1]}"
             if pending and pending[0] in {"stock_add", "stock_remove"}
-            else "admin:resellers"
-            if pending and pending[0] == "reseller_add"
-            else f"admin:settings:section:{bot_setting_section(pending[1])}"
-            if pending and pending[0] == "bot_setting" and pending[1]
-            else "admin:settings:section:media"
-            if media_pending
-            else "admin:catalogs"
+            else (
+                "admin:resellers"
+                if pending and pending[0] == "reseller_add"
+                else (
+                    f"admin:settings:section:{bot_setting_section(pending[1])}"
+                    if pending and pending[0] == "bot_setting" and pending[1]
+                    else (
+                        "admin:settings:section:media"
+                        if media_pending
+                        else "admin:catalogs"
+                    )
+                )
+            )
         )
         await replace_callback_screen(
             callback,
@@ -3979,7 +5104,11 @@ def register_handlers(
         pending_admin_input[callback.from_user.id] = ("stock_add", product_id)
         await replace_callback_screen(
             callback,
-            copy(language, "ផ្ញើ License Key មួយក្នុងមួយបន្ទាត់៖", "Send one license key per line:"),
+            copy(
+                language,
+                "ផ្ញើ Digital Key ឬ Code មួយក្នុងមួយបន្ទាត់៖",
+                "Send one digital key or code per line:",
+            ),
             keyboard([back_button("admin:cancel-input", language)]),
         )
 
@@ -3993,7 +5122,11 @@ def register_handlers(
         pending_admin_input[callback.from_user.id] = ("stock_remove", product_id)
         await replace_callback_screen(
             callback,
-            copy(language, "ផ្ញើ License Key ដែលចង់ដក មួយក្នុងមួយបន្ទាត់។ ដកបានតែ Key ដែលមិនទាន់កក់ ឬលក់៖", "Send the exact license keys to remove, one per line. Only keys that are neither reserved nor sold can be removed."),
+            copy(
+                language,
+                "ផ្ញើ Digital Key ឬ Code ដែលចង់ដក មួយក្នុងមួយបន្ទាត់។ ដកបានតែធាតុដែលមិនទាន់កក់ ឬលក់៖",
+                "Send the exact digital keys or codes to remove, one per line. Only items that are neither reserved nor sold can be removed.",
+            ),
             keyboard([back_button("admin:cancel-input", language)]),
         )
 
@@ -4012,7 +5145,10 @@ def register_handlers(
                 return
             pending_wallet_amount.discard(message.from_user.id)
             pending_admin_media.pop(message.from_user.id, None)
-            if pending_admin_input.get(message.from_user.id, (None, None))[0] == "bot_setting":
+            if (
+                pending_admin_input.get(message.from_user.id, (None, None))[0]
+                == "bot_setting"
+            ):
                 pending_admin_input.pop(message.from_user.id, None)
             product_id = package_id_from_start(text)
             if product_id:
@@ -4035,7 +5171,10 @@ def register_handlers(
                         is_reseller=is_reseller,
                     )
                     return
-                logger.info("Stock notification link references unavailable product %s", product_id)
+                logger.info(
+                    "Stock notification link references unavailable product %s",
+                    product_id,
+                )
             await send_welcome(message, store, settings, language, immediate=True)
             return
         language = await safe_user_language(store, message.from_user.id)
@@ -4046,6 +5185,8 @@ def register_handlers(
             "account",
             "💰 add funds",
             "add funds",
+            "🛍 digital products",
+            "digital products",
             "🎮 games service",
             "games service",
             "🛒 my orders",
@@ -4054,7 +5195,10 @@ def register_handlers(
             "🎥 how to buy",
             "how to buy",
         }
-        if message.from_user.id in pending_wallet_amount and text.casefold() not in customer_buttons:
+        if (
+            message.from_user.id in pending_wallet_amount
+            and text.casefold() not in customer_buttons
+        ):
             try:
                 await start_wallet_deposit(message.from_user, text, language)
             except ValueError as exc:
@@ -4064,7 +5208,9 @@ def register_handlers(
                         f"⚠️ {str(exc)}\n\n{wallet_custom_amount_prompt(language)}",
                         reply_markup=prompt_message.reply_markup,
                     )
-                    active_screen_messages[message.from_user.id] = updated or prompt_message
+                    active_screen_messages[message.from_user.id] = (
+                        updated or prompt_message
+                    )
                     await delete_replaced_message(message)
                 else:
                     await send_replacing_screen(
@@ -4074,7 +5220,10 @@ def register_handlers(
                     )
                 return
             except Exception as exc:
-                logger.exception("Could not start custom wallet deposit for Telegram user %s", message.from_user.id)
+                logger.exception(
+                    "Could not start custom wallet deposit for Telegram user %s",
+                    message.from_user.id,
+                )
                 await send_replacing_screen(
                     message,
                     message.from_user.id,
@@ -4082,7 +5231,7 @@ def register_handlers(
                         language,
                         exc,
                         message.from_user.id in settings.admin_ids,
-                    )
+                    ),
                 )
                 return
             pending_wallet_amount.discard(message.from_user.id)
@@ -4096,7 +5245,9 @@ def register_handlers(
             and pending_setting is not None
             and pending_setting[0] == "bot_setting"
         )
-        if not has_pending_bot_setting and await show_customer_action(message, message.from_user, text, language):
+        if not has_pending_bot_setting and await show_customer_action(
+            message, message.from_user, text, language
+        ):
             return
         if message.from_user.id not in settings.admin_ids:
             await send_welcome(message, store, settings, language)
@@ -4107,10 +5258,22 @@ def register_handlers(
             values = wizard["values"]
             try:
                 if step in {"media", "delivery_image", "delivery_video"}:
-                    raise ValueError(copy(language, "សូមផ្ញើរូបភាព/វីដេអូ ឬចុចរំលង។", "Send a photo/video or use Skip."))
+                    raise ValueError(
+                        copy(
+                            language,
+                            "សូមផ្ញើរូបភាព/វីដេអូ ឬចុចរំលង។",
+                            "Send a photo/video or use Skip.",
+                        )
+                    )
                 if step == "name":
                     if not text:
-                        raise ValueError(copy(language, "ឈ្មោះមិនអាចទទេបានទេ។", "Name cannot be empty."))
+                        raise ValueError(
+                            copy(
+                                language,
+                                "ឈ្មោះមិនអាចទទេបានទេ។",
+                                "Name cannot be empty.",
+                            )
+                        )
                     values["name"] = text
                 elif step == "description":
                     values["description"] = text
@@ -4128,19 +5291,40 @@ def register_handlers(
                     try:
                         price = Decimal(text)
                     except InvalidOperation:
-                        raise ValueError(copy(language, "តម្លៃមិនត្រឹមត្រូវទេ។", "Invalid price.")) from None
+                        raise ValueError(
+                            copy(language, "តម្លៃមិនត្រឹមត្រូវទេ។", "Invalid price.")
+                        ) from None
                     if not price.is_finite() or price <= 0:
-                        raise ValueError(copy(language, "តម្លៃត្រូវតែធំជាង 0។", "Price must be greater than 0."))
+                        raise ValueError(
+                            copy(
+                                language,
+                                "តម្លៃត្រូវតែធំជាង 0។",
+                                "Price must be greater than 0.",
+                            )
+                        )
                     values["price"] = str(price)
-                    if wizard["edit"] and Decimal(str(values.get("reseller_price", "0"))) >= price:
+                    if (
+                        wizard["edit"]
+                        and Decimal(str(values.get("reseller_price", "0"))) >= price
+                    ):
                         wizard["must_set_reseller_price"] = True
                 elif step == "reseller_price":
                     try:
                         reseller_price = Decimal(text)
                         customer_price = Decimal(str(values["price"]))
                     except (InvalidOperation, KeyError):
-                        raise ValueError(copy(language, "សូមបញ្ចូលតម្លៃ Reseller ត្រឹមត្រូវ។", "Enter a valid reseller price.")) from None
-                    if not reseller_price.is_finite() or reseller_price <= 0 or reseller_price >= customer_price:
+                        raise ValueError(
+                            copy(
+                                language,
+                                "សូមបញ្ចូលតម្លៃ Reseller ត្រឹមត្រូវ។",
+                                "Enter a valid reseller price.",
+                            )
+                        ) from None
+                    if (
+                        not reseller_price.is_finite()
+                        or reseller_price <= 0
+                        or reseller_price >= customer_price
+                    ):
                         raise ValueError(
                             copy(
                                 language,
@@ -4151,10 +5335,14 @@ def register_handlers(
                     values["reseller_price"] = str(reseller_price)
                     wizard.pop("must_set_reseller_price", None)
                 else:
-                    raise ValueError(copy(language, "Wizard មិនសកម្មទេ។", "No active wizard step."))
+                    raise ValueError(
+                        copy(language, "Wizard មិនសកម្មទេ។", "No active wizard step.")
+                    )
                 steps = ADMIN_WIZARD_STEPS[wizard["kind"]]
                 current_index = steps.index(step)
-                wizard["step"] = steps[current_index + 1] if current_index + 1 < len(steps) else None
+                wizard["step"] = (
+                    steps[current_index + 1] if current_index + 1 < len(steps) else None
+                )
             except ValueError as exc:
                 await show_admin_wizard(
                     message,
@@ -4164,7 +5352,9 @@ def register_handlers(
                     notice=str(exc),
                 )
                 return
-            await show_admin_wizard(message, message.from_user.id, language, edit_message=False)
+            await show_admin_wizard(
+                message, message.from_user.id, language, edit_message=False
+            )
             return
         if text.casefold() in {"🛍 buy now", "buy now"}:
             await show_catalogs(message, 0, language, edit_message=False)
@@ -4173,23 +5363,39 @@ def register_handlers(
             stock_add = parse_stock_add(text, language)
             if stock_add:
                 product_id, credentials = stock_add
-                added = await store.import_stock(product_id, credentials, settings.stock_encryption_key)
-                await notify_stock_added(bot, store, settings.stock_notification_chat_ids, product_id, added)
+                added = await store.import_stock(
+                    product_id, credentials, settings.stock_encryption_key
+                )
+                await notify_stock_added(
+                    bot, store, product_id, added
+                )
                 await send_replacing_screen(
                     message,
                     message.from_user.id,
-                    copy(language, f"បានបញ្ចូលស្តុកថ្មីចំនួន {added}។", f"Added {added} new stock item(s)."),
+                    copy(
+                        language,
+                        f"បានបញ្ចូលស្តុកថ្មីចំនួន {added}។",
+                        f"Added {added} new stock item(s).",
+                    ),
                 )
                 return
         except ValueError as exc:
-            await send_replacing_screen(message, message.from_user.id, html.escape(str(exc)))
+            await send_replacing_screen(
+                message, message.from_user.id, html.escape(str(exc))
+            )
             return
         except Exception:
-            logger.exception("Direct stock import failed for admin %s", message.from_user.id)
+            logger.exception(
+                "Direct stock import failed for admin %s", message.from_user.id
+            )
             await send_replacing_screen(
                 message,
                 message.from_user.id,
-                copy(language, "មិនអាចបញ្ចូលស្តុកបានទេ។ សូមពិនិត្យ Product ID រួចព្យាយាមម្ដងទៀត។", "Could not add stock. Check the product ID and try again."),
+                copy(
+                    language,
+                    "មិនអាចបញ្ចូលស្តុកបានទេ។ សូមពិនិត្យ Product ID រួចព្យាយាមម្ដងទៀត។",
+                    "Could not add stock. Check the product ID and try again.",
+                ),
             )
             return
         pending = pending_admin_input.get(message.from_user.id)
@@ -4198,9 +5404,22 @@ def register_handlers(
                 await send_replacing_screen(
                     message,
                     message.from_user.id,
-                    copy(language, "⚙️ បើកផ្ទាំងគ្រប់គ្រងហាង៖", "⚙️ Open store administration:"),
+                    copy(
+                        language,
+                        "⚙️ បើកផ្ទាំងគ្រប់គ្រងហាង៖",
+                        "⚙️ Open store administration:",
+                    ),
                     reply_markup=keyboard(
-                        [[InlineKeyboardButton(text=copy(language, "⚙️ គ្រប់គ្រងហាង", "⚙️ Store admin"), callback_data="admin")]]
+                        [
+                            [
+                                InlineKeyboardButton(
+                                    text=copy(
+                                        language, "⚙️ គ្រប់គ្រងហាង", "⚙️ Store admin"
+                                    ),
+                                    callback_data="admin",
+                                )
+                            ]
+                        ]
                     ),
                 )
             else:
@@ -4210,53 +5429,129 @@ def register_handlers(
         try:
             if action == "bot_setting":
                 if target_id not in BOT_SETTING_LABELS:
-                    raise ValueError(copy(language, "Setting មិនត្រឹមត្រូវទេ។", "Invalid setting."))
+                    raise ValueError(
+                        copy(language, "Setting មិនត្រឹមត្រូវទេ។", "Invalid setting.")
+                    )
                 value = "" if text == "-" else text.strip()
                 if target_id == "support_username" and value:
                     value = value.removeprefix("@")
                     if not value.isascii() or not value.replace("_", "").isalnum():
-                        raise ValueError(copy(language, "សូមបញ្ចូល Telegram username ដូចជា @support។", "Enter a Telegram username such as @support."))
-                elif target_id in {
-                    "how_to_buy_caption",
-                    "how_to_buy_caption_km",
-                    "how_to_buy_caption_en",
-                } and len(value) > 1024:
-                    raise ValueError(copy(language, "Caption មិនអាចលើស 1024 តួអក្សរបានទេ។", "Captions cannot exceed 1024 characters."))
-                elif target_id in {"stock_notification_chat_ids", "order_notification_chat_ids"} and len(value) > 2000:
-                    raise ValueError(copy(language, "តម្លៃវែងពេក។", "The value is too long."))
+                        raise ValueError(
+                            copy(
+                                language,
+                                "សូមបញ្ចូល Telegram username ដូចជា @support។",
+                                "Enter a Telegram username such as @support.",
+                            )
+                        )
+                elif (
+                    target_id
+                    in {
+                        "how_to_buy_caption",
+                        "how_to_buy_caption_km",
+                        "how_to_buy_caption_en",
+                    }
+                    and len(value) > 1024
+                ):
+                    raise ValueError(
+                        copy(
+                            language,
+                            "Caption មិនអាចលើស 1024 តួអក្សរបានទេ។",
+                            "Captions cannot exceed 1024 characters.",
+                        )
+                    )
+                elif (
+                    target_id
+                    in {"stock_notification_chat_ids", "order_notification_chat_ids"}
+                    and len(value) > 2000
+                ):
+                    raise ValueError(
+                        copy(language, "តម្លៃវែងពេក។", "The value is too long.")
+                    )
+                elif target_id == "install_group_url" and value:
+                    parsed_url = urlsplit(value)
+                    if (
+                        parsed_url.scheme != "https"
+                        or not parsed_url.netloc
+                        or len(value) > 2048
+                    ):
+                        raise ValueError(
+                            copy(
+                                language,
+                                "សូមបញ្ចូល HTTPS URL ត្រឹមត្រូវ។",
+                                "Enter a valid HTTPS URL.",
+                            )
+                        )
                 await store.set_bot_setting(target_id, value)
                 if target_id in {"welcome_photo_url", "welcome_video_url"}:
                     welcome_media_cache = None
             elif action == "reseller_add":
                 if not text.isdecimal():
-                    raise ValueError(copy(language, "សូមបញ្ចូល Telegram ID ជាលេខវិជ្ជមាន។", "Enter a positive numeric Telegram ID."))
+                    raise ValueError(
+                        copy(
+                            language,
+                            "សូមបញ្ចូល Telegram ID ជាលេខវិជ្ជមាន។",
+                            "Enter a positive numeric Telegram ID.",
+                        )
+                    )
                 await store.add_reseller(int(text))
             elif action == "stock_add":
-                credentials = [line.strip() for line in text.splitlines() if line.strip()]
+                credentials = [
+                    line.strip() for line in text.splitlines() if line.strip()
+                ]
                 if not credentials:
-                    raise ValueError(copy(language, "សូមបញ្ចូល License Key យ៉ាងហោចណាស់មួយ។", "Enter at least one license key."))
-                added = await store.import_stock(target_id, credentials, settings.stock_encryption_key)
-                await notify_stock_added(bot, store, settings.stock_notification_chat_ids, target_id, added)
+                    raise ValueError(
+                        copy(
+                            language,
+                            "សូមបញ្ចូល Digital Key ឬ Code យ៉ាងហោចណាស់មួយ។",
+                            "Enter at least one digital key or code.",
+                        )
+                    )
+                added = await store.import_stock(
+                    target_id, credentials, settings.stock_encryption_key
+                )
+                await notify_stock_added(
+                    bot, store, target_id, added
+                )
             elif action == "stock_remove":
-                credentials = [line.strip() for line in text.splitlines() if line.strip()]
+                credentials = [
+                    line.strip() for line in text.splitlines() if line.strip()
+                ]
                 if not credentials:
-                    raise ValueError(copy(language, "សូមបញ្ចូល License Key យ៉ាងហោចណាស់មួយ។", "Enter at least one license key."))
-                removed = await store.remove_stock(target_id, credentials, settings.stock_encryption_key)
+                    raise ValueError(
+                        copy(
+                            language,
+                            "សូមបញ្ចូល Digital Key ឬ Code យ៉ាងហោចណាស់មួយ។",
+                            "Enter at least one digital key or code.",
+                        )
+                    )
+                removed = await store.remove_stock(
+                    target_id, credentials, settings.stock_encryption_key
+                )
             else:
                 return
         except (InvalidOperation, ValueError) as exc:
             await update_active_screen(
                 message.from_user.id,
-                copy(language, f"⚠️ ព័ត៌មានមិនត្រឹមត្រូវ៖ {html.escape(str(exc))}\n\nសូមផ្ញើម្តងទៀត។", f"⚠️ Invalid input: {html.escape(str(exc))}\n\nPlease send it again."),
+                copy(
+                    language,
+                    f"⚠️ ព័ត៌មានមិនត្រឹមត្រូវ៖ {html.escape(str(exc))}\n\nសូមផ្ញើម្តងទៀត។",
+                    f"⚠️ Invalid input: {html.escape(str(exc))}\n\nPlease send it again.",
+                ),
                 input_message=message,
                 reply_markup=keyboard([back_button("admin:cancel-input", language)]),
             )
             return
         except Exception:
-            logger.exception("Admin catalog update failed for user %s", message.from_user.id)
+            logger.exception(
+                "Admin catalog update failed for user %s", message.from_user.id
+            )
             await update_active_screen(
                 message.from_user.id,
-                copy(language, "⚠️ មិនអាចរក្សាទុកបានទេ។ សូមផ្ញើតម្លៃម្តងទៀត។", "⚠️ Could not save the changes. Please send the value again."),
+                copy(
+                    language,
+                    "⚠️ មិនអាចរក្សាទុកបានទេ។ សូមផ្ញើតម្លៃម្តងទៀត។",
+                    "⚠️ Could not save the changes. Please send the value again.",
+                ),
                 input_message=message,
                 reply_markup=keyboard([back_button("admin:cancel-input", language)]),
             )
@@ -4265,18 +5560,35 @@ def register_handlers(
         if action == "bot_setting":
             await update_active_screen(
                 message.from_user.id,
-                copy(language, "✅ បានរក្សាទុក Bot setting ជោគជ័យ។", "✅ Bot setting saved."),
+                copy(
+                    language,
+                    "✅ បានរក្សាទុក Bot setting ជោគជ័យ។",
+                    "✅ Bot setting saved.",
+                ),
                 input_message=message,
                 reply_markup=keyboard(
-                    [back_button(f"admin:settings:section:{bot_setting_section(target_id)}", language)]
+                    [
+                        back_button(
+                            f"admin:settings:section:{bot_setting_section(target_id)}",
+                            language,
+                        )
+                    ]
                 ),
             )
             return
         if action in {"stock_add", "stock_remove"}:
             if action == "stock_add":
-                result_message = copy(language, f"បានបញ្ចូលស្តុកថ្មីចំនួន {added}។", f"Added {added} new stock item(s).")
+                result_message = copy(
+                    language,
+                    f"បានបញ្ចូលស្តុកថ្មីចំនួន {added}។",
+                    f"Added {added} new stock item(s).",
+                )
             else:
-                result_message = copy(language, f"បានដកស្តុកដែលមិនទាន់លក់ចំនួន {removed}។", f"Removed {removed} unsold stock item(s).")
+                result_message = copy(
+                    language,
+                    f"បានដកស្តុកដែលមិនទាន់លក់ចំនួន {removed}។",
+                    f"Removed {removed} unsold stock item(s).",
+                )
             await update_active_screen(
                 message.from_user.id,
                 result_message,
@@ -4286,7 +5598,11 @@ def register_handlers(
             return
         await update_active_screen(
             message.from_user.id,
-            copy(language, "បានផ្តល់សិទ្ធិ Reseller ដោយជោគជ័យ។", "Reseller pricing enabled successfully."),
+            copy(
+                language,
+                "បានផ្តល់សិទ្ធិ Reseller ដោយជោគជ័យ។",
+                "Reseller pricing enabled successfully.",
+            ),
             input_message=message,
             reply_markup=keyboard([back_button("admin:resellers", language)]),
         )
@@ -4297,10 +5613,26 @@ def register_handlers(
         language = await safe_user_language(store, callback.from_user.id)
         if callback.from_user.id not in settings.admin_ids:
             return
-        result = await store.client.table("products").select("id,name").eq("active", True).order("sort_order").execute()
-        rows = [[InlineKeyboardButton(text=item["name"], callback_data=f"au:{item['id']}")] for item in result.data]
+        result = (
+            await store.client.table("products")
+            .select("id,name")
+            .eq("active", True)
+            .order("sort_order")
+            .execute()
+        )
+        rows = [
+            [InlineKeyboardButton(text=item["name"], callback_data=f"au:{item['id']}")]
+            for item in result.data
+        ]
         rows.append(back_button("admin", language))
-        await callback.message.edit_text(copy(language, "ជ្រើសរើសផលិតផលសម្រាប់បញ្ចូលស្តុក៖", "Choose a product for the stock import:"), reply_markup=keyboard(rows))
+        await callback.message.edit_text(
+            copy(
+                language,
+                "ជ្រើសរើសផលិតផលសម្រាប់បញ្ចូលស្តុក៖",
+                "Choose a product for the stock import:",
+            ),
+            reply_markup=keyboard(rows),
+        )
 
     @router.callback_query(F.data.startswith("au:"))
     async def request_stock_file(callback: CallbackQuery) -> None:
@@ -4311,7 +5643,11 @@ def register_handlers(
         pending_stock_upload[callback.from_user.id] = callback.data[3:]
         await replace_callback_screen(
             callback,
-            copy(language, "សូមផ្ញើឯកសារ .txt ដែលមាន License Key មួយក្នុងមួយជួរ។", "Send a .txt file with one license key per line."),
+            copy(
+                language,
+                "សូមផ្ញើឯកសារ .txt ដែលមាន Digital Key ឬ Code មួយក្នុងមួយជួរ។",
+                "Send a .txt file with one digital key or code per line.",
+            ),
             keyboard([back_button("admin:cancel-upload", language)]),
         )
 
@@ -4337,10 +5673,18 @@ def register_handlers(
         if not product_id:
             return
         document = message.document
-        if not document.file_name or not document.file_name.lower().endswith(".txt") or (document.file_size or 0) > 1_000_000:
+        if (
+            not document.file_name
+            or not document.file_name.lower().endswith(".txt")
+            or (document.file_size or 0) > 1_000_000
+        ):
             await update_active_screen(
                 message.from_user.id,
-                copy(language, "⚠️ សូមប្រើឯកសារ .txt ទំហំមិនលើស 1 MB។", "⚠️ Use a .txt file no larger than 1 MB."),
+                copy(
+                    language,
+                    "⚠️ សូមប្រើឯកសារ .txt ទំហំមិនលើស 1 MB។",
+                    "⚠️ Use a .txt file no larger than 1 MB.",
+                ),
                 input_message=message,
                 reply_markup=keyboard([back_button("admin:cancel-upload", language)]),
             )
@@ -4348,14 +5692,30 @@ def register_handlers(
         try:
             buffer = io.BytesIO()
             await bot.download(document.file_id, destination=buffer)
-            credentials = [line.strip() for line in buffer.getvalue().decode("utf-8").splitlines() if line.strip()]
+            credentials = [
+                line.strip()
+                for line in buffer.getvalue().decode("utf-8").splitlines()
+                if line.strip()
+            ]
             if not credentials:
-                raise ValueError(copy(language, "ឯកសារត្រូវមាន License Key យ៉ាងហោចណាស់មួយ។", "The file must contain at least one license key."))
-            added = await store.import_stock(product_id, credentials, settings.stock_encryption_key)
+                raise ValueError(
+                    copy(
+                        language,
+                        "ឯកសារត្រូវមាន Digital Key ឬ Code យ៉ាងហោចណាស់មួយ។",
+                        "The file must contain at least one digital key or code.",
+                    )
+                )
+            added = await store.import_stock(
+                product_id, credentials, settings.stock_encryption_key
+            )
         except (UnicodeDecodeError, ValueError) as exc:
             await update_active_screen(
                 message.from_user.id,
-                copy(language, f"⚠️ ឯកសារមិនត្រឹមត្រូវ៖ {html.escape(str(exc))}", f"⚠️ Invalid file: {html.escape(str(exc))}"),
+                copy(
+                    language,
+                    f"⚠️ ឯកសារមិនត្រឹមត្រូវ៖ {html.escape(str(exc))}",
+                    f"⚠️ Invalid file: {html.escape(str(exc))}",
+                ),
                 input_message=message,
                 reply_markup=keyboard([back_button("admin:cancel-upload", language)]),
             )
@@ -4364,16 +5724,26 @@ def register_handlers(
             logger.exception("Stock import failed for product %s", product_id)
             await update_active_screen(
                 message.from_user.id,
-                copy(language, "⚠️ មិនអាចបញ្ចូលស្តុកបានទេ។ សូមព្យាយាមម្ដងទៀត។", "⚠️ Could not import stock. Please try again."),
+                copy(
+                    language,
+                    "⚠️ មិនអាចបញ្ចូលស្តុកបានទេ។ សូមព្យាយាមម្ដងទៀត។",
+                    "⚠️ Could not import stock. Please try again.",
+                ),
                 input_message=message,
                 reply_markup=keyboard([back_button("admin:cancel-upload", language)]),
             )
             return
         pending_stock_upload.pop(message.from_user.id, None)
-        await notify_stock_added(bot, store, settings.stock_notification_chat_ids, product_id, added)
+        await notify_stock_added(
+            bot, store, product_id, added
+        )
         await update_active_screen(
             message.from_user.id,
-            copy(language, f"បានបញ្ចូលស្តុកថ្មីចំនួន {added}។", f"Added {added} new stock item(s)."),
+            copy(
+                language,
+                f"បានបញ្ចូលស្តុកថ្មីចំនួន {added}។",
+                f"Added {added} new stock item(s).",
+            ),
             input_message=message,
             reply_markup=keyboard([back_button("admin", language)]),
         )
@@ -4414,12 +5784,16 @@ def register_handlers(
             f"ស្ថិតិការលក់\nការបញ្ជាទិញដែលបានបង់៖ {summary['paid_orders']}\nចំណូលសរុប៖ {money(summary['total_revenue'])}\nចំណូលថ្ងៃនេះ៖ {money(summary['today_revenue'])}",
             f"Sales summary\nPaid orders: {summary['paid_orders']}\nTotal revenue: {money(summary['total_revenue'])}\nToday's revenue: {money(summary['today_revenue'])}",
         )
-        await callback.message.edit_text(text, reply_markup=keyboard([back_button("admin", language)]))
+        await callback.message.edit_text(
+            text, reply_markup=keyboard([back_button("admin", language)])
+        )
 
     dispatcher.include_router(router)
 
 
-async def reconcile_payments(bot: Bot, store: Store, payments: KHPayClient, settings: Settings) -> None:
+async def reconcile_payments(
+    bot: Bot, store: Store, payments: KHQRPayClient, settings: Settings
+) -> None:
     wallet_schema_warning_logged = False
     while True:
         try:
@@ -4428,14 +5802,20 @@ async def reconcile_payments(bot: Bot, store: Store, payments: KHPayClient, sett
                     payment = await payments.check_payment(order["transaction_id"])
                     status = payment.get("status")
                     if status == "paid":
-                        await deliver_order(bot, store, settings, order["id"], int(order["chat_id"]))
+                        await deliver_order(
+                            bot, store, settings, order["id"], int(order["chat_id"])
+                        )
                     elif status in {"expired", "failed"}:
-                        await expire_payment(bot, store, order["id"], int(order["chat_id"]), status)
+                        await expire_payment(
+                            bot, store, order["id"], int(order["chat_id"]), status
+                        )
                 except Exception:
                     logger.exception("Reconciliation failed for order %s", order["id"])
             for order in await store.undelivered_orders():
                 try:
-                    await deliver_order(bot, store, settings, order["id"], int(order["chat_id"]))
+                    await deliver_order(
+                        bot, store, settings, order["id"], int(order["chat_id"])
+                    )
                 except Exception:
                     logger.exception("Delivery retry failed for order %s", order["id"])
         except Exception:
@@ -4459,9 +5839,11 @@ async def reconcile_payments(bot: Bot, store: Store, payments: KHPayClient, sett
                     payment = await payments.check_payment(deposit["transaction_id"])
                     status = payment.get("status")
                     if status == "paid":
-                        if Decimal(str(payment.get("amount"))) != Decimal(str(deposit["amount"])):
+                        if Decimal(str(payment.get("amount"))) != Decimal(
+                            str(deposit["amount"])
+                        ):
                             logger.error(
-                                "KHPAY amount mismatch for wallet deposit %s",
+                                "KHQRPay amount mismatch for wallet deposit %s",
                                 deposit["id"],
                             )
                             continue
@@ -4469,7 +5851,9 @@ async def reconcile_payments(bot: Bot, store: Store, payments: KHPayClient, sett
                     elif status in {"expired", "failed"}:
                         await expire_wallet_deposit(bot, store, deposit, status)
                 except Exception:
-                    logger.exception("Wallet deposit reconciliation failed for %s", deposit["id"])
+                    logger.exception(
+                        "Wallet deposit reconciliation failed for %s", deposit["id"]
+                    )
         await asyncio.sleep(settings.poll_interval_seconds)
 
 
@@ -4513,7 +5897,6 @@ async def reconcile_broadcasts(bot: Bot, store: Store) -> None:
                     job.get("buttons") or [],
                     progress_message,
                     event,
-                    settings,
                 )
                 status = "cancelled" if cancelled else "sent"
                 await store.finish_broadcast_job(job_id, status, sent, failed)
@@ -4527,7 +5910,9 @@ async def reconcile_broadcasts(bot: Bot, store: Store) -> None:
                         f"❌ Scheduled broadcast {job_id} failed. Check the application logs.",
                     )
                 except Exception:
-                    logger.exception("Could not report scheduled broadcast failure %s", job_id)
+                    logger.exception(
+                        "Could not report scheduled broadcast failure %s", job_id
+                    )
             finally:
                 broadcast_cancel_events.pop(job_id, None)
                 if broadcast_active_keys.get(admin_id) == job_id:

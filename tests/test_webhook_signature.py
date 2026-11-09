@@ -4,7 +4,7 @@ import hmac
 from app.payments import verify_webhook_signature
 
 
-def test_accepts_khpay_prefixed_raw_body_signature():
+def test_accepts_khqrpay_prefixed_raw_body_signature():
     body = b'{"event":"payment.paid"}'
     secret = "webhook-secret"
     digest = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()

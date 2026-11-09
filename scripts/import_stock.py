@@ -35,7 +35,6 @@ async def main() -> None:
             await notify_stock_added(
                 bot,
                 store,
-                os.environ.get("STOCK_NOTIFICATION_CHAT_IDS", ""),
                 args.product_id,
                 added,
             )

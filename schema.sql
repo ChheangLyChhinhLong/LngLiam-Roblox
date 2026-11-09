@@ -60,17 +60,6 @@ create table if not exists public.categories (
     sort_order integer not null default 0
 );
 
-insert into public.categories (name, description, sort_order)
-select seed.name, seed.description, seed.sort_order
-from (values
-    ('Roblox (Robux Send)', 'Robux top-up via player username', 1000),
-    ('Roblox (Robux Code)', 'Robux gift code', 1001)
-) as seed(name, description, sort_order)
-where not exists (
-    select 1 from public.categories existing
-    where lower(existing.name) = lower(seed.name)
-);
-
 create table if not exists public.products (
     id uuid primary key default gen_random_uuid(),
     category_id uuid not null references public.categories(id),
