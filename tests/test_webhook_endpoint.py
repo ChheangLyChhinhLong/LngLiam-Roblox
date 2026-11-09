@@ -9,6 +9,53 @@ from fastapi.testclient import TestClient
 from app import main
 
 
+def test_webhook_hides_missing_secret_configuration(monkeypatch):
+    monkeypatch.setattr(main.settings, "khqrpay_webhook_secret", "")
+
+    response = TestClient(main.app).post("/webhook/khqrpay", json={})
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Webhook service is unavailable"}
+    assert "secret" not in response.text.casefold()
+    assert "khqrpay" not in response.text.casefold()
+
+
+def test_webhook_hides_payment_provider_errors(monkeypatch):
+    secret = "webhook-secret"
+    body = json.dumps(
+        {"event": "payment.update", "id": 123, "status": "Paid", "amount": 5.0}
+    ).encode()
+    signature = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    store = SimpleNamespace(
+        order_by_transaction=AsyncMock(
+            return_value={
+                "id": "order-123",
+                "chat_id": 456,
+                "total": "5.00",
+                "status": "pending",
+            }
+        )
+    )
+    monkeypatch.setattr(main.settings, "khqrpay_webhook_secret", secret)
+    monkeypatch.setattr(main.app.state, "store", store, raising=False)
+    monkeypatch.setattr(
+        main.payments,
+        "check_payment",
+        AsyncMock(side_effect=RuntimeError("provider-secret database details")),
+    )
+
+    response = TestClient(main.app).post(
+        "/webhook/khqrpay",
+        content=body,
+        headers={"x-webhook-signature": signature},
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Could not verify payment"}
+    assert "provider-secret" not in response.text
+    assert "database details" not in response.text
+
+
 def test_paid_status_webhook_confirms_and_delivers_order(monkeypatch):
     secret = "webhook-secret"
     body = json.dumps(

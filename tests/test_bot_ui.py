@@ -71,7 +71,7 @@ def test_welcome_text_escapes_profile_data_and_handles_missing_username():
 
     assert "&lt;Jing&gt;" in text
     assert "&lt;Jing&gt; Digital Shop" in text
-    assert "ID: 12345" in text
+    assert "12345" not in text
     assert "└ ឈ្មោះ: &lt;Jing&gt;" in text
     assert "Digital Key, Code" in text
     assert "Roblox" not in text
@@ -87,7 +87,7 @@ def test_english_welcome_promotes_the_shop_and_account_screen_is_separate():
     account = account_text(user, "2.50", "en", is_reseller=True)
 
     assert "Welcome to My Digital Store!" in text
-    assert "ID: 12345" in text
+    assert "12345" not in text
     assert "Name: Jing Long" in text
     assert "digital keys, codes, and other digital products" in text
     assert "Choose a product from the menu below" in text
@@ -96,7 +96,7 @@ def test_english_welcome_promotes_the_shop_and_account_screen_is_separate():
     assert "Full name: Jing Long" in account
     assert "Username: @jing" in account
     assert "Account type: Reseller" in account
-    assert "<code>12345</code>" in account
+    assert "12345" not in account
     assert "$2.50" in account
 
 
@@ -131,6 +131,7 @@ def test_account_text_handles_missing_username_and_last_name():
     assert "Username: Not set" in account
     assert "Account type: Customer" in account
     assert "Balance: <b>$0.00</b>" in account
+    assert "12345" not in account
 
 
 def test_order_history_shows_empty_message_or_order_details():
@@ -155,8 +156,25 @@ def test_order_history_shows_empty_message_or_order_details():
     assert "2026-10-20 02:35 UTC" in text
     assert "Robux &lt;Gift&gt; ×2" in text
     assert "$5.00" in text
-    assert "txn-456" in text
+    assert "txn-456" not in text
+    assert "order-123456" not in text
     assert "Paid" in text
+
+    text_without_product_name = order_history_text(
+        [
+            {
+                "id": "order-internal-id",
+                "product_id": "product-internal-id",
+                "quantity": 1,
+                "total": "5.00",
+                "status": "paid",
+                "transaction_id": "txn-internal-id",
+            }
+        ],
+        "en",
+    )
+    assert "internal-id" not in text_without_product_name
+    assert "Unknown" in text_without_product_name
 
 
 def test_order_history_keyboard_has_previous_and_next_pagination_buttons():
@@ -385,7 +403,7 @@ def test_welcome_sends_the_new_shop_keyboard_and_saves_profile():
         sent_text = message.answer.call_args.args[0]
         sent_markup = message.answer.call_args.kwargs["reply_markup"]
         assert "សូមស្វាគមន៍មកកាន់ Test Telegram Bot!" in sent_text
-        assert "ID: 12345" in sent_text
+        assert "12345" not in sent_text
         assert "ឈ្មោះ: Jing" in sent_text
         assert [button.text for button in sent_markup.keyboard[0]] == [
             "👤 Account",
@@ -696,12 +714,17 @@ def test_wallet_schema_error_detection_only_matches_missing_wallet_tables():
     assert is_wallet_schema_missing(missing_wallet_table)
     assert not is_wallet_schema_missing(missing_product_table)
     assert not is_wallet_schema_missing(RuntimeError("Network timeout"))
-    assert "run the latest schema.sql" in wallet_error_message(
-        "en",
-        missing_wallet_table,
-        is_admin=True,
-    )
-    assert "shop admin" in wallet_error_message("en", missing_wallet_table)
+    admin_message = wallet_error_message("en")
+    customer_message = wallet_error_message("en")
+    assert admin_message == customer_message
+    assert "temporarily unavailable" in admin_message
+    assert "schema.sql" not in admin_message
+    assert "SQL Editor" not in admin_message
+    assert "temporarily unavailable" in customer_message
+    assert "schema.sql" not in customer_message
+    assert "SQL Editor" not in customer_message
+    assert "Supabase" not in admin_message
+    assert "Supabase" not in customer_message
 
 
 def test_wallet_balance_defaults_to_zero_when_supabase_returns_no_row_or_response():
@@ -1030,21 +1053,22 @@ def test_khqr_payment_keyboard_supports_english():
 
 
 def test_payment_caption_matches_requested_html_layout_and_escapes_data():
-    caption = payment_caption("Gold <Package>", 2, "10.5", "txn-123", "en")
+    caption = payment_caption("Gold <Package>", 2, "10.5", "en")
 
     assert caption == (
         "💳 <b>Pay $10.50</b>\n\n"
         "🛍 <b>Product:</b> Gold &lt;Package&gt; x2\n"
         "💰 <b>Total:</b> $10.50\n"
         "🟢 <b>Remaining to pay:</b> $10.50\n"
-        "🏷 <b>Ref:</b> <code>txn-123</code>\n"
         "⏱ <b>Scan KHQR to complete payment.</b>\n"
         "⏰ <b>You have 10 minutes to pay. The QR refreshes itself.</b>"
     )
+    assert "Ref:" not in caption
+    assert "transaction" not in caption
 
 
 def test_payment_caption_supports_khmer():
-    caption = payment_caption("Gold", 1, "5", "txn-123", "km")
+    caption = payment_caption("Gold", 1, "5", "km")
 
     assert "ទូទាត់ $5.00" in caption
     assert "ផលិតផល៖" in caption

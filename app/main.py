@@ -106,7 +106,7 @@ async def open_aba_mobile(order_id: str, request: Request) -> RedirectResponse:
 async def khqrpay_webhook(request: Request) -> dict[str, bool | str]:
     if not settings.khqrpay_webhook_secret:
         raise HTTPException(
-            status_code=503, detail="KHQRPay webhook secret is not configured"
+            status_code=503, detail="Webhook service is unavailable"
         )
 
     raw_body = await request.body()
@@ -155,7 +155,7 @@ async def khqrpay_webhook(request: Request) -> dict[str, bool | str]:
             payment = await payments.check_payment(transaction_id)
         except Exception:
             logging.getLogger(__name__).exception("KHQRPay status verification failed for %s", transaction_id)
-            raise HTTPException(status_code=503, detail="Could not verify payment with KHQRPay") from None
+            raise HTTPException(status_code=503, detail="Could not verify payment") from None
         if payment.get("status") != expected_status:
             return {"received": True, "status": "awaiting_api_confirmation"}
 
@@ -182,7 +182,7 @@ async def khqrpay_webhook(request: Request) -> dict[str, bool | str]:
         payment = await payments.check_payment(transaction_id)
     except Exception:
         logging.getLogger(__name__).exception("KHQRPay status verification failed for %s", transaction_id)
-        raise HTTPException(status_code=503, detail="Could not verify payment with KHQRPay") from None
+        raise HTTPException(status_code=503, detail="Could not verify payment") from None
     if payment.get("status") != expected_status:
         return {"received": True, "status": "awaiting_api_confirmation"}
 

@@ -33,6 +33,12 @@ from app.store import Store
 
 logger = logging.getLogger(__name__)
 router = Router()
+
+
+class InputValidationError(ValueError):
+    pass
+
+
 pending_stock_upload: dict[int, str] = {}
 pending_admin_input: dict[int, tuple[str, str | None]] = {}
 pending_admin_media: dict[int, str] = {}
@@ -291,21 +297,7 @@ def is_wallet_schema_missing(error: Exception) -> bool:
     )
 
 
-def wallet_error_message(
-    language: str, error: Exception, is_admin: bool = False
-) -> str:
-    if is_wallet_schema_missing(error):
-        if is_admin:
-            return copy(
-                language,
-                "Wallet មិនទាន់ដំណើរការទេ៖ សូមមេត្តារងចាំ ចុងក្រោយក្នុង SQL Editor មុនប្រើ Account/Add funds។",
-                "Wallet is not configured: run the latest schema.sql in SQL Editor before using Account/Add funds.",
-            )
-        return copy(
-            language,
-            "មុខងារ Wallet មិនទាន់រួចរាល់ទេ។ សូមឲ្យ Admin ដំណើរការ DataBase ចុងក្រោយក្នុង SQL Editor រួចសាកល្បងម្តងទៀត។",
-            "Wallet is not configured yet. Ask the shop admin to run the latest schema.sql in SQL Editor, then try again.",
-        )
+def wallet_error_message(language: str) -> str:
     return copy(
         language,
         "មិនអាចប្រើ Wallet បានទេនៅពេលនេះ។ សូមព្យាយាមម្តងទៀតពេលក្រោយ។",
@@ -348,7 +340,6 @@ def payment_caption(
     product_name: str,
     quantity: int,
     amount: Any,
-    transaction_ref: str,
     language: str = "en",
 ) -> str:
     total = f"{Decimal(str(amount)):.2f}"
@@ -357,7 +348,6 @@ def payment_caption(
         f"🛍 <b>{copy(language, 'ផលិតផល៖', 'Product:')}</b> {html.escape(product_name)} x{quantity}\n"
         f"💰 <b>{copy(language, 'សរុប៖', 'Total:')}</b> ${total}\n"
         f"🟢 <b>{copy(language, 'នៅសល់ត្រូវបង់៖', 'Remaining to pay:')}</b> ${total}\n"
-        f"🏷 <b>{copy(language, 'លេខយោង៖', 'Ref:')}</b> <code>{html.escape(transaction_ref)}</code>\n"
         f"⏱ <b>{copy(language, 'ស្កេន KHQR ដើម្បីបញ្ចប់ការទូទាត់។', 'Scan KHQR to complete payment.')}</b>\n"
         f"⏰ <b>{copy(language, 'អ្នកមានពេល 10 នាទីដើម្បីទូទាត់។ QR code នឹងផុតកំណត់ដោយស្វ័យប្រវត្តិ។', 'You have 10 minutes to pay. The QR refreshes itself.')}</b>"
     )
@@ -428,10 +418,7 @@ def order_history_text(orders: list[dict[str, Any]], language: str = "km") -> st
         except ValueError:
             date_text = created_at or copy(language, "មិនស្គាល់", "Unknown")
         product_name = html.escape(
-            str(order.get("product_name") or order.get("product_id") or "—")
-        )
-        reference = html.escape(
-            str(order.get("transaction_id") or order.get("id") or "—")
+            str(order.get("product_name") or copy(language, "មិនស្គាល់", "Unknown"))
         )
         status = html.escape(
             status_labels.get(order.get("status"), str(order.get("status") or "—"))
@@ -440,7 +427,6 @@ def order_history_text(orders: list[dict[str, Any]], language: str = "km") -> st
         lines.append(
             f"📅 {html.escape(date_text)}\n"
             f"📦 {product_name} ×{quantity} · {money(order.get('total', 0))}\n"
-            f"🔖 {copy(language, 'លេខយោង', 'Ref')}: <code>{reference}</code>\n"
             f"📌 {copy(language, 'ស្ថានភាព', 'Status')}: {status}"
         )
     return (
@@ -738,7 +724,6 @@ def welcome_text(
     categories: list[dict[str, Any]] | None = None,
     bot_name: str | None = None,
 ) -> str:
-    user_id = html.escape(str(getattr(user, "id", "")))
     full_name = " ".join(
         part.strip()
         for part in (
@@ -754,7 +739,6 @@ def welcome_text(
         return (
             f"💎 <b>{greeting}</b>\n\n"
             "📋 <b>Account information</b>\n"
-            f"├ 📋 ID: {user_id}\n"
             f"└ Name: {full_name}\n\n"
             "🔑 Buy digital keys, codes, and other digital products quickly and securely.\n\n"
             "Choose a product from the menu below to get started."
@@ -763,7 +747,6 @@ def welcome_text(
     return (
         f"💎 <b>{greeting}</b>\n\n"
         "📋 <b>ព័ត៌មានគណនី</b>\n"
-        f"├ ID: {user_id}\n"
         f"└ ឈ្មោះ: {full_name}\n\n"
         "🔑 ទិញ Digital Key, Code និងផលិតផល Digital ផ្សេងៗបានងាយស្រួល រហ័ស និងមានសុវត្ថិភាព។\n\n"
         "សូមជ្រើសរើសផលិតផលពីម៉ឺនុយខាងក្រោម ដើម្បីចាប់ផ្តើម។"
@@ -808,7 +791,6 @@ def account_text(
         f"👤 <b>{copy(language, 'ព័ត៌មានគណនី', 'Account')}</b>\n\n"
         f"• {copy(language, 'ឈ្មោះពេញ', 'Full name')}: {html.escape(full_name or copy(language, 'មិនមាន', 'Not set'))}\n"
         f"• {copy(language, 'ឈ្មោះអ្នកប្រើ', 'Username')}: {username}\n"
-        f"• {copy(language, 'លេខសម្គាល់', 'UID')}: <code>{user.id}</code>\n"
         f"• {copy(language, 'ប្រភេទគណនី', 'Account type')}: {account_type}\n"
         f"• {copy(language, 'សមតុល្យ', 'Balance')}: <b>{money(balance)}</b>"
     )
@@ -912,7 +894,7 @@ def parse_stock_add(text: str, language: str = "km") -> tuple[str, list[str]] | 
     if not parts or parts[0].lower() != "addstock":
         return None
     if len(parts) != 2 or not separator:
-        raise ValueError(
+        raise InputValidationError(
             copy(
                 language,
                 "សូមប្រើទម្រង់ addstock <product_id> | key1, key2។",
@@ -925,7 +907,7 @@ def parse_stock_add(text: str, language: str = "km") -> tuple[str, list[str]] | 
         if item.strip()
     ]
     if not credentials:
-        raise ValueError(
+        raise InputValidationError(
             copy(
                 language,
                 "សូមបញ្ចូល Digital Key ឬ Code យ៉ាងហោចណាស់មួយ។",
@@ -2516,8 +2498,8 @@ def register_handlers(
         )
         caption = copy(
             language,
-            f"💰 <b>បញ្ចូលប្រាក់ {money(amount)}</b>\n\nសូមស្កេន KHQR ដើម្បីបញ្ចូលប្រាក់ទៅក្នុង Wallet។ សមតុល្យនឹងកើនឡើងបន្ទាប់ពី KHQRPay បញ្ជាក់ការទូទាត់។",
-            f"💰 <b>Add {money(amount)} to your wallet</b>\n\nScan the KHQR to add funds. Your balance is credited after KHQRPay confirms payment.",
+            f"💰 <b>បញ្ចូលប្រាក់ {money(amount)}</b>\n\nសូមស្កេន KHQR ដើម្បីបញ្ចូលប្រាក់ទៅក្នុង Wallet។ សមតុល្យនឹងកើនឡើងបន្ទាប់ពីការទូទាត់ត្រូវបានបញ្ជាក់។",
+            f"💰 <b>Add {money(amount)} to your wallet</b>\n\nScan the KHQR to add funds. Your balance is credited after payment is confirmed.",
         )
         sent = await bot.send_photo(
             user.id,
@@ -2568,14 +2550,14 @@ def register_handlers(
             try:
                 balance = await store.wallet_balance(user.id)
                 is_reseller = await store.is_reseller(user.id)
-            except Exception as exc:
+            except Exception:
                 logger.exception(
                     "Could not load account wallet for Telegram user %s", user.id
                 )
                 await send_replacing_screen(
                     message,
                     user.id,
-                    wallet_error_message(language, exc, user.id in settings.admin_ids),
+                    wallet_error_message(language),
                 )
                 return True
             await send_replacing_screen(
@@ -2905,7 +2887,7 @@ def register_handlers(
         kind = wizard["kind"]
         if kind == "product":
             if not values.get("name") or not values.get("price"):
-                raise ValueError(
+                raise InputValidationError(
                     copy(
                         language,
                         "ឈ្មោះ និងតម្លៃទូទៅត្រូវតែបញ្ចូល។",
@@ -2921,7 +2903,7 @@ def register_handlers(
                 or reseller_price <= 0
                 or reseller_price > price
             ):
-                raise ValueError(
+                raise InputValidationError(
                     copy(
                         language,
                         "តម្លៃមិនត្រឹមត្រូវទេ។ តម្លៃ Reseller ត្រូវមិនលើសតម្លៃអតិថិជន។",
@@ -2954,7 +2936,7 @@ def register_handlers(
                 )
             if wizard["action"] == "product_add":
                 if wizard.get("category_id") is None:
-                    raise ValueError(
+                    raise InputValidationError(
                         copy(
                             language,
                             "សូមជ្រើសរើស Catalog ជាមុនសិន។",
@@ -2992,7 +2974,7 @@ def register_handlers(
             return f"ap:{wizard['target_id']}"
 
         if not values.get("name"):
-            raise ValueError(
+            raise InputValidationError(
                 copy(
                     language,
                     "ឈ្មោះ Catalog ត្រូវតែបញ្ចូល។",
@@ -3107,18 +3089,14 @@ def register_handlers(
         await delete_replaced_message(callback.message)
         try:
             await start_wallet_deposit(callback.from_user, amount, language)
-        except Exception as exc:
+        except Exception:
             logger.exception(
                 "Could not start wallet deposit for Telegram user %s",
                 callback.from_user.id,
             )
             await bot.send_message(
                 callback.from_user.id,
-                wallet_error_message(
-                    language,
-                    exc,
-                    callback.from_user.id in settings.admin_ids,
-                ),
+                wallet_error_message(language),
                 reply_markup=welcome_keyboard(callback.from_user.id, settings),
             )
 
@@ -3461,7 +3439,6 @@ def register_handlers(
             str(product_data["name"]),
             int(quantity_text),
             order["total"],
-            str(payment["transaction_id"]),
             language,
         )
         payment_message = await bot.send_photo(
@@ -3615,8 +3592,8 @@ def register_handlers(
                 await callback.message.answer(
                     copy(
                         language,
-                        "មិនទាន់ទទួលបានការទូទាត់ទេ។ សូមបញ្ចប់ការទូទាត់តាម KHQRPay។",
-                        "Payment has not arrived yet. Please complete payment with KHQRPay.",
+                        "មិនទាន់ទទួលបានការទូទាត់ទេ។ សូមបញ្ចប់ការទូទាត់។",
+                        "Payment has not arrived yet. Please complete your payment.",
                     )
                 )
         except Exception:
@@ -4631,8 +4608,8 @@ def register_handlers(
             message.from_user.id,
             copy(
                 language,
-                f"✅ បាន Upload {'វីដេអូ' if is_video else 'រូបភាព'} ទៅ Cloudinary និងបច្ចុប្បន្នភាព Package ID <code>{html.escape(product_id)}</code> ជោគជ័យ!",
-                f"✅ {'Video' if is_video else 'Image'} uploaded to Cloudinary and package ID <code>{html.escape(product_id)}</code> updated.",
+                f"✅ បានបច្ចុប្បន្នភាព {'វីដេអូ' if is_video else 'រូបភាព'} ជោគជ័យ។",
+                f"✅ {'Video' if is_video else 'Image'} updated successfully.",
             ),
             parse_mode="HTML",
         )
@@ -4705,8 +4682,8 @@ def register_handlers(
                 message.from_user.id,
                 copy(
                     language,
-                    f"✅ បាន Upload និងរក្សាទុក {'វីដេអូ' if is_video else 'រូបភាព'} ទៅ Cloudinary/Supabase ជោគជ័យ។",
-                    f"✅ The {'video' if is_video else 'image'} was uploaded to Cloudinary and saved in Supabase.",
+                    f"✅ បានរក្សាទុក {'វីដេអូ' if is_video else 'រូបភាព'} ជោគជ័យ។",
+                    f"✅ The {'video' if is_video else 'image'} was saved successfully.",
                 ),
                 input_message=message,
                 reply_markup=keyboard(
@@ -5074,7 +5051,7 @@ def register_handlers(
             return
         try:
             target = await finish_admin_wizard(callback.from_user.id, language)
-        except ValueError as exc:
+        except InputValidationError as exc:
             await callback.answer(str(exc), show_alert=True)
             return
         except Exception:
@@ -5084,8 +5061,8 @@ def register_handlers(
             await callback.answer(
                 copy(
                     language,
-                    "រក្សាទុកមិនបានទេ។ សូមពិនិត្យ Cloudinary/Supabase រួចព្យាយាមម្ដងទៀត។",
-                    "Could not save. Check Cloudinary/Supabase and try again.",
+                    "រក្សាទុកមិនបានទេ។ សូមព្យាយាមម្ដងទៀត។",
+                    "Could not save. Please try again.",
                 ),
                 show_alert=True,
             )
@@ -5238,7 +5215,7 @@ def register_handlers(
             and text.casefold() not in customer_buttons
         ):
             try:
-                await start_wallet_deposit(message.from_user, text, language)
+                parse_wallet_deposit_amount(text, language)
             except ValueError as exc:
                 prompt_message = active_screen_messages.get(message.from_user.id)
                 if prompt_message:
@@ -5257,7 +5234,9 @@ def register_handlers(
                         f"⚠️ {str(exc)}\n\n{wallet_custom_amount_prompt(language)}",
                     )
                 return
-            except Exception as exc:
+            try:
+                await start_wallet_deposit(message.from_user, text, language)
+            except Exception:
                 logger.exception(
                     "Could not start custom wallet deposit for Telegram user %s",
                     message.from_user.id,
@@ -5265,11 +5244,7 @@ def register_handlers(
                 await send_replacing_screen(
                     message,
                     message.from_user.id,
-                    wallet_error_message(
-                        language,
-                        exc,
-                        message.from_user.id in settings.admin_ids,
-                    ),
+                    wallet_error_message(language),
                 )
                 return
             pending_wallet_amount.discard(message.from_user.id)
@@ -5415,9 +5390,23 @@ def register_handlers(
                     ),
                 )
                 return
-        except ValueError as exc:
+        except InputValidationError as exc:
             await send_replacing_screen(
                 message, message.from_user.id, html.escape(str(exc))
+            )
+            return
+        except ValueError:
+            logger.exception(
+                "Direct stock import failed for admin %s", message.from_user.id
+            )
+            await send_replacing_screen(
+                message,
+                message.from_user.id,
+                copy(
+                    language,
+                    "មិនអាចបញ្ចូលស្តុកបានទេ។ សូមពិនិត្យ Product ID និងស្តុក រួចព្យាយាមម្ដងទៀត។",
+                    "Could not add stock. Check the product ID and stock data, then try again.",
+                ),
             )
             return
         except Exception:
@@ -5465,14 +5454,14 @@ def register_handlers(
         try:
             if action == "bot_setting":
                 if target_id not in BOT_SETTING_LABELS:
-                    raise ValueError(
+                    raise InputValidationError(
                         copy(language, "Setting មិនត្រឹមត្រូវទេ។", "Invalid setting.")
                     )
                 value = "" if text == "-" else text.strip()
                 if target_id == "support_username" and value:
                     value = value.removeprefix("@")
                     if not value.isascii() or not value.replace("_", "").isalnum():
-                        raise ValueError(
+                        raise InputValidationError(
                             copy(
                                 language,
                                 "សូមបញ្ចូល Telegram username ដូចជា @support។",
@@ -5488,7 +5477,7 @@ def register_handlers(
                     }
                     and len(value) > 1024
                 ):
-                    raise ValueError(
+                    raise InputValidationError(
                         copy(
                             language,
                             "Caption មិនអាចលើស 1024 តួអក្សរបានទេ។",
@@ -5500,7 +5489,7 @@ def register_handlers(
                     in {"stock_notification_chat_ids", "order_notification_chat_ids"}
                     and len(value) > 2000
                 ):
-                    raise ValueError(
+                    raise InputValidationError(
                         copy(language, "តម្លៃវែងពេក។", "The value is too long.")
                     )
                 elif target_id == "install_group_url" and value:
@@ -5510,7 +5499,7 @@ def register_handlers(
                         or not parsed_url.netloc
                         or len(value) > 2048
                     ):
-                        raise ValueError(
+                        raise InputValidationError(
                             copy(
                                 language,
                                 "សូមបញ្ចូល HTTPS URL ត្រឹមត្រូវ។",
@@ -5522,7 +5511,7 @@ def register_handlers(
                     welcome_media_cache = None
             elif action == "reseller_add":
                 if not text.isdecimal():
-                    raise ValueError(
+                    raise InputValidationError(
                         copy(
                             language,
                             "សូមបញ្ចូល Telegram ID ជាលេខវិជ្ជមាន។",
@@ -5535,7 +5524,7 @@ def register_handlers(
                     line.strip() for line in text.splitlines() if line.strip()
                 ]
                 if not credentials:
-                    raise ValueError(
+                    raise InputValidationError(
                         copy(
                             language,
                             "សូមបញ្ចូល Digital Key ឬ Code យ៉ាងហោចណាស់មួយ។",
@@ -5551,7 +5540,7 @@ def register_handlers(
                     line.strip() for line in text.splitlines() if line.strip()
                 ]
                 if not credentials:
-                    raise ValueError(
+                    raise InputValidationError(
                         copy(
                             language,
                             "សូមបញ្ចូល Digital Key ឬ Code យ៉ាងហោចណាស់មួយ។",
@@ -5563,7 +5552,7 @@ def register_handlers(
                 )
             else:
                 return
-        except (InvalidOperation, ValueError) as exc:
+        except InputValidationError as exc:
             await update_active_screen(
                 message.from_user.id,
                 copy(
@@ -5732,7 +5721,7 @@ def register_handlers(
                 if line.strip()
             ]
             if not credentials:
-                raise ValueError(
+                raise InputValidationError(
                     copy(
                         language,
                         "ឯកសារត្រូវមាន Digital Key ឬ Code យ៉ាងហោចណាស់មួយ។",
@@ -5742,13 +5731,26 @@ def register_handlers(
             added = await store.import_stock(
                 product_id, credentials, settings.stock_encryption_key
             )
-        except (UnicodeDecodeError, ValueError) as exc:
+        except (UnicodeDecodeError, InputValidationError):
             await update_active_screen(
                 message.from_user.id,
                 copy(
                     language,
-                    f"⚠️ ឯកសារមិនត្រឹមត្រូវ៖ {html.escape(str(exc))}",
-                    f"⚠️ Invalid file: {html.escape(str(exc))}",
+                    "⚠️ ឯកសារមិនត្រឹមត្រូវ ឬមិនអាចបញ្ចូលស្តុកបានទេ។",
+                    "⚠️ The file is invalid or could not be imported.",
+                ),
+                input_message=message,
+                reply_markup=keyboard([back_button("admin:cancel-upload", language)]),
+            )
+            return
+        except ValueError:
+            logger.exception("Stock import failed for product %s", product_id)
+            await update_active_screen(
+                message.from_user.id,
+                copy(
+                    language,
+                    "⚠️ មិនអាចបញ្ចូលស្តុកបានទេ។ សូមព្យាយាមម្ដងទៀត។",
+                    "⚠️ Could not import stock. Please try again.",
                 ),
                 input_message=message,
                 reply_markup=keyboard([back_button("admin:cancel-upload", language)]),
