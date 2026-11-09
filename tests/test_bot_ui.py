@@ -23,7 +23,10 @@ from app.bot import (
     execute_broadcast,
     edit_text_message,
     expire_payment,
+    first_language_prompt,
     is_wallet_schema_missing,
+    language_choice_keyboard,
+    load_bot_full_name,
     menu,
     normalize_language,
     order_history_keyboard,
@@ -55,6 +58,7 @@ from app.bot import (
     wallet_deposit_keyboard,
 )
 import app.bot as bot_module
+bot_module.bot_full_name = "Test Telegram Bot"
 from app.security import decrypt_stock, encrypt_stock, stock_fingerprint
 from app.store import Store
 
@@ -62,11 +66,10 @@ from app.store import Store
 def test_welcome_text_escapes_profile_data_and_handles_missing_username():
     user = SimpleNamespace(id=12345, first_name="<Jing>", username=None)
 
-    text = welcome_text(user)
+    text = welcome_text(user, bot_name="<Jing> Digital Shop")
 
     assert "&lt;Jing&gt;" in text
-    assert "LngLiam!" in text
-    assert "Digital" in text
+    assert "&lt;Jing&gt; Digital Shop" in text
     assert "ID: 12345" in text
     assert "└ ឈ្មោះ: &lt;Jing&gt;" in text
     assert "Digital Key, Code" in text
@@ -77,10 +80,10 @@ def test_welcome_text_escapes_profile_data_and_handles_missing_username():
 def test_english_welcome_promotes_the_shop_and_account_screen_is_separate():
     user = SimpleNamespace(id=12345, first_name="Jing", last_name="Long", username="jing")
 
-    text = welcome_text(user, "en")
+    text = welcome_text(user, "en", bot_name="My Digital Store")
     account = account_text(user, "2.50", "en", is_reseller=True)
 
-    assert "Welcome to LngLiam Digital Shop!" in text
+    assert "Welcome to My Digital Store!" in text
     assert "ID: 12345" in text
     assert "Name: Jing Long" in text
     assert "digital keys, codes, and other digital products" in text
@@ -92,6 +95,28 @@ def test_english_welcome_promotes_the_shop_and_account_screen_is_separate():
     assert "Account type: Reseller" in account
     assert "<code>12345</code>" in account
     assert "$2.50" in account
+
+
+def test_welcome_brand_comes_from_telegram_bot_full_name():
+    async def run_test():
+        previous_name = bot_module.bot_full_name
+        bot = SimpleNamespace(
+            get_me=AsyncMock(
+                return_value=SimpleNamespace(
+                    first_name="My <Digital>", last_name="Store"
+                )
+            )
+        )
+
+        try:
+            assert await load_bot_full_name(bot) == "My <Digital> Store"
+            assert "Welcome to My &lt;Digital&gt; Store!" in welcome_text(
+                SimpleNamespace(id=12345, first_name="Jing"), "en"
+            )
+        finally:
+            bot_module.bot_full_name = previous_name
+
+    asyncio.run(run_test())
 
 
 def test_account_text_handles_missing_username_and_last_name():
@@ -296,6 +321,17 @@ def test_language_helpers_normalize_supported_locale_variants():
     asyncio.run(run_test())
 
 
+def test_first_use_language_picker_offers_khmer_as_default_choice():
+    assert first_language_prompt().startswith("🌐 សូមជ្រើសរើសភាសាជាមុនសិន៖")
+    markup = language_choice_keyboard()
+
+    assert [row[0].callback_data for row in markup.inline_keyboard] == [
+        "lang:km",
+        "lang:en",
+    ]
+    assert markup.inline_keyboard[0][0].text == "🇰🇭 ភាសាខ្មែរ"
+
+
 def test_bot_setting_section_resolves_all_settings_to_their_screen():
     assert bot_setting_section("welcome_photo_url") == "media"
     assert bot_setting_section("welcome_video_url") == "media"
@@ -331,7 +367,7 @@ def test_welcome_sends_the_new_shop_keyboard_and_saves_profile():
         message.answer.assert_awaited_once()
         sent_text = message.answer.call_args.args[0]
         sent_markup = message.answer.call_args.kwargs["reply_markup"]
-        assert "សូមស្វាគមន៍មកកាន់ហាង Digital របស់ LngLiam!" in sent_text
+        assert "សូមស្វាគមន៍មកកាន់ Test Telegram Bot!" in sent_text
         assert "ID: 12345" in sent_text
         assert "ឈ្មោះ: Jing" in sent_text
         assert [button.text for button in sent_markup.keyboard[0]] == ["👤 Account", "💰 Add funds"]
@@ -363,7 +399,7 @@ def test_welcome_uses_preloaded_language_without_a_second_database_lookup():
 
         store.user_language.assert_not_awaited()
         store.upsert_user.assert_awaited_once_with(12345, "jing", "Jing", "en")
-        assert "Welcome to LngLiam Digital Shop!" in message.answer.call_args.args[0]
+        assert "Welcome to Test Telegram Bot!" in message.answer.call_args.args[0]
 
     asyncio.run(run_test())
 
@@ -394,7 +430,7 @@ def test_immediate_welcome_replies_before_database_work():
         await send_welcome(message, store, SimpleNamespace(admin_ids=set()), "en", immediate=True)
 
         message.answer.assert_awaited_once()
-        assert "Welcome to LngLiam Digital Shop!" in message.answer.call_args.args[0]
+        assert "Welcome to Test Telegram Bot!" in message.answer.call_args.args[0]
         store.user_language.assert_not_awaited()
         store.upsert_user.assert_not_awaited()
         store.bot_settings.assert_not_awaited()
@@ -411,39 +447,15 @@ def test_immediate_welcome_replies_before_database_work():
     asyncio.run(run_test())
 
 
-def test_immediate_welcome_defaults_to_khmer_not_telegram_locale():
-    async def run_test():
-        user_id = 54321
-        bot_module.user_language_cache.pop(user_id, None)
-        user = SimpleNamespace(id=user_id, first_name="Jing", username="jing", language_code="en")
-        sent_message = SimpleNamespace(message_id=793, text="Welcome")
-        message = SimpleNamespace(
-            from_user=user,
-            answer=AsyncMock(return_value=sent_message),
-            delete=AsyncMock(),
-            bot=SimpleNamespace(delete_message=AsyncMock()),
-        )
-        store = SimpleNamespace(
-            user_language=AsyncMock(return_value=None),
-            upsert_user=AsyncMock(),
-            bot_settings=AsyncMock(return_value={}),
-        )
+def test_new_user_language_picker_ignores_telegram_locale():
+    user = SimpleNamespace(id=54321, language_code="en")
 
-        await send_welcome(message, store, SimpleNamespace(admin_ids=set()), immediate=True)
+    prompt = first_language_prompt()
+    options = language_choice_keyboard().inline_keyboard
 
-        assert "សូមស្វាគមន៍មកកាន់ហាង Digital របស់ LngLiam!" in message.answer.call_args.args[0]
-        await asyncio.gather(*tuple(bot_module.welcome_setup_tasks))
-        if bot_module.welcome_settings_task:
-            await bot_module.welcome_settings_task
-
-        store.upsert_user.assert_awaited_once_with(user_id, "jing", "Jing", "km")
-        assert bot_module.user_language_cache[user_id] == "km"
-        bot_module.user_language_cache.pop(user_id, None)
-        bot_module.welcome_message_ids.pop(user_id, None)
-        bot_module.menu_keyboard_messages.pop(user_id, None)
-        bot_module.active_screen_messages.pop(user_id, None)
-
-    asyncio.run(run_test())
+    assert user.language_code == "en"
+    assert prompt.startswith("🌐 សូមជ្រើសរើសភាសាជាមុនសិន៖")
+    assert [row[0].callback_data for row in options] == ["lang:km", "lang:en"]
 
 
 def test_welcome_uses_configured_photo_preview():
@@ -599,7 +611,7 @@ def test_admin_welcome_keyboard_includes_admin_access_and_store_actions():
     assert rows[1] == ["👤 Account", "💰 Add funds"]
     assert rows[2] == ["🛍 Digital Products"]
     assert rows[3] == ["🛒 My Orders", "🎥 How to Buy"]
-    assert rows[4] == ["🔗 Install Group"]
+    assert rows[4] == ["🔗 Join Group"]
     assert all("Roblox" not in button for row in rows for button in row)
 
 

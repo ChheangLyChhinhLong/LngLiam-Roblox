@@ -47,6 +47,7 @@ menu_keyboard_messages: dict[int, Message] = {}
 active_screen_messages: dict[int, Message] = {}
 user_language_cache: dict[int, str] = {}
 welcome_media_cache: dict[str, str] | None = None
+bot_full_name = ""
 welcome_settings_task: asyncio.Task[None] | None = None
 welcome_setup_tasks: set[asyncio.Task[None]] = set()
 payment_message_ids: dict[str, tuple[int, int]] = {}
@@ -73,7 +74,7 @@ BOT_SETTING_LABELS = {
         "ចំណងជើងវីដេអូណែនាំ (អង់គ្លេស)",
     ),
     "support_username": ("Support username", "ឈ្មោះអ្នកជំនួយ"),
-    "install_group_url": ("Install group URL", "តំណ Group ដំឡើង"),
+    "install_group_url": ("Join group URL", "តំណចូល Group"),
     "stock_notification_chat_ids": (
         "Stock notification chats (groups/channels)",
         "Group/Channel ទទួលដំណឹងស្តុក",
@@ -390,6 +391,19 @@ def schedule_welcome_media_preload(store: Store) -> asyncio.Task[None]:
 
 def copy(language: str | None, khmer: str, english: str) -> str:
     return english if normalize_language(language) == "en" else khmer
+
+
+def language_choice_keyboard() -> InlineKeyboardMarkup:
+    return keyboard(
+        [
+            [InlineKeyboardButton(text="🇰🇭 ភាសាខ្មែរ", callback_data="lang:km")],
+            [InlineKeyboardButton(text="🇺🇸 English", callback_data="lang:en")],
+        ]
+    )
+
+
+def first_language_prompt() -> str:
+    return "🌐 សូមជ្រើសរើសភាសាជាមុនសិន៖\nPlease choose your language first:"
 
 
 def order_history_text(orders: list[dict[str, Any]], language: str = "km") -> str:
@@ -719,7 +733,10 @@ async def execute_broadcast(
 
 
 def welcome_text(
-    user: Any, language: str = "km", categories: list[dict[str, Any]] | None = None
+    user: Any,
+    language: str = "km",
+    categories: list[dict[str, Any]] | None = None,
+    bot_name: str | None = None,
 ) -> str:
     user_id = html.escape(str(getattr(user, "id", "")))
     full_name = " ".join(
@@ -731,23 +748,43 @@ def welcome_text(
         if part and part.strip()
     )
     full_name = html.escape(full_name or "—")
+    shop_name = html.escape(bot_name if bot_name is not None else bot_full_name)
     if normalize_language(language) == "en":
+        greeting = f"Welcome to {shop_name}!" if shop_name else "Welcome!"
         return (
-            "💎 <b>Welcome to LngLiam Digital Shop!</b>\n\n"
+            f"💎 <b>{greeting}</b>\n\n"
             "📋 <b>Account information</b>\n"
             f"├ 📋 ID: {user_id}\n"
             f"└ Name: {full_name}\n\n"
             "🔑 Buy digital keys, codes, and other digital products quickly and securely.\n\n"
             "Choose a product from the menu below to get started."
         )
+    greeting = (
+        f"សូមស្វាគមន៍មកកាន់ {shop_name}!"
+        if shop_name
+        else "សូមស្វាគមន៍!"
+    )
     return (
-        "💎 <b>សូមស្វាគមន៍មកកាន់ហាង Digital របស់ LngLiam!</b>\n\n"
+        f"💎 <b>{greeting}</b>\n\n"
         "📋 <b>ព័ត៌មានគណនី</b>\n"
         f"├ ID: {user_id}\n"
         f"└ ឈ្មោះ: {full_name}\n\n"
         "🔑 ទិញ Digital Key, Code និងផលិតផល Digital ផ្សេងៗបានងាយស្រួល រហ័ស និងមានសុវត្ថិភាព។\n\n"
         "សូមជ្រើសរើសផលិតផលពីម៉ឺនុយខាងក្រោម ដើម្បីចាប់ផ្តើម។"
     )
+
+
+async def load_bot_full_name(bot: Bot) -> str:
+    global bot_full_name
+    bot_user = await bot.get_me()
+    bot_full_name = " ".join(
+        part.strip()
+        for part in (bot_user.first_name, bot_user.last_name)
+        if part and part.strip()
+    )
+    if not bot_full_name:
+        raise ValueError("Telegram bot profile does not have a full name")
+    return bot_full_name
 
 
 def account_text(
@@ -1027,7 +1064,7 @@ def welcome_keyboard(user_id: int, settings: Settings) -> ReplyKeyboardMarkup:
             [KeyboardButton(text="👤 Account"), KeyboardButton(text="💰 Add funds")],
             [KeyboardButton(text="🛍 Digital Products")],
             [KeyboardButton(text="🛒 My Orders"), KeyboardButton(text="🎥 How to Buy")],
-            [KeyboardButton(text="🔗 Install Group")],
+            [KeyboardButton(text="🔗 Join Group")],
         ]
     )
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, is_persistent=True)
@@ -2597,7 +2634,12 @@ def register_handlers(
             )
         elif action in {"🎥 how to buy", "how to buy"}:
             await show_how_to_buy(message, language, replace_user_screen=True)
-        elif action in {"🔗 install group", "install group"}:
+        elif action in {
+            "🔗 join group",
+            "join group",
+            "🔗 install group",
+            "install group",
+        }:
             try:
                 install_group_url = (
                     await store.bot_settings(("install_group_url",))
@@ -2620,8 +2662,8 @@ def register_handlers(
                     user.id,
                     copy(
                         language,
-                        "មិនទាន់មានតំណ Group ដំឡើងទេ។",
-                        "The install group link is not configured yet.",
+                        "មិនទាន់មានតំណចូល Group ទេ។",
+                        "The join group link is not configured yet.",
                     ),
                 )
             else:
@@ -2630,8 +2672,8 @@ def register_handlers(
                     user.id,
                     copy(
                         language,
-                        "ចូល Group ដំឡើងតាមតំណខាងក្រោម៖",
-                        "Join the install group using the link below:",
+                        "ចូល Group តាមតំណខាងក្រោម៖",
+                        "Join the group using the link below:",
                     ),
                     reply_markup=keyboard(
                         [
@@ -2640,7 +2682,7 @@ def register_handlers(
                                     text=copy(
                                         language,
                                         "🔗 ចូល Group",
-                                        "🔗 Open install group",
+                                        "🔗 Join Group",
                                     ),
                                     url=install_group_url,
                                 )

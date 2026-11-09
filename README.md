@@ -4,19 +4,32 @@ Project នេះជា Telegram shop សម្រាប់លក់ Digital Key
 
 ## មាតិកា
 
-- [តម្រូវការមុនចាប់ផ្តើម](#តម្រូវការមុនចាប់ផ្តើម)
-- [រៀបចំ Telegram Bot](#1-រៀបចំ-telegram-bot)
-- [រៀបចំ Supabase](#2-រៀបចំ-supabase)
-- [កំណត់ Environment Variables](#3-កំណត់-environment-variables)
-- [ដំណើរការលើម៉ាស៊ីនផ្ទាល់ខ្លួន](#4-ដំណើរការលើម៉ាស៊ីនផ្ទាល់ខ្លួន)
-- [បង្កើត Catalog, Package និង Stock](#5-បង្កើត-catalog-package-និង-stock)
-- [កំណត់វីដេអូណែនាំ និងរូបភាព](#6-កំណត់វីដេអូណែនាំ-និងរូបភាព)
-- [ដាក់ពី GitHub ទៅ Render](#7-ដាក់ពី-github-ទៅ-render)
-- [ភ្ជាប់ KHQRPay](#8-ភ្ជាប់-khqrpay)
-- [ត្រួតពិនិត្យ Render ដោយ UptimeRobot](#9-ត្រួតពិនិត្យ-render-ដោយ-uptimerobot)
-- [របៀបប្រើក្នុង Telegram](#របៀបប្រើក្នុង-telegram)
-- [សុវត្ថិភាព និងថែទាំ](#សុវត្ថិភាព-និងថែទាំ)
-- [ដោះស្រាយបញ្ហា](#ដោះស្រាយបញ្ហា)
+- [PU\_MMO169\_Sale\_Mod — Telegram Digital Key Shop](#pu_mmo169_sale_mod--telegram-digital-key-shop)
+  - [មាតិកា](#មាតិកា)
+  - [តម្រូវការមុនចាប់ផ្តើម](#តម្រូវការមុនចាប់ផ្តើម)
+  - [1. រៀបចំ Telegram Bot](#1-រៀបចំ-telegram-bot)
+  - [2. រៀបចំ Supabase](#2-រៀបចំ-supabase)
+  - [3. កំណត់ Environment Variables](#3-កំណត់-environment-variables)
+  - [4. ដំណើរការលើម៉ាស៊ីនផ្ទាល់ខ្លួន](#4-ដំណើរការលើម៉ាស៊ីនផ្ទាល់ខ្លួន)
+    - [រត់ Tests](#រត់-tests)
+  - [5. បង្កើត Catalog, Package និង Stock](#5-បង្កើត-catalog-package-និង-stock)
+    - [តាម Admin panel ក្នុង Telegram](#តាម-admin-panel-ក្នុង-telegram)
+    - [បញ្ចូល stock ជា `.txt`](#បញ្ចូល-stock-ជា-txt)
+    - [Broadcast](#broadcast)
+    - [កែប្រែ និងបិទ Catalog/Package](#កែប្រែ-និងបិទ-catalogpackage)
+  - [6. កំណត់វីដេអូណែនាំ និងរូបភាព](#6-កំណត់វីដេអូណែនាំ-និងរូបភាព)
+    - [វីដេអូ “How to buy”](#វីដេអូ-how-to-buy)
+    - [Wallet និងម៉ឺនុយ](#wallet-និងម៉ឺនុយ)
+    - [រូបភាព និងវីដេអូ Package](#រូបភាព-និងវីដេអូ-package)
+  - [7. ដាក់ពី GitHub ទៅ Render](#7-ដាក់ពី-github-ទៅ-render)
+    - [7.1 Push code ទៅ GitHub](#71-push-code-ទៅ-github)
+    - [7.2 បង្កើត Render service ពី Blueprint](#72-បង្កើត-render-service-ពី-blueprint)
+  - [8. ភ្ជាប់ KHQRPay](#8-ភ្ជាប់-khqrpay)
+  - [9. ត្រួតពិនិត្យ Render ដោយ UptimeRobot](#9-ត្រួតពិនិត្យ-render-ដោយ-uptimerobot)
+  - [របៀបប្រើក្នុង Telegram](#របៀបប្រើក្នុង-telegram)
+  - [សុវត្ថិភាព និងថែទាំ](#សុវត្ថិភាព-និងថែទាំ)
+  - [ដោះស្រាយបញ្ហា](#ដោះស្រាយបញ្ហា)
+  - [សាកល្បងមុនបើកលក់](#សាកល្បងមុនបើកលក់)
 
 ## តម្រូវការមុនចាប់ផ្តើម
 
@@ -29,7 +42,7 @@ Project នេះជា Telegram shop សម្រាប់លក់ Digital Key
 ## 1. រៀបចំ Telegram Bot
 
 1. បើក [@BotFather](https://t.me/BotFather) ហើយផ្ញើ `/newbot`។
-2. ជ្រើសឈ្មោះ និង username សម្រាប់ bot រួចរក្សាទុក token ដែល BotFather ផ្តល់ឲ្យ។
+2. ជ្រើសឈ្មោះពេញ និង username សម្រាប់ bot រួចរក្សាទុក token ដែល BotFather ផ្តល់ឲ្យ។ Welcome message ប្រើឈ្មោះពេញ bot ពី Telegram ដោយស្វ័យប្រវត្តិ; បើប្តូរឈ្មោះ bot សូម restart bot ដើម្បីឲ្យឈ្មោះថ្មីបង្ហាញ។
 3. រកលេខ Telegram user ID របស់អ្នក ដើម្បីដាក់ក្នុង `TELEGRAM_ADMIN_IDS`។ ដាក់ជា ID លេខសុទ្ធ មិនមែន username; អាចដាក់ admin ច្រើន ដូចជា 2 នាក់ ដោយបំបែកជាមួយសញ្ញាក្បៀស៖ `123456789,987654321`។
 4. កុំផ្ញើ bot token ទៅអ្នកដទៃ និងកុំដាក់វាក្នុង source control។
 
@@ -198,7 +211,7 @@ on conflict (key) do update set value = excluded.value;
 
 Bot ទាញ settings ថ្មីរាល់ពេលអ្នកប្រើបើក tutorial ដូច្នេះមិនចាំបាច់ restart bot បន្ទាប់ពីកែទេ។
 
-នៅ **Store admin → Settings → Media → Welcome media** admin អាចផ្ញើរូបភាព ឬវីដេអូ។ Bot upload ទៅ Cloudinary ហើយរក្សា URL នៅក្នុង Supabase `bot_settings`; media ប្រភេទថ្មីនឹងជំនួស media ចាស់ ហើយមានប៊ូតុង Clear តែមួយសម្រាប់លុប Welcome media ទាំងពីរប្រភេទ។ ក្នុង Settings → **Store links** អាចកំណត់ Support username និង Install group URL (បង្ហាញជាប៊ូតុងក្នុងម៉ឺនុយមេ) ហើយ **Notifications** អាចកំណត់ group IDs សម្រាប់ stock/order notifications។ ការកំណត់ទាំងនេះត្រូវរក្សាទុកក្នុង Admin panel មិនមែន Environment Variables ទេ។
+នៅ **Store admin → Settings → Media → Welcome media** admin អាចផ្ញើរូបភាព ឬវីដេអូ។ Bot upload ទៅ Cloudinary ហើយរក្សា URL នៅក្នុង Supabase `bot_settings`; media ប្រភេទថ្មីនឹងជំនួស media ចាស់ ហើយមានប៊ូតុង Clear តែមួយសម្រាប់លុប Welcome media ទាំងពីរប្រភេទ។ ក្នុង Settings → **Store links** អាចកំណត់ Support username និង Join group URL (បង្ហាញជាប៊ូតុង **Join Group** ក្នុងម៉ឺនុយ) ហើយ **Notifications** អាចកំណត់ group IDs សម្រាប់ stock/order notifications។ ការកំណត់ទាំងនេះត្រូវរក្សាទុកក្នុង Admin panel មិនមែន Environment Variables ទេ។
 
 ```sql
 insert into public.bot_settings (key, value)
@@ -207,7 +220,7 @@ values
 on conflict (key) do update set value = excluded.value;
 ```
 
-ចាប់ផ្តើមប្រើ bot ដោយផ្ញើ `/start`។ Bot នឹងបង្ហាញ Welcome media និងម៉ឺនុយសេវាកម្ម។
+ចាប់ផ្តើមប្រើ bot ដោយផ្ញើ `/start`។ អ្នកប្រើថ្មីត្រូវជ្រើសភាសាមុន ដោយ **ភាសាខ្មែរ** ជាជម្រើសដំបូង និងជាភាសាលំនាំដើម; បន្ទាប់ពីជ្រើសរួច Bot នឹងរក្សាទុកជម្រើស ហើយបង្ហាញ Welcome media និងម៉ឺនុយ។
 
 ### Wallet និងម៉ឺនុយ
 
@@ -246,7 +259,7 @@ git push origin main
 3. Render រកឃើញ `render.yaml` នៅ project root. ពិនិត្យ configuration ហើយចុច **Deploy Blueprint**។ Blueprint កំណត់ Python web service, build/start command, health check `/health` និង `numInstances: 1`។
 4. នៅពេល Render ស្នើ environment variables សូមបញ្ចូល secrets ពិតតាមតារាងក្នុងផ្នែកទី 3។ តម្លៃចាំបាច់យ៉ាងហោចណាស់មាន `BOT_TOKEN`, `TELEGRAM_ADMIN_IDS`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `KHQRPAY_API_KEY` និង `STOCK_ENCRYPTION_KEY`។ កុំប្រើតម្លៃឧទាហរណ៍ក្នុង `.env.example` ជា production secrets។
 5. កំណែ Python ត្រូវបានកំណត់ដោយ `.python-version` (`3.13`)។ Render អនុវត្តកំណែនេះ ហើយប្រើ patch release ចុងក្រោយដែលមានសម្រាប់ Python 3.13។ មើល [Render Python version guide](https://render.com/docs/python-version)។
-6. បើប្រើ media Package ត្រូវបន្ថែម `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY` និង `CLOUDINARY_API_SECRET` នៅ Render **Environment**។ `PUBLIC_BASE_URL` ក៏ត្រូវបញ្ចូលក្រោយទទួលបាន service URL ដែរ។ Support, Install group និង notification destinations អាចកំណត់ក្នុង Telegram តាម **Admin → Settings**។
+6. បើប្រើ media Package ត្រូវបន្ថែម `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY` និង `CLOUDINARY_API_SECRET` នៅ Render **Environment**។ `PUBLIC_BASE_URL` ក៏ត្រូវបញ្ចូលក្រោយទទួលបាន service URL ដែរ។ Support, Join group និង notification destinations អាចកំណត់ក្នុង Telegram តាម **Admin → Settings**។
 7. រង់ចាំ deploy ជោគជ័យ។ ក្នុង service **Settings/Overview** ចម្លង URL HTTPS ដែល Render ផ្ដល់ឲ្យ (`https://YOUR-SERVICE.onrender.com`)។
 8. នៅ Render **Environment** បន្ថែម/កែ:
 

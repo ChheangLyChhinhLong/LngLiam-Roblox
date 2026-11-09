@@ -17,6 +17,7 @@ from app.bot import (
     deliver_order,
     expire_payment,
     expire_wallet_deposit,
+    load_bot_full_name,
     reconcile_broadcasts,
     reconcile_payments,
     register_handlers,
@@ -50,6 +51,7 @@ async def lifespan(_: FastAPI):
         )
         store = Store(supabase)
         app.state.store = store
+        await load_bot_full_name(bot)
         register_handlers(dispatcher, bot, store, payments, settings)
         polling_task = asyncio.create_task(dispatcher.start_polling(bot))
         reconcile_task = asyncio.create_task(reconcile_payments(bot, store, payments, settings))
