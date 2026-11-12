@@ -637,6 +637,7 @@ def test_checkout_payment_buttons_show_balance_only_when_it_covers_the_total():
         "bw:product-123:1",
         "b:aba:product-123:1",
     ]
+    assert [row[0].style for row in funded_rows] == ["success", "success"]
     assert "Pay via balance" in funded_rows[0][0].text
     assert "Pay via ABA" in funded_rows[1][0].text
 
@@ -655,6 +656,7 @@ def test_checkout_payment_buttons_offer_each_configured_khqrpay_key():
         "b:aba:product-123:1",
         "b:bakong:product-123:1",
     ]
+    assert [row[0].style for row in rows] == ["success", "success"]
     assert ["ABA" in row[0].text for row in rows] == [True, False]
     assert ["Bakong" in row[0].text for row in rows] == [False, True]
 
@@ -715,6 +717,10 @@ def test_wallet_payment_method_keyboard_keeps_amount_and_provider_in_callback():
     assert [row[0].callback_data for row in markup.inline_keyboard[:2]] == [
         "wallet:method:aba:12.50",
         "wallet:method:bakong:12.50",
+    ]
+    assert [row[0].style for row in markup.inline_keyboard[:2]] == [
+        "primary",
+        "primary",
     ]
 
 
@@ -1038,6 +1044,11 @@ def test_admin_package_actions_group_editing_and_stock_controls():
         ["au:product-123"],
         ["ac:category-123"],
     ]
+    assert [rows[0][1].style, rows[1][0].style, rows[1][1].style] == [
+        "danger",
+        "success",
+        "danger",
+    ]
 
 
 def test_admin_actions_are_translated_for_english_users():
@@ -1069,6 +1080,10 @@ def test_khqr_payment_keyboard_has_only_aba_and_check_buttons():
     assert markup.inline_keyboard[0][0].url == open_url
     assert markup.inline_keyboard[1][0].text == "✅ ខ្ញុំបានទូទាត់ · ពិនិត្យ"
     assert markup.inline_keyboard[1][0].callback_data == "check_payment_order-123"
+    assert [row[0].style for row in markup.inline_keyboard] == [
+        "primary",
+        "success",
+    ]
 
 
 def test_khqr_payment_keyboard_supports_english():
@@ -1080,6 +1095,15 @@ def test_khqr_payment_keyboard_supports_english():
         "🏦 Open in ABA Mobile",
         "✅ I have paid · Check",
     ]
+
+
+def test_reply_keyboard_styles_primary_shop_and_successful_wallet_action():
+    markup = welcome_keyboard(12345, SimpleNamespace(admin_ids=set()))
+    buttons = {button.text: button for row in markup.keyboard for button in row}
+
+    assert buttons["🛍 Digital Products"].style == "primary"
+    assert buttons["💰 Add funds"].style == "success"
+    assert buttons["👤 Account"].style is None
 
 
 def test_bakong_payment_keyboard_links_to_checkout_page():

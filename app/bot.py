@@ -820,6 +820,7 @@ def checkout_payment_rows(
                 InlineKeyboardButton(
                     text=f"💰 {copy(language, 'បង់តាមសមតុល្យ', 'Pay via balance')} • {money(total)}",
                     callback_data=f"bw:{product_id}:{quantity}",
+                    style="success",
                 )
             ]
         )
@@ -830,6 +831,7 @@ def checkout_payment_rows(
                 InlineKeyboardButton(
                     text=f"💳 {copy(language, 'បង់តាម', 'Pay via')} {method_label} • {money(total)}",
                     callback_data=f"b:{payment_method}:{product_id}:{quantity}",
+                    style="success",
                 )
             ]
         )
@@ -1021,8 +1023,16 @@ def menu(
         "support": copy(language, "💬 ជំនួយ", "💬 Support"),
     }
     rows = [
-        [InlineKeyboardButton(text=labels["shop"], callback_data="shop")],
-        [InlineKeyboardButton(text=labels["orders"], callback_data="history")],
+        [
+            InlineKeyboardButton(
+                text=labels["shop"], callback_data="shop", style="primary"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text=labels["orders"], callback_data="history", style="primary"
+            )
+        ],
         [InlineKeyboardButton(text=labels["guide"], callback_data="how_to_buy")],
         [
             InlineKeyboardButton(text=labels["language"], callback_data="language"),
@@ -1047,9 +1057,15 @@ def welcome_keyboard(user_id: int, settings: Settings) -> ReplyKeyboardMarkup:
         rows.append([KeyboardButton(text="⚙️ ADMIN")])
     rows.extend(
         [
-            [KeyboardButton(text="👤 Account"), KeyboardButton(text="💰 Add funds")],
-            [KeyboardButton(text="🛍 Digital Products")],
-            [KeyboardButton(text="🛒 My Orders"), KeyboardButton(text="🎥 How to Buy")],
+            [
+                KeyboardButton(text="👤 Account"),
+                KeyboardButton(text="💰 Add funds", style="success"),
+            ],
+            [KeyboardButton(text="🛍 Digital Products", style="primary")],
+            [
+                KeyboardButton(text="🛒 My Orders", style="primary"),
+                KeyboardButton(text="🎥 How to Buy"),
+            ],
             [KeyboardButton(text="🔗 Join Group")],
         ]
     )
@@ -1085,6 +1101,7 @@ def admin_category_actions(
             InlineKeyboardButton(
                 text=copy(language, "🗑 បិទ Catalog", "🗑 Disable catalog"),
                 callback_data=f"admin:category-disable:{category_id}",
+                style="danger",
             ),
         ],
         back_button("admin:catalogs", language),
@@ -1103,16 +1120,19 @@ def admin_product_actions(
             InlineKeyboardButton(
                 text=copy(language, "🗑 បិទ Package", "🗑 Disable package"),
                 callback_data=f"admin:product-disable:{product_id}",
+                style="danger",
             ),
         ],
         [
             InlineKeyboardButton(
                 text=copy(language, "➕ បន្ថែមស្តុក", "➕ Add stock"),
                 callback_data=f"admin:stock-add:{product_id}",
+                style="success",
             ),
             InlineKeyboardButton(
                 text=copy(language, "➖ ដកស្តុក", "➖ Remove stock"),
                 callback_data=f"admin:stock-remove:{product_id}",
+                style="danger",
             ),
         ],
         [
@@ -1148,6 +1168,7 @@ def payment_keyboard(
                 InlineKeyboardButton(
                     text=copy(language, open_label_km, open_label_en),
                     url=open_url,
+                    style="primary",
                 )
             ]
         )
@@ -1160,6 +1181,7 @@ def payment_keyboard(
                     "✅ I have paid · Check",
                 ),
                 callback_data=f"check_payment_{order_id}",
+                style="success",
             )
         ]
     )
@@ -1210,6 +1232,7 @@ def wallet_payment_method_keyboard(
             InlineKeyboardButton(
                 text=f"💳 {method.upper()}",
                 callback_data=f"wallet:method:{method}:{amount}",
+                style="primary",
             )
         ]
         for method in payment_methods
@@ -1241,6 +1264,7 @@ def wallet_payment_keyboard(
                 InlineKeyboardButton(
                     text=copy(language, open_label_km, open_label_en),
                     url=open_url,
+                    style="primary",
                 )
             ]
         )
@@ -1254,6 +1278,7 @@ def wallet_payment_keyboard(
                         "✅ I have paid · Check",
                     ),
                     callback_data=f"wallet:check:{deposit_id}",
+                    style="success",
                 )
             ],
             back_button("home", language),
@@ -3409,6 +3434,7 @@ def register_handlers(
                     InlineKeyboardButton(
                         text=copy(language, "អស់ស្តុក", "Out of stock"),
                         callback_data="noop",
+                        style="danger",
                     )
                 ]
             )
