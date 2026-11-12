@@ -46,6 +46,7 @@ from app.bot import (
     parse_stock_add,
     product_price,
     quantity_limit,
+    register_handlers,
     safe_user_language,
     send_replacing_screen,
     send_welcome,
@@ -1151,6 +1152,60 @@ def test_admin_actions_are_translated_for_english_users():
         "📥 Import stock (.txt)",
         "⬅️ Back",
     ]
+
+
+def test_stale_edit_wizard_skip_refreshes_the_current_step():
+    async def run_test():
+        user_id = 7654321
+        edited_message = SimpleNamespace(message_id=987)
+        prompt = SimpleNamespace(
+            message_id=987,
+            edit_text=AsyncMock(return_value=edited_message),
+        )
+        callback = SimpleNamespace(
+            data="admin:wizard-skip:delivery_message",
+            from_user=SimpleNamespace(id=user_id),
+            message=prompt,
+            answer=AsyncMock(),
+        )
+        bot_module.admin_wizards[user_id] = {
+            "kind": "product",
+            "action": "product_edit",
+            "target_id": "product-123",
+            "category_id": "category-123",
+            "edit": True,
+            "step": "delivery_video",
+            "values": {},
+        }
+        bot_module.active_screen_messages.pop(user_id, None)
+
+        register_handlers(
+            SimpleNamespace(include_router=Mock()),
+            SimpleNamespace(),
+            SimpleNamespace(user_language=AsyncMock(return_value="en")),
+            SimpleNamespace(),
+            SimpleNamespace(admin_ids={user_id}),
+        )
+        handler = next(
+            handler.callback
+            for handler in bot_module.router.callback_query.handlers
+            if handler.callback.__name__ == "skip_admin_wizard_step"
+        )
+
+        await handler(callback)
+
+        callback.answer.assert_awaited_once_with(
+            "The form was updated. Continue from the current step."
+        )
+        prompt.edit_text.assert_awaited_once()
+        assert "Step 8/8" in prompt.edit_text.await_args.args[0]
+        assert bot_module.admin_wizards[user_id]["step"] == "delivery_video"
+
+        bot_module.admin_wizards.pop(user_id, None)
+        bot_module.active_screen_messages.pop(user_id, None)
+        bot_module.user_language_cache.pop(user_id, None)
+
+    asyncio.run(run_test())
 
 
 def test_khqr_payment_keyboard_has_only_aba_and_check_buttons():

@@ -2924,6 +2924,7 @@ def register_handlers(
         kind = wizard["kind"]
         steps = ADMIN_WIZARD_STEPS[kind]
         step = wizard.get("step")
+        values = wizard["values"]
         notice_text = f"⚠️ {html.escape(notice)}\n\n" if notice else ""
         if step is None:
             title = copy(language, "💾 ពិនិត្យ និងរក្សាទុក", "💾 Review and save")
@@ -2942,7 +2943,6 @@ def register_handlers(
                 ],
             ]
             if kind == "product":
-                values = wizard["values"]
                 summary = (
                     f"📦 <b>{html.escape(values['name'])}</b>\n"
                     f"{copy(language, 'ព័ត៌មានលម្អិត៖', 'Details:')} {html.escape(values.get('description') or '-')}\n"
@@ -2958,7 +2958,6 @@ def register_handlers(
                     f"{'✅' if values.get('delivery_video_url') or values.get('delivery_video_file_id') else '—'}"
                 )
             else:
-                values = wizard["values"]
                 summary = (
                     f"🗂 <b>{html.escape(values['name'])}</b>\n"
                     f"{copy(language, 'ព័ត៌មានលម្អិត៖', 'Details:')} {html.escape(values.get('description') or '-')}"
@@ -5209,10 +5208,12 @@ def register_handlers(
         if step != requested_step:
             await callback.answer(
                 copy(
-                    language, "ជំហាននេះលែងសកម្មហើយ។", "This step is no longer active."
-                ),
-                show_alert=True,
+                    language,
+                    "ទម្រង់បានធ្វើបច្ចុប្បន្នភាពហើយ។ សូមបន្តពីជំហានបច្ចុប្បន្ន។",
+                    "The form was updated. Continue from the current step.",
+                )
             )
+            await show_admin_wizard(callback.message, callback.from_user.id, language)
             return
         optional_steps = {
             "media",
@@ -5265,15 +5266,22 @@ def register_handlers(
         if (
             not wizard
             or not wizard["edit"]
-            or wizard.get("step") != step
             or step not in fields
         ):
             await callback.answer(
-                copy(
-                    language, "ជំហាននេះលែងសកម្មហើយ។", "This step is no longer active."
-                ),
+                copy(language, "មិនអាចលុប Media នេះបានទេ។", "This media cannot be cleared."),
                 show_alert=True,
             )
+            return
+        if wizard.get("step") != step:
+            await callback.answer(
+                copy(
+                    language,
+                    "ទម្រង់បានធ្វើបច្ចុប្បន្នភាពហើយ។ សូមបន្តពីជំហានបច្ចុប្បន្ន។",
+                    "The form was updated. Continue from the current step.",
+                )
+            )
+            await show_admin_wizard(callback.message, callback.from_user.id, language)
             return
         url_field, file_field = fields[step]
         wizard["values"][url_field] = None
