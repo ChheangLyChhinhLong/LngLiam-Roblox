@@ -2929,11 +2929,12 @@ def register_handlers(
     ) -> None:
         user_id = message.from_user.id if message.from_user else None
 
-        async def answer(text: str) -> None:
+        async def answer(text: str, *, parse_mode: str | None = None) -> None:
+            options = {"parse_mode": parse_mode} if parse_mode else {}
             if replace_user_screen and user_id is not None:
-                await send_replacing_screen(message, user_id, text)
+                await send_replacing_screen(message, user_id, text, **options)
             else:
-                await message.answer(text)
+                await message.answer(text, **options)
 
         try:
             settings_data = await store.bot_settings(
@@ -2974,8 +2975,28 @@ def register_handlers(
                 copied = await copy_telegram_content_reference(
                     bot, message.chat.id, reference
                 )
-            except TelegramBadRequest as exc:
+            except TelegramAPIError as exc:
                 logger.warning("Could not copy configured How to Buy media: %s", exc)
+                post_link = video.strip()
+                if parse_telegram_post_link(post_link):
+                    link_label = copy(
+                        language,
+                        "បើក Media ណែនាំក្នុង Telegram",
+                        "Open the tutorial in Telegram",
+                    )
+                    fallback_text = (
+                        f"{html.escape(caption)}\n\n" if caption else ""
+                    ) + (
+                        "មិនអាចផ្ញើ Media តាម Bot បានទេ។ "
+                        if language == "km"
+                        else "The bot could not send this media. "
+                    )
+                    fallback_text += (
+                        f'<a href="{html.escape(post_link, quote=True)}">'
+                        f"{link_label}</a>"
+                    )
+                    await answer(fallback_text, parse_mode="HTML")
+                    return
                 await answer(
                     copy(
                         language,

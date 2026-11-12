@@ -201,7 +201,7 @@ Script អាន `.env` ពី project root។ វាត្រូវការ `S
 
 ### វីដេអូ “How to buy”
 
-នៅ **Store admin → Settings → Media → How to Buy** ផ្ញើ Video, Media ឬឯកសារ ហើយចុច **Save media**។ Bot upload ឯកសារទៅ Cloudinary ហើយ Supabase រក្សាទុក URL ដើម្បីផ្ញើឯកសារនោះ។ បើ paste Telegram post link វារក្សាទុកជា URL ដើម ដូចជា `https://t.me/channel/123`; Bot ចម្លង post តាម Telegram ដោយផ្ទាល់. Caption ខ្មែរ/អង់គ្លេសអាចកំណត់នៅ **Settings → Captions**។
+នៅ **Store admin → Settings → Media → How to Buy** ផ្ញើ Video, Media ឬឯកសារ ហើយចុច **Save media**។ Bot upload ឯកសារទៅ Cloudinary ហើយ Supabase រក្សាទុក URL ក្នុង `how_to_buy_video_url` ដើម្បីផ្ញើឯកសារនោះ។ បើ paste Telegram post link វារក្សាទុកជា URL ដើម ដូចជា `https://t.me/channel/123`; Bot ព្យាយាមចម្លង post ហើយបង្ហាញតំណបើមិនអាចចូល source បាន។ ដើម្បីឲ្យ Bot ផ្ញើ Video ដោយផ្ទាល់ សូម upload Video file ជំនួស post link។ Caption ខ្មែរ/អង់គ្លេសអាចកំណត់នៅ **Settings → Captions**។
 
 ```sql
 insert into public.bot_settings (key, value)

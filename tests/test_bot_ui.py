@@ -1633,6 +1633,74 @@ def test_tutorial_post_link_is_saved_as_plain_url():
     asyncio.run(run_test())
 
 
+def test_tutorial_file_upload_saves_cloudinary_url(monkeypatch):
+    async def run_test():
+        user_id = 7654329
+        screen = SimpleNamespace(message_id=994, text="Media settings")
+        screen.edit_text = AsyncMock(return_value=screen)
+        bot_module.pending_admin_media[user_id] = {
+            "kind": "tutorial",
+            "items": [
+                {
+                    "file_id": "video-file-id",
+                    "media_type": "video",
+                    "file_name": "tutorial.mp4",
+                }
+            ],
+        }
+        bot = SimpleNamespace()
+        settings = SimpleNamespace(
+            admin_ids={user_id},
+            cloudinary_cloud_name="cloud",
+            cloudinary_api_key="key",
+            cloudinary_api_secret="secret",
+        )
+        cloudinary_url = "https://res.cloudinary.com/cloud/video/upload/tutorial.mp4"
+        upload = AsyncMock(return_value=cloudinary_url)
+        monkeypatch.setattr(bot_module, "upload_cloudinary_file", upload)
+        store = SimpleNamespace(
+            user_language=AsyncMock(return_value="en"),
+            bot_settings=AsyncMock(return_value={}),
+            set_bot_setting=AsyncMock(),
+        )
+        register_handlers(
+            SimpleNamespace(include_router=Mock()),
+            bot,
+            store,
+            SimpleNamespace(),
+            settings,
+        )
+        callback = SimpleNamespace(
+            data="admin:media-save",
+            from_user=SimpleNamespace(id=user_id),
+            message=screen,
+            answer=AsyncMock(),
+        )
+        handler = [
+            handler.callback
+            for handler in bot_module.router.callback_query.handlers
+            if handler.callback.__name__ == "save_admin_telegram_media"
+        ][-1]
+
+        await handler(callback)
+
+        upload.assert_awaited_once_with(
+            bot,
+            settings,
+            "video-file-id",
+            "bot-media",
+            resource_type="auto",
+            file_name="tutorial.mp4",
+        )
+        store.set_bot_setting.assert_awaited_once_with(
+            "how_to_buy_video_url", cloudinary_url
+        )
+        assert user_id not in bot_module.pending_admin_media
+        bot_module.user_language_cache.pop(user_id, None)
+
+    asyncio.run(run_test())
+
+
 def test_package_wizard_uploads_package_media_to_cloudinary(monkeypatch):
     async def run_test():
         user_id = 7654325
@@ -1838,6 +1906,59 @@ def test_how_to_buy_reports_when_telegram_source_message_is_unavailable():
 
         bot.copy_messages.assert_awaited_once()
         assert "Could not copy the tutorial media" in message.answer.await_args.args[0]
+
+        bot_module.user_language_cache.pop(user_id, None)
+
+    asyncio.run(run_test())
+
+
+def test_how_to_buy_falls_back_to_clickable_link_when_telegram_copy_fails():
+    async def run_test():
+        user_id = 7654322
+        post_link = "https://t.me/PU_MMO169/704"
+        message = SimpleNamespace(
+            chat=SimpleNamespace(id=user_id),
+            from_user=SimpleNamespace(id=user_id),
+            answer=AsyncMock(),
+        )
+        callback = SimpleNamespace(
+            data="how_to_buy",
+            from_user=SimpleNamespace(id=user_id),
+            message=message,
+            answer=AsyncMock(),
+        )
+        bot = SimpleNamespace(
+            copy_messages=AsyncMock(
+                side_effect=TelegramBadRequest(Mock(), "message to forward not found")
+            )
+        )
+        store = SimpleNamespace(
+            user_language=AsyncMock(return_value="en"),
+            bot_settings=AsyncMock(
+                return_value={"how_to_buy_video_url": post_link}
+            ),
+        )
+        register_handlers(
+            SimpleNamespace(include_router=Mock()),
+            bot,
+            store,
+            SimpleNamespace(),
+            SimpleNamespace(admin_ids=set()),
+        )
+        handler = [
+            handler.callback
+            for handler in bot_module.router.callback_query.handlers
+            if handler.callback.__name__ == "buying_guide"
+        ][-1]
+
+        await handler(callback)
+
+        bot.copy_messages.assert_awaited_once()
+        message.answer.assert_awaited_once()
+        assert message.answer.await_args.kwargs["parse_mode"] == "HTML"
+        assert post_link in message.answer.await_args.args[0]
+        assert "Open the tutorial in Telegram" in message.answer.await_args.args[0]
+        assert "Could not copy the tutorial media" not in message.answer.await_args.args[0]
 
         bot_module.user_language_cache.pop(user_id, None)
 
