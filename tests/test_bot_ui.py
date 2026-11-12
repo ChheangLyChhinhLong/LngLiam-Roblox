@@ -303,6 +303,10 @@ def test_telegram_post_link_parser_supports_public_and_private_posts():
         "@shop_channel",
         123,
     )
+    assert parse_telegram_post_link("t.me/shop_channel/123") == (
+        "@shop_channel",
+        123,
+    )
     assert parse_telegram_post_link("https://t.me/s/shop_channel/123?single") == (
         "@shop_channel",
         123,
@@ -336,6 +340,10 @@ def test_telegram_content_reference_accepts_single_messages_and_albums():
     )
 
     assert decode_telegram_content_reference(album) == (123, [20, 21])
+    assert decode_telegram_content_reference("https://t.me/shop_channel/123") == (
+        "@shop_channel",
+        [123],
+    )
     assert decode_telegram_content_reference("https://example.com/file.mp4") is None
     with pytest.raises(ValueError, match="one Telegram message or one album"):
         encode_telegram_content_reference(
@@ -379,6 +387,31 @@ def test_copy_telegram_content_reference_copies_album_without_downloading():
             from_chat_id="@media_channel",
             message_ids=[11, 12],
         )
+
+    asyncio.run(run_test())
+
+
+def test_telegram_media_command_reference_copies_without_admin_caption():
+    async def run_test():
+        bot = SimpleNamespace(
+            copy_message=AsyncMock(return_value=SimpleNamespace(message_id=303)),
+            copy_messages=AsyncMock(),
+        )
+        reference = encode_telegram_content_reference(
+            [{"message_id": 13, "source_chat_id": "@media_channel"}],
+            drop_caption=True,
+        )
+
+        copied = await copy_telegram_content_reference(bot, 456, reference)
+
+        assert copied == [SimpleNamespace(message_id=303)]
+        bot.copy_message.assert_awaited_once_with(
+            chat_id=456,
+            from_chat_id="@media_channel",
+            message_id=13,
+            caption="",
+        )
+        bot.copy_messages.assert_not_awaited()
 
     asyncio.run(run_test())
 
@@ -1271,6 +1304,339 @@ def test_stale_edit_wizard_skip_refreshes_the_current_step():
 
         bot_module.admin_wizards.pop(user_id, None)
         bot_module.active_screen_messages.pop(user_id, None)
+        bot_module.user_language_cache.pop(user_id, None)
+
+    asyncio.run(run_test())
+
+
+def test_request_admin_media_uses_direct_telegram_copy_without_mode_buttons():
+    async def run_test():
+        user_id = 7654322
+        edited_message = SimpleNamespace(message_id=988)
+        prompt = SimpleNamespace(
+            message_id=988,
+            text="Settings",
+            edit_text=AsyncMock(return_value=edited_message),
+        )
+        callback = SimpleNamespace(
+            data="admin:media:welcome",
+            from_user=SimpleNamespace(id=user_id),
+            message=prompt,
+            answer=AsyncMock(),
+        )
+        store = SimpleNamespace(user_language=AsyncMock(return_value="en"))
+
+        register_handlers(
+            SimpleNamespace(include_router=Mock()),
+            SimpleNamespace(),
+            store,
+            SimpleNamespace(),
+            SimpleNamespace(admin_ids={user_id}),
+        )
+        handler = [
+            handler.callback
+            for handler in bot_module.router.callback_query.handlers
+            if handler.callback.__name__ == "request_admin_media"
+        ][-1]
+
+        await handler(callback)
+
+        markup = prompt.edit_text.await_args.kwargs["reply_markup"]
+        assert [
+            [button.callback_data for button in row]
+            for row in markup.inline_keyboard
+        ] == [["admin:settings:section:media"]]
+        assert "copies it directly" in prompt.edit_text.await_args.args[0]
+
+        bot_module.pending_admin_media.pop(user_id, None)
+        bot_module.active_screen_messages.pop(user_id, None)
+        bot_module.user_language_cache.pop(user_id, None)
+
+    asyncio.run(run_test())
+
+
+def test_admin_media_uses_telegram_copy_without_upload(monkeypatch):
+    async def run_test():
+        user_id = 7654324
+        screen = SimpleNamespace(message_id=989, text="Media prompt")
+        screen.edit_text = AsyncMock(return_value=screen)
+        bot_module.active_screen_messages[user_id] = screen
+        bot_module.pending_admin_media[user_id] = {
+            "kind": "welcome",
+            "items": [],
+        }
+        bot = SimpleNamespace()
+        settings = SimpleNamespace(
+            admin_ids={user_id},
+            cloudinary_cloud_name="cloud",
+            cloudinary_api_key="key",
+            cloudinary_api_secret="secret",
+        )
+        store = SimpleNamespace(user_language=AsyncMock(return_value="en"))
+        upload = AsyncMock(side_effect=AssertionError("unexpected upload"))
+        monkeypatch.setattr(bot_module, "upload_product_media", upload)
+        register_handlers(
+            SimpleNamespace(include_router=Mock()),
+            bot,
+            store,
+            SimpleNamespace(),
+            settings,
+        )
+        handler = [
+            handler.callback
+            for handler in bot_module.router.message.handlers
+            if handler.callback.__name__ == "receive_wizard_media"
+        ][-1]
+        message = SimpleNamespace(
+            from_user=SimpleNamespace(id=user_id),
+            chat=SimpleNamespace(id=user_id),
+            message_id=200,
+            text=None,
+            caption=None,
+            photo=[SimpleNamespace(file_id="photo-file-id")],
+            video=None,
+            media_group_id=None,
+        )
+
+        await handler(message)
+
+        upload.assert_not_awaited()
+        pending = bot_module.pending_admin_media[user_id]
+        assert pending["items"] == [
+            {
+                "message_id": 200,
+                "media_group_id": None,
+                "source_chat_id": user_id,
+            }
+        ]
+        markup = screen.edit_text.await_args.kwargs["reply_markup"]
+        assert [
+            [button.callback_data for button in row]
+            for row in markup.inline_keyboard
+        ] == [["admin:media-save"], ["admin:media-cancel"]]
+        assert "copies it directly" in screen.edit_text.await_args.args[0]
+
+        bot_module.pending_admin_media.pop(user_id, None)
+        bot_module.active_screen_messages.pop(user_id, None)
+        bot_module.user_language_cache.pop(user_id, None)
+
+    asyncio.run(run_test())
+
+
+def test_package_wizard_uses_telegram_copy_without_upload(monkeypatch):
+    async def run_test():
+        user_id = 7654325
+        screen = SimpleNamespace(message_id=990)
+        bot_module.active_screen_messages[user_id] = screen
+        bot_module.admin_wizards[user_id] = {
+            "kind": "product",
+            "action": "product_add",
+            "target_id": None,
+            "category_id": "category-1",
+            "edit": False,
+            "step": "media",
+            "values": {"description": ""},
+        }
+        bot = SimpleNamespace()
+        settings = SimpleNamespace(
+            admin_ids={user_id},
+            cloudinary_cloud_name="cloud",
+            cloudinary_api_key="key",
+            cloudinary_api_secret="secret",
+        )
+        store = SimpleNamespace(user_language=AsyncMock(return_value="en"))
+        upload = AsyncMock(side_effect=AssertionError("unexpected upload"))
+        monkeypatch.setattr(bot_module, "upload_product_media", upload)
+        register_handlers(
+            SimpleNamespace(include_router=Mock()),
+            bot,
+            store,
+            SimpleNamespace(),
+            settings,
+        )
+        handler = [
+            handler.callback
+            for handler in bot_module.router.message.handlers
+            if handler.callback.__name__ == "receive_wizard_media"
+        ][-1]
+        sent_screen = SimpleNamespace(message_id=991)
+        message = SimpleNamespace(
+            from_user=SimpleNamespace(id=user_id),
+            chat=SimpleNamespace(id=user_id),
+            message_id=201,
+            answer=AsyncMock(return_value=sent_screen),
+            delete=AsyncMock(),
+            text=None,
+            caption="A caption retained in Telegram",
+            photo=[SimpleNamespace(file_id="photo-file-id")],
+            video=None,
+            media_group_id=None,
+        )
+
+        await handler(message)
+
+        upload.assert_not_awaited()
+        assert bot_module.admin_wizards[user_id]["telegram_media_items"] == [
+            {
+                "message_id": 201,
+                "media_group_id": None,
+                "source_chat_id": user_id,
+            }
+        ]
+        assert "copies it directly" in message.answer.await_args.args[0]
+
+        bot_module.admin_wizards.pop(user_id, None)
+        bot_module.active_screen_messages.pop(user_id, None)
+        bot_module.user_language_cache.pop(user_id, None)
+
+    asyncio.run(run_test())
+
+
+def test_set_product_media_saves_telegram_reference_without_upload(monkeypatch):
+    async def run_test():
+        user_id = 7654326
+        store = SimpleNamespace(
+            user_language=AsyncMock(return_value="en"),
+            update_product_image=AsyncMock(return_value=True),
+        )
+        upload = AsyncMock(side_effect=AssertionError("unexpected upload"))
+        monkeypatch.setattr(bot_module, "upload_product_media", upload)
+        register_handlers(
+            SimpleNamespace(include_router=Mock()),
+            SimpleNamespace(),
+            store,
+            SimpleNamespace(),
+            SimpleNamespace(admin_ids={user_id}),
+        )
+        handler = [
+            handler.callback
+            for handler in bot_module.router.message.handlers
+            if handler.callback.__name__ == "set_product_media"
+        ][-1]
+        message = SimpleNamespace(
+            from_user=SimpleNamespace(id=user_id),
+            chat=SimpleNamespace(id=user_id),
+            message_id=202,
+            text=None,
+            caption="setmedia product-1",
+            photo=[SimpleNamespace(file_id="photo-file-id")],
+            video=None,
+            media_group_id=None,
+            answer=AsyncMock(return_value=SimpleNamespace(message_id=992)),
+            delete=AsyncMock(),
+        )
+
+        await handler(message)
+
+        upload.assert_not_awaited()
+        product_id, reference = store.update_product_image.await_args.args
+        assert product_id == "product-1"
+        assert decode_telegram_content_reference(reference) == (user_id, [202])
+        assert bot_module.telegram_content_reference_drops_caption(reference)
+
+        bot_module.active_screen_messages.pop(user_id, None)
+        bot_module.user_language_cache.pop(user_id, None)
+
+    asyncio.run(run_test())
+
+
+def test_how_to_buy_reports_when_telegram_source_message_is_unavailable():
+    async def run_test():
+        user_id = 7654323
+        message = SimpleNamespace(
+            chat=SimpleNamespace(id=user_id),
+            from_user=SimpleNamespace(id=user_id),
+            answer=AsyncMock(),
+        )
+        callback = SimpleNamespace(
+            data="how_to_buy",
+            from_user=SimpleNamespace(id=user_id),
+            message=message,
+            answer=AsyncMock(),
+        )
+        reference = encode_telegram_content_reference(
+            [{"message_id": 45, "source_chat_id": "@tutorial_channel"}]
+        )
+        bot = SimpleNamespace(
+            copy_messages=AsyncMock(
+                side_effect=TelegramBadRequest(Mock(), "message to forward not found")
+            )
+        )
+        store = SimpleNamespace(
+            user_language=AsyncMock(return_value="en"),
+            bot_settings=AsyncMock(
+                return_value={"how_to_buy_video_url": reference}
+            ),
+        )
+        register_handlers(
+            SimpleNamespace(include_router=Mock()),
+            bot,
+            store,
+            SimpleNamespace(),
+            SimpleNamespace(admin_ids=set()),
+        )
+        handler = [
+            handler.callback
+            for handler in bot_module.router.callback_query.handlers
+            if handler.callback.__name__ == "buying_guide"
+        ][-1]
+
+        await handler(callback)
+
+        bot.copy_messages.assert_awaited_once()
+        assert "Could not copy the tutorial media" in message.answer.await_args.args[0]
+
+        bot_module.user_language_cache.pop(user_id, None)
+
+    asyncio.run(run_test())
+
+
+def test_how_to_buy_copies_raw_telegram_post_link_from_supabase():
+    async def run_test():
+        user_id = 7654327
+        message = SimpleNamespace(
+            chat=SimpleNamespace(id=user_id),
+            from_user=SimpleNamespace(id=user_id),
+            answer=AsyncMock(),
+            delete=AsyncMock(),
+        )
+        callback = SimpleNamespace(
+            data="how_to_buy",
+            from_user=SimpleNamespace(id=user_id),
+            message=message,
+            answer=AsyncMock(),
+        )
+        bot = SimpleNamespace(
+            copy_messages=AsyncMock(return_value=[SimpleNamespace(message_id=301)])
+        )
+        store = SimpleNamespace(
+            user_language=AsyncMock(return_value="en"),
+            bot_settings=AsyncMock(
+                return_value={"how_to_buy_video_url": "https://t.me/PU_MMO169/704"}
+            ),
+        )
+        register_handlers(
+            SimpleNamespace(include_router=Mock()),
+            bot,
+            store,
+            SimpleNamespace(),
+            SimpleNamespace(admin_ids=set()),
+        )
+        handler = [
+            handler.callback
+            for handler in bot_module.router.callback_query.handlers
+            if handler.callback.__name__ == "buying_guide"
+        ][-1]
+
+        await handler(callback)
+
+        bot.copy_messages.assert_awaited_once_with(
+            chat_id=user_id,
+            from_chat_id="@PU_MMO169",
+            message_ids=[704],
+        )
+        assert message.answer.await_args_list[-1].args[0] == "🎥 Tutorial media"
+
         bot_module.user_language_cache.pop(user_id, None)
 
     asyncio.run(run_test())
@@ -2321,7 +2687,14 @@ def test_stock_notification_reaches_users_and_configured_chats_once():
             send_message=AsyncMock(),
         )
         store = SimpleNamespace(
-            product=AsyncMock(return_value={"id": "product-123", "name": "Robux"}),
+            product=AsyncMock(
+                return_value={
+                    "id": "product-123",
+                    "category_id": "category-123",
+                    "name": "Robux",
+                }
+            ),
+            category=AsyncMock(return_value={"name": "VPN"}),
             stock_notification_users=AsyncMock(
                 return_value=[
                     {"telegram_id": 12345, "language": "en"},
@@ -2342,9 +2715,14 @@ def test_stock_notification_reaches_users_and_configured_chats_once():
             -100987,
             "@shopnews",
         ]
-        assert "New quantity: 4" in bot.send_message.await_args_list[0].args[1]
-        assert "ចំនួនថ្មី៖ 4" in bot.send_message.await_args_list[1].args[1]
-        assert "New quantity: 4" in bot.send_message.await_args_list[2].args[1]
+        assert "Product: <b>VPN</b>" in bot.send_message.await_args_list[0].args[1]
+        assert "Package: <b>Robux</b>" in bot.send_message.await_args_list[0].args[1]
+        assert "Newly added: <b>4</b>" in bot.send_message.await_args_list[0].args[1]
+        assert "ទំនិញ៖ <b>VPN</b>" in bot.send_message.await_args_list[1].args[1]
+        assert "កញ្ចប់៖ <b>Robux</b>" in bot.send_message.await_args_list[1].args[1]
+        assert "ចំនួនបន្ថែមថ្មី៖ <b>4</b>" in bot.send_message.await_args_list[1].args[1]
+        assert "Newly added: <b>4</b>" in bot.send_message.await_args_list[2].args[1]
+        assert bot.send_message.await_args_list[0].kwargs["parse_mode"] == "HTML"
         button = (
             bot.send_message.await_args_list[0]
             .kwargs["reply_markup"]
@@ -2357,14 +2735,14 @@ def test_stock_notification_reaches_users_and_configured_chats_once():
             .kwargs["reply_markup"]
             .inline_keyboard[0][0]
             .text
-            == "🛍 View product"
+            == "🛍 Buy now"
         )
         assert (
             bot.send_message.await_args_list[1]
             .kwargs["reply_markup"]
             .inline_keyboard[0][0]
             .text
-            == "🛍 មើល Package"
+            == "🛍 ទិញឥឡូវនេះ"
         )
 
     asyncio.run(run_test())
