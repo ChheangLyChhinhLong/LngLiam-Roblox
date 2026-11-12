@@ -415,7 +415,7 @@ revoke all on function public.available_stock_count(uuid) from public, anon, aut
 revoke all on function public.sales_summary() from public, anon, authenticated;
 revoke all on function public.import_stock_items(uuid, jsonb) from public, anon, authenticated;
 revoke all on function public.create_wallet_deposit(bigint, numeric) from public, anon, authenticated;
-revoke all on function public.set_wallet_deposit_payment(uuid, text, text) from public, anon, authenticated;
+revoke all on function public.set_wallet_deposit_payment(uuid, text, text, text) from public, anon, authenticated;
 revoke all on function public.complete_wallet_deposit(uuid) from public, anon, authenticated;
 revoke all on function public.close_wallet_deposit(uuid, text) from public, anon, authenticated;
 grant execute on function public.reserve_order(bigint, uuid, integer) to service_role;
@@ -428,7 +428,7 @@ grant execute on function public.available_stock_count(uuid) to service_role;
 grant execute on function public.sales_summary() to service_role;
 grant execute on function public.import_stock_items(uuid, jsonb) to service_role;
 grant execute on function public.create_wallet_deposit(bigint, numeric) to service_role;
-grant execute on function public.set_wallet_deposit_payment(uuid, text, text) to service_role;
+grant execute on function public.set_wallet_deposit_payment(uuid, text, text, text) to service_role;
 grant execute on function public.complete_wallet_deposit(uuid) to service_role;
 grant execute on function public.close_wallet_deposit(uuid, text) to service_role;
 
