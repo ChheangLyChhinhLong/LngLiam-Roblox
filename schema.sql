@@ -407,7 +407,7 @@ $$;
 
 revoke all on function public.reserve_order(bigint, uuid, integer) from public, anon, authenticated;
 revoke all on function public.reserve_wallet_order(bigint, uuid, integer) from public, anon, authenticated;
-revoke all on function public.set_order_payment(uuid, text, text) from public, anon, authenticated;
+revoke all on function public.set_order_payment(uuid, text, text, text) from public, anon, authenticated;
 revoke all on function public.release_order(uuid, text) from public, anon, authenticated;
 revoke all on function public.fulfill_order(uuid) from public, anon, authenticated;
 revoke all on function public.mark_order_delivered(uuid) from public, anon, authenticated;
@@ -420,7 +420,7 @@ revoke all on function public.complete_wallet_deposit(uuid) from public, anon, a
 revoke all on function public.close_wallet_deposit(uuid, text) from public, anon, authenticated;
 grant execute on function public.reserve_order(bigint, uuid, integer) to service_role;
 grant execute on function public.reserve_wallet_order(bigint, uuid, integer) to service_role;
-grant execute on function public.set_order_payment(uuid, text, text) to service_role;
+grant execute on function public.set_order_payment(uuid, text, text, text) to service_role;
 grant execute on function public.release_order(uuid, text) to service_role;
 grant execute on function public.fulfill_order(uuid) to service_role;
 grant execute on function public.mark_order_delivered(uuid) to service_role;
@@ -431,3 +431,5 @@ grant execute on function public.create_wallet_deposit(bigint, numeric) to servi
 grant execute on function public.set_wallet_deposit_payment(uuid, text, text) to service_role;
 grant execute on function public.complete_wallet_deposit(uuid) to service_role;
 grant execute on function public.close_wallet_deposit(uuid, text) to service_role;
+
+notify pgrst, 'reload schema';

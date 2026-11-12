@@ -333,7 +333,7 @@ Admin panel អាចបន្ថែម/កែ Catalog និង Package, បិ
 | Bot បង្ហាញថាមិនមាន Catalog | ពិនិត្យថាមាន `categories` ដែល `active = true` ក្នុង Supabase។ |
 | Admin panel មិនបង្ហាញ | ពិនិត្យ Telegram numeric ID ក្នុង `TELEGRAM_ADMIN_IDS` ហើយ restart/redeploy។ |
 | Supabase request បរាជ័យ | ពិនិត្យ `SUPABASE_URL`, service-role key និងថា `schema.sql` បាន run ជោគជ័យ។ កុំបិទ RLS ដើម្បីជៀសបញ្ហា។ |
-| `PGRST205` រកមិនឃើញ `user_wallets` ឬ `wallet_deposits` | បើក Supabase SQL Editor ហើយ run `schema.sql` ចុងក្រោយ។ បន្ទាប់មកសាកល្បង Account/Add funds ម្តងទៀត។ Bot នឹងប្រាប់ថា Wallet មិនទាន់រៀបចំ ជំនួសឲ្យបរាជ័យដោយ unhandled exception។ |
+| `PGRST205` រកមិនឃើញ table ដូចជា `categories`, `users`, `orders`, `user_wallets` ឬ `broadcast_jobs` | បើក Supabase SQL Editor របស់ project ដែល URL ត្រូវគ្នានឹង `SUPABASE_URL` ក្នុង Render ហើយ run `schema.sql` ចុងក្រោយទាំងមូល ដោយពិនិត្យឲ្យប្រាកដថា query បញ្ចប់ដោយគ្មាន SQL error។ Script នឹង reload PostgREST schema cache នៅចុងក្រោយ។ បន្ទាប់មករង់ចាំបន្តិច ហើយសាកល្បងម្តងទៀត។ |
 | Import stock មិនជោគជ័យ | ពិនិត្យ Product UUID, file UTF-8, format មួយ Digital Key/Code ក្នុងមួយបន្ទាត់ និង encryption key។ |
 | រូបភាព/វីដេអូមិន upload ឬមិនបង្ហាញ | បំពេញ Cloudinary variables ទាំងបី, ពិនិត្យ `CLOUDINARY_CLOUD_NAME`, API key/secret នៅ local/Render និង run schema ចុងក្រោយដែលមាន `products.video_url`។ |
 | KHQRPay checkout បរាជ័យ | ពិនិត្យ ABA API key, `KHQRPAY_BASE_URL`, ABA static PayWay link ក្នុង Dashboard និង Render Logs។ |
