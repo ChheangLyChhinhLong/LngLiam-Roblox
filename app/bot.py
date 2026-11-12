@@ -179,6 +179,45 @@ def stock_notification_url(bot_username: str, product_id: str) -> str:
     return f"https://t.me/{bot_username.lstrip('@')}?start=package_{product_id}"
 
 
+def parse_telegram_post_link(text: str) -> tuple[int | str, int] | None:
+    try:
+        parsed = urlsplit(text.strip())
+    except ValueError:
+        return None
+    if parsed.scheme not in {"http", "https"} or parsed.hostname not in {
+        "t.me",
+        "www.t.me",
+        "telegram.me",
+        "www.telegram.me",
+    }:
+        return None
+
+    parts = [part for part in parsed.path.split("/") if part]
+    if len(parts) < 2:
+        return None
+    if parts[0].casefold() == "s":
+        parts = parts[1:]
+    if len(parts) < 2:
+        return None
+    if len(parts[-1]) > 20:
+        return None
+    try:
+        message_id = int(parts[-1])
+    except ValueError:
+        return None
+    if message_id <= 0:
+        return None
+
+    if parts[0].casefold() == "c":
+        if not parts[1].isdigit() or len(parts[1]) > 20:
+            return None
+        return int(f"-100{parts[1]}"), message_id
+
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{3,31}", parts[0]):
+        return None
+    return f"@{parts[0]}", message_id
+
+
 def paginate(items: list[Any], page: int) -> tuple[list[Any], int, int]:
     page_count = max(1, (len(items) + CATALOG_PAGE_SIZE - 1) // CATALOG_PAGE_SIZE)
     page = max(0, min(page, page_count - 1))
@@ -636,19 +675,27 @@ async def broadcast_destinations(
 async def copy_broadcast_content(
     bot: Bot,
     chat_id: int | str,
-    source_chat_id: int,
+    source_chat_id: int | str,
     content: list[dict[str, Any]],
     buttons: list[dict[str, str]],
 ) -> list[int]:
-    message_ids = sorted(int(item["message_id"]) for item in content)
-    copied = await telegram_call_with_retry(
-        lambda: bot.copy_messages(
-            chat_id=chat_id,
-            from_chat_id=source_chat_id,
-            message_ids=message_ids,
+    copied_ids: list[int] = []
+    source_groups: list[tuple[int | str, list[int]]] = []
+    for item in content:
+        item_source = item.get("source_chat_id", source_chat_id)
+        if not source_groups or source_groups[-1][0] != item_source:
+            source_groups.append((item_source, []))
+        source_groups[-1][1].append(int(item["message_id"]))
+
+    for item_source, message_ids in source_groups:
+        copied = await telegram_call_with_retry(
+            lambda item_source=item_source, message_ids=message_ids: bot.copy_messages(
+                chat_id=chat_id,
+                from_chat_id=item_source,
+                message_ids=sorted(message_ids),
+            )
         )
-    )
-    copied_ids = [int(item.message_id) for item in copied]
+        copied_ids.extend(int(item.message_id) for item in copied)
 
     markup = broadcast_buttons_markup(buttons)
     if markup:
@@ -667,6 +714,8 @@ async def delete_broadcast_source(
     bot: Bot, source_chat_id: int, content: list[dict[str, Any]]
 ) -> None:
     for item in content:
+        if item.get("source_chat_id", source_chat_id) != source_chat_id:
+            continue
         try:
             await bot.delete_message(source_chat_id, int(item["message_id"]))
         except TelegramBadRequest:
@@ -2155,12 +2204,24 @@ def register_handlers(
                 )
                 await delete_replaced_message(message)
                 return True
-            draft["content"].append(
-                {
-                    "message_id": message.message_id,
-                    "media_group_id": message.media_group_id,
-                }
-            )
+            telegram_post = parse_telegram_post_link(text)
+            if telegram_post:
+                post_chat_id, post_message_id = telegram_post
+                draft["content"].append(
+                    {
+                        "message_id": post_message_id,
+                        "media_group_id": None,
+                        "source_chat_id": post_chat_id,
+                    }
+                )
+                await delete_replaced_message(message)
+            else:
+                draft["content"].append(
+                    {
+                        "message_id": message.message_id,
+                        "media_group_id": message.media_group_id,
+                    }
+                )
             draft["stage"] = "content"
             if (
                 message.media_group_id
@@ -2176,7 +2237,7 @@ def register_handlers(
                 copy(
                     language,
                     f"✅ បានបន្ថែមមាតិកា {len(draft['content'])} សារ។ បន្តផ្ញើអត្ថបទ/Media ឬចុច Preview។",
-                    f"✅ Added content item {len(draft['content'])}. Send more text/media or choose Preview.",
+                    f"✅ Added content item {len(draft['content'])}. Send more text/media or a Telegram post link, or choose Preview.",
                 ),
             )
             return True
@@ -4020,10 +4081,12 @@ def register_handlers(
             copy(
                 language,
                 "📣 <b>បង្កើត Broadcast</b>\n"
-                "ផ្ញើអត្ថបទ រូបភាព វីដេអូ ឯកសារ Audio/Voice/GIF ឬ Album។ អាចផ្ញើច្រើនសារ។\n"
+                "ផ្ញើអត្ថបទ Media/ឯកសារប្រភេទណាក៏បាន ឬ Album; ក៏អាចផ្ញើ Telegram post link (t.me/channel/123)។\n"
+                "Telegram នឹង copy media ដោយផ្ទាល់ ដូច្នេះមិនចាំបាច់ download/upload ឬកំណត់ទំហំក្នុង bot ទេ។\n"
                 "ពេលរួច សូមចុច Preview; អាចបន្ថែម URL Buttons ឬកំណត់ពេលផ្ញើបាន។",
                 "📣 <b>Create a broadcast</b>\n"
-                "Send text, photos, videos, documents, audio/voice/GIFs, or albums. You can send multiple messages.\n"
+                "Send text, any media/file type, or albums; you can also paste a Telegram post link (t.me/channel/123).\n"
+                "Telegram copies the media directly, so the bot does not download/upload it or impose its own size limit.\n"
                 "When finished, choose Preview; you can add URL buttons or schedule delivery.",
             ),
             broadcast_draft_keyboard("content", language),
@@ -4547,9 +4610,9 @@ def register_handlers(
                     else "សូមផ្ញើវីដេអូ How to Buy។"
                 ),
                 (
-                    "Send the welcome photo or video."
+                    "Send the welcome photo or video. The bot stores its Telegram file reference without downloading or re-uploading it."
                     if kind == "welcome"
-                    else "Send the How to Buy video."
+                    else "Send the How to Buy video. The bot stores its Telegram file reference without downloading or re-uploading it."
                 ),
             ),
             keyboard([back_button("admin:settings:section:media", language)]),
@@ -4858,18 +4921,15 @@ def register_handlers(
                 return
             media = message.video if is_video else message.photo[-1]
             try:
-                media_url = await upload_product_media(
-                    bot,
-                    settings,
-                    media.file_id,
-                    "video" if is_video else "image",
-                )
+                media_reference = media.file_id
                 if kind == "tutorial":
-                    await store.set_bot_setting("how_to_buy_video_url", media_url)
+                    await store.set_bot_setting(
+                        "how_to_buy_video_url", media_reference
+                    )
                 else:
                     await store.set_bot_setting(
                         "welcome_video_url" if is_video else "welcome_photo_url",
-                        media_url,
+                        media_reference,
                     )
                     await store.set_bot_setting(
                         "welcome_photo_url" if is_video else "welcome_video_url",
@@ -6038,6 +6098,13 @@ def register_handlers(
         )
     )
     async def receive_other_broadcast_media(message: Message) -> None:
+        if not message.from_user or message.from_user.id not in settings.admin_ids:
+            return
+        language = await safe_user_language(store, message.from_user.id)
+        await handle_broadcast_input(message, language)
+
+    @router.message()
+    async def receive_unlisted_broadcast_content(message: Message) -> None:
         if not message.from_user or message.from_user.id not in settings.admin_ids:
             return
         language = await safe_user_language(store, message.from_user.id)

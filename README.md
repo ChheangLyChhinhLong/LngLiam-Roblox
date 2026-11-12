@@ -168,7 +168,7 @@ addstock PRODUCT_UUID | key1, key2
 
 ### Broadcast
 
-នៅ **Store admin → Broadcast** អាចបង្កើតសារផ្សព្វផ្សាយជាអត្ថបទ, រូបភាព, វីដេអូ, ឯកសារ, audio/voice, GIF/animation, video note, sticker, contact, location, poll និង album បាន។ អាចផ្ញើច្រើនមាតិកាជាប់គ្នា រួចចុច **Preview** ដើម្បីពិនិត្យមាតិកា និងចំនួនអ្នកទទួលមុនពេល Confirm។ ជម្រើស **Add buttons** ទទួល URL មួយក្នុងមួយបន្ទាត់ ដូចជា `បើកហាង | https://example.com`; អាចបញ្ចូលបានអតិបរមា 8 តំណ។
+នៅ **Store admin → Broadcast** អាចបង្កើតសារផ្សព្វផ្សាយជាអត្ថបទ, រូបភាព, វីដេអូ, ឯកសារ, audio/voice, GIF/animation, video note, sticker, contact, location, poll និង album បាន។ អាចផ្ញើច្រើនមាតិកាជាប់គ្នា ឬ paste តំណ Telegram post ដូចជា `https://t.me/channel/123` ឬ `https://t.me/c/1234567890/456`។ Bot ចម្លង post តាម Telegram ដោយផ្ទាល់ មិនទាញយក/បញ្ចូលឯកសារឡើងវិញទេ; ដូច្នេះគ្មានកំណត់ទំហំ upload ផ្ទាល់ខ្លួន ប៉ុន្តែ Telegram នៅតែកំណត់លើប្រភពដែល bot អាចចូលដំណើរការ និងការផ្ញើទៅអ្នកទទួល។ ចុច **Preview** ដើម្បីពិនិត្យមាតិកា និងចំនួនអ្នកទទួលមុនពេល Confirm។ ជម្រើស **Add buttons** ទទួល URL មួយក្នុងមួយបន្ទាត់ ដូចជា `បើកហាង | https://example.com`; អាចបញ្ចូលបានអតិបរមា 8 តំណ។
 
 Broadcast ផ្ញើទៅអ្នកប្រើដែលបានចាប់ផ្តើម Bot និង chat IDs ដែលកំណត់នៅ **Settings → Notifications** (Stock និង Order notifications)។ អ្នកទទួលត្រូវបាន deduplicate; អ្នកប្រើដែល block bot ឬ chat ដែល bot មិនមានសិទ្ធិ post នឹងរាប់ជា Failed។ ពេលផ្ញើអាចមើល Sent/Failed/Progress និងចុច **Stop** ដើម្បីបញ្ឈប់។
 
@@ -201,7 +201,7 @@ Script អាន `.env` ពី project root។ វាត្រូវការ `S
 
 ### វីដេអូ “How to buy”
 
-នៅ **Store admin → Settings → Media → How to Buy** admin អាចផ្ញើវីដេអូសម្រាប់ upload ទៅ Cloudinary ហើយ URL HTTPS ត្រូវបានរក្សាទុកក្នុង `public.bot_settings.how_to_buy_video_url`។ Caption ខ្មែរ/អង់គ្លេសអាចកំណត់នៅ **Settings → Captions**។ ក៏អាចកែ URL/caption ដោយផ្ទាល់តាម Supabase SQL Editor; បើគ្មាន caption វីដេអូនឹងផ្ញើដោយគ្មាន caption។
+នៅ **Store admin → Settings → Media → How to Buy** admin អាចផ្ញើវីដេអូ ហើយ Bot រក្សា Telegram file reference ក្នុង `public.bot_settings.how_to_buy_video_url` ដោយមិនទាញយក/បញ្ចូលទៅ Cloudinary។ វាអាចជៀសវាងកំហុស Cloudinary និងកំណត់ទំហំ download របស់ Telegram Bot API។ Caption ខ្មែរ/អង់គ្លេសអាចកំណត់នៅ **Settings → Captions**។ ក៏អាចកែ URL/caption ដោយផ្ទាល់តាម Supabase SQL Editor; បើគ្មាន caption វីដេអូនឹងផ្ញើដោយគ្មាន caption។
 
 ```sql
 insert into public.bot_settings (key, value)
@@ -214,7 +214,7 @@ on conflict (key) do update set value = excluded.value;
 
 Bot ទាញ settings ថ្មីរាល់ពេលអ្នកប្រើបើក tutorial ដូច្នេះមិនចាំបាច់ restart bot បន្ទាប់ពីកែទេ។
 
-នៅ **Store admin → Settings → Media → Welcome media** admin អាចផ្ញើរូបភាព ឬវីដេអូ។ Bot upload ទៅ Cloudinary ហើយរក្សា URL នៅក្នុង Supabase `bot_settings`; media ប្រភេទថ្មីនឹងជំនួស media ចាស់ ហើយមានប៊ូតុង Clear តែមួយសម្រាប់លុប Welcome media ទាំងពីរប្រភេទ។ ក្នុង Settings → **Store links** អាចកំណត់ Support username និង Join group URL (បង្ហាញជាប៊ូតុង **Join Group** ក្នុងម៉ឺនុយ) ហើយ **Notifications** អាចកំណត់ group IDs សម្រាប់ stock/order notifications។ ការកំណត់ទាំងនេះត្រូវរក្សាទុកក្នុង Admin panel មិនមែន Environment Variables ទេ។
+នៅ **Store admin → Settings → Media → Welcome media** admin អាចផ្ញើរូបភាព ឬវីដេអូ។ Bot រក្សា Telegram file reference នៅក្នុង Supabase `bot_settings` ដោយមិន upload ទៅ Cloudinary; media ប្រភេទថ្មីនឹងជំនួស media ចាស់ ហើយមានប៊ូតុង Clear តែមួយសម្រាប់លុប Welcome media ទាំងពីរប្រភេទ។ ក្នុង Settings → **Store links** អាចកំណត់ Support username និង Join group URL (បង្ហាញជាប៊ូតុង **Join Group** ក្នុងម៉ឺនុយ) ហើយ **Notifications** អាចកំណត់ group IDs សម្រាប់ stock/order notifications។ ការកំណត់ទាំងនេះត្រូវរក្សាទុកក្នុង Admin panel មិនមែន Environment Variables ទេ។
 
 ```sql
 insert into public.bot_settings (key, value)

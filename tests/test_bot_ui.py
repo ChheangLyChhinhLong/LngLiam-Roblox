@@ -17,6 +17,7 @@ from app.bot import (
     copy,
     checkout_payment_rows,
     complete_wallet_deposit,
+    delete_broadcast_source,
     delete_replaced_message,
     deliver_order,
     description_preview,
@@ -32,6 +33,7 @@ from app.bot import (
     order_history_keyboard,
     order_history_text,
     parse_broadcast_buttons,
+    parse_telegram_post_link,
     parse_wallet_deposit_amount,
     notify_order_success,
     notify_stock_added,
@@ -287,6 +289,79 @@ def test_copy_broadcast_content_preserves_albums_and_adds_url_buttons():
             bot.send_message.await_args.kwargs["reply_markup"].inline_keyboard[0][0].url
             == "https://example.com"
         )
+
+    asyncio.run(run_test())
+
+
+def test_telegram_post_link_parser_supports_public_and_private_posts():
+    assert parse_telegram_post_link("https://t.me/shop_channel/123") == (
+        "@shop_channel",
+        123,
+    )
+    assert parse_telegram_post_link("https://t.me/s/shop_channel/123?single") == (
+        "@shop_channel",
+        123,
+    )
+    assert parse_telegram_post_link("https://t.me/c/1234567890/456") == (
+        -1001234567890,
+        456,
+    )
+    assert parse_telegram_post_link("https://t.me/shop_channel/20/456") == (
+        "@shop_channel",
+        456,
+    )
+    assert parse_telegram_post_link("https://t.me/+invitecode") is None
+    assert parse_telegram_post_link("https://example.com/channel/123") is None
+
+
+def test_copy_broadcast_content_uses_each_telegram_post_source_in_order():
+    async def run_test():
+        bot = SimpleNamespace(
+            copy_messages=AsyncMock(
+                side_effect=[
+                    [SimpleNamespace(message_id=101)],
+                    [SimpleNamespace(message_id=102)],
+                    [SimpleNamespace(message_id=103)],
+                ]
+            ),
+            send_message=AsyncMock(),
+        )
+        content = [
+            {"message_id": 10, "media_group_id": None},
+            {
+                "message_id": 456,
+                "media_group_id": None,
+                "source_chat_id": "@shop_channel",
+            },
+            {"message_id": 12, "media_group_id": None},
+        ]
+
+        copied = await copy_broadcast_content(bot, 123, 999, content, [])
+
+        assert copied == [101, 102, 103]
+        assert [
+            call.kwargs["from_chat_id"]
+            for call in bot.copy_messages.await_args_list
+        ] == [999, "@shop_channel", 999]
+
+    asyncio.run(run_test())
+
+
+def test_delete_broadcast_source_does_not_delete_linked_channel_posts():
+    async def run_test():
+        bot = SimpleNamespace(delete_message=AsyncMock())
+        content = [
+            {"message_id": 10, "media_group_id": None},
+            {
+                "message_id": 456,
+                "media_group_id": None,
+                "source_chat_id": "@shop_channel",
+            },
+        ]
+
+        await delete_broadcast_source(bot, 999, content)
+
+        bot.delete_message.assert_awaited_once_with(999, 10)
 
     asyncio.run(run_test())
 
