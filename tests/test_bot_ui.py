@@ -1454,7 +1454,7 @@ def test_request_admin_media_uses_direct_telegram_copy_without_mode_buttons():
             [button.callback_data for button in row]
             for row in markup.inline_keyboard
         ] == [["admin:settings:section:media"]]
-        assert "copies it directly" in prompt.edit_text.await_args.args[0]
+        assert "Cloudinary" in prompt.edit_text.await_args.args[0]
 
         bot_module.pending_admin_media.pop(user_id, None)
         bot_module.active_screen_messages.pop(user_id, None)
@@ -1463,7 +1463,7 @@ def test_request_admin_media_uses_direct_telegram_copy_without_mode_buttons():
     asyncio.run(run_test())
 
 
-def test_admin_media_uses_telegram_copy_without_upload(monkeypatch):
+def test_admin_media_uploads_file_to_cloudinary_and_saves_secure_url(monkeypatch):
     async def run_test():
         user_id = 7654324
         screen = SimpleNamespace(message_id=989, text="Media prompt")
@@ -1480,9 +1480,15 @@ def test_admin_media_uses_telegram_copy_without_upload(monkeypatch):
             cloudinary_api_key="key",
             cloudinary_api_secret="secret",
         )
-        store = SimpleNamespace(user_language=AsyncMock(return_value="en"))
-        upload = AsyncMock(side_effect=AssertionError("unexpected upload"))
-        monkeypatch.setattr(bot_module, "upload_product_media", upload)
+        store = SimpleNamespace(
+            user_language=AsyncMock(return_value="en"),
+            set_bot_setting=AsyncMock(),
+            bot_settings=AsyncMock(return_value={}),
+        )
+        upload = AsyncMock(
+            return_value="https://res.cloudinary.com/cloud/image/upload/welcome.png"
+        )
+        monkeypatch.setattr(bot_module, "upload_cloudinary_file", upload)
         register_handlers(
             SimpleNamespace(include_router=Mock()),
             bot,
@@ -1508,13 +1514,12 @@ def test_admin_media_uses_telegram_copy_without_upload(monkeypatch):
 
         await handler(message)
 
-        upload.assert_not_awaited()
         pending = bot_module.pending_admin_media[user_id]
         assert pending["items"] == [
             {
-                "message_id": 200,
-                "media_group_id": None,
-                "source_chat_id": user_id,
+                "file_id": "photo-file-id",
+                "media_type": "image",
+                "file_name": "image-200",
             }
         ]
         markup = screen.edit_text.await_args.kwargs["reply_markup"]
@@ -1522,11 +1527,42 @@ def test_admin_media_uses_telegram_copy_without_upload(monkeypatch):
             [button.callback_data for button in row]
             for row in markup.inline_keyboard
         ] == [["admin:media-save"], ["admin:media-cancel"]]
-        assert "copies it directly" in screen.edit_text.await_args.args[0]
+        assert "Cloudinary" in screen.edit_text.await_args.args[0]
+
+        save_callback = SimpleNamespace(
+            data="admin:media-save",
+            from_user=SimpleNamespace(id=user_id),
+            message=screen,
+            answer=AsyncMock(),
+        )
+        save_handler = [
+            handler.callback
+            for handler in bot_module.router.callback_query.handlers
+            if handler.callback.__name__ == "save_admin_telegram_media"
+        ][-1]
+        await save_handler(save_callback)
+
+        upload.assert_awaited_once_with(
+            bot,
+            settings,
+            "photo-file-id",
+            "bot-media",
+            resource_type="auto",
+            file_name="image-200",
+        )
+        assert store.set_bot_setting.await_args_list[0].args == (
+            "welcome_photo_url",
+            "https://res.cloudinary.com/cloud/image/upload/welcome.png",
+        )
+        assert store.set_bot_setting.await_args_list[1].args == (
+            "welcome_video_url",
+            "",
+        )
 
         bot_module.pending_admin_media.pop(user_id, None)
         bot_module.active_screen_messages.pop(user_id, None)
         bot_module.user_language_cache.pop(user_id, None)
+        bot_module.welcome_media_cache = None
 
     asyncio.run(run_test())
 
@@ -1570,7 +1606,9 @@ def test_tutorial_post_link_is_saved_as_plain_url():
 
         await receive_handler(message)
 
-        assert bot_module.pending_admin_media[user_id]["post_link"] == post_link
+        assert bot_module.pending_admin_media[user_id]["items"] == [
+            {"url": post_link, "media_type": "link"}
+        ]
 
         save_callback = SimpleNamespace(
             data="admin:media-save",
@@ -1595,7 +1633,7 @@ def test_tutorial_post_link_is_saved_as_plain_url():
     asyncio.run(run_test())
 
 
-def test_package_wizard_uses_telegram_copy_without_upload(monkeypatch):
+def test_package_wizard_uploads_package_media_to_cloudinary(monkeypatch):
     async def run_test():
         user_id = 7654325
         screen = SimpleNamespace(message_id=990)
@@ -1610,6 +1648,7 @@ def test_package_wizard_uses_telegram_copy_without_upload(monkeypatch):
             "values": {"description": ""},
         }
         bot = SimpleNamespace()
+        cloudinary_url = "https://res.cloudinary.com/cloud/image/upload/item.png"
         settings = SimpleNamespace(
             admin_ids={user_id},
             cloudinary_cloud_name="cloud",
@@ -1617,8 +1656,8 @@ def test_package_wizard_uses_telegram_copy_without_upload(monkeypatch):
             cloudinary_api_secret="secret",
         )
         store = SimpleNamespace(user_language=AsyncMock(return_value="en"))
-        upload = AsyncMock(side_effect=AssertionError("unexpected upload"))
-        monkeypatch.setattr(bot_module, "upload_product_media", upload)
+        upload = AsyncMock(return_value=cloudinary_url)
+        monkeypatch.setattr(bot_module, "upload_cloudinary_file", upload)
         register_handlers(
             SimpleNamespace(include_router=Mock()),
             bot,
@@ -1647,15 +1686,43 @@ def test_package_wizard_uses_telegram_copy_without_upload(monkeypatch):
 
         await handler(message)
 
-        upload.assert_not_awaited()
         assert bot_module.admin_wizards[user_id]["telegram_media_items"] == [
             {
-                "message_id": 201,
-                "media_group_id": None,
-                "source_chat_id": user_id,
+                "file_id": "photo-file-id",
+                "media_type": "image",
+                "file_name": "image-201",
             }
         ]
-        assert "copies it directly" in message.answer.await_args.args[0]
+        assert "Cloudinary" in message.answer.await_args.args[0]
+
+        wizard_screen = SimpleNamespace(
+            message_id=990,
+            edit_text=AsyncMock(return_value=SimpleNamespace(message_id=993)),
+        )
+        save_callback = SimpleNamespace(
+            data="admin:wizard-media-save",
+            from_user=SimpleNamespace(id=user_id),
+            message=wizard_screen,
+            answer=AsyncMock(),
+        )
+        save_handler = [
+            handler.callback
+            for handler in bot_module.router.callback_query.handlers
+            if handler.callback.__name__ == "save_wizard_telegram_media"
+        ][-1]
+        await save_handler(save_callback)
+
+        upload.assert_awaited_once_with(
+            bot,
+            settings,
+            "photo-file-id",
+            "products",
+            resource_type="auto",
+            file_name="image-201",
+        )
+        assert bot_module.admin_wizards[user_id]["values"]["media_url"] == cloudinary_url
+        assert bot_module.admin_wizards[user_id]["values"]["media_type"] == "image"
+        assert "telegram_media_items" not in bot_module.admin_wizards[user_id]
 
         bot_module.admin_wizards.pop(user_id, None)
         bot_module.active_screen_messages.pop(user_id, None)
@@ -1664,21 +1731,29 @@ def test_package_wizard_uses_telegram_copy_without_upload(monkeypatch):
     asyncio.run(run_test())
 
 
-def test_set_product_media_saves_telegram_reference_without_upload(monkeypatch):
+def test_set_product_media_uploads_to_cloudinary_and_stores_url(monkeypatch):
     async def run_test():
         user_id = 7654326
         store = SimpleNamespace(
             user_language=AsyncMock(return_value="en"),
             update_product_image=AsyncMock(return_value=True),
         )
-        upload = AsyncMock(side_effect=AssertionError("unexpected upload"))
-        monkeypatch.setattr(bot_module, "upload_product_media", upload)
+        settings = SimpleNamespace(
+            admin_ids={user_id},
+            cloudinary_cloud_name="cloud",
+            cloudinary_api_key="key",
+            cloudinary_api_secret="secret",
+        )
+        cloudinary_url = "https://res.cloudinary.com/cloud/image/upload/product.png"
+        upload = AsyncMock(return_value=cloudinary_url)
+        monkeypatch.setattr(bot_module, "upload_cloudinary_file", upload)
+        bot = SimpleNamespace()
         register_handlers(
             SimpleNamespace(include_router=Mock()),
-            SimpleNamespace(),
+            bot,
             store,
             SimpleNamespace(),
-            SimpleNamespace(admin_ids={user_id}),
+            settings,
         )
         handler = [
             handler.callback
@@ -1700,11 +1775,17 @@ def test_set_product_media_saves_telegram_reference_without_upload(monkeypatch):
 
         await handler(message)
 
-        upload.assert_not_awaited()
-        product_id, reference = store.update_product_image.await_args.args
+        upload.assert_awaited_once_with(
+            bot,
+            settings,
+            "photo-file-id",
+            "products",
+            resource_type="auto",
+            file_name="image-202",
+        )
+        product_id, media_url = store.update_product_image.await_args.args
         assert product_id == "product-1"
-        assert decode_telegram_content_reference(reference) == (user_id, [202])
-        assert bot_module.telegram_content_reference_drops_caption(reference)
+        assert media_url == cloudinary_url
 
         bot_module.active_screen_messages.pop(user_id, None)
         bot_module.user_language_cache.pop(user_id, None)
@@ -2554,6 +2635,69 @@ def test_product_video_downloads_and_uploads_to_cloudinary(monkeypatch):
     asyncio.run(run_test())
 
 
+def test_generic_telegram_file_upload_uses_cloudinary_auto_detection(monkeypatch):
+    async def run_test():
+        async def download_file(file_id, destination):
+            destination.write(b"plain-text-file")
+
+        telegram_bot = SimpleNamespace(download=AsyncMock(side_effect=download_file))
+        settings = SimpleNamespace(
+            cloudinary_cloud_name="cloud",
+            cloudinary_api_key="key",
+            cloudinary_api_secret="secret",
+        )
+        uploaded = Mock(
+            return_value={
+                "secure_url": "https://res.cloudinary.com/cloud/raw/upload/notes.txt"
+            }
+        )
+        monkeypatch.setattr(bot_module.cloudinary.uploader, "upload", uploaded)
+
+        url = await bot_module.upload_cloudinary_file(
+            telegram_bot,
+            settings,
+            "telegram-document-id",
+            "bot-media",
+            resource_type="auto",
+            file_name="notes.txt",
+        )
+
+        assert url == "https://res.cloudinary.com/cloud/raw/upload/notes.txt"
+        assert uploaded.call_args.args[0].getvalue() == b"plain-text-file"
+        assert uploaded.call_args.args[0].name == "notes.txt"
+        assert uploaded.call_args.kwargs["resource_type"] == "auto"
+        assert uploaded.call_args.kwargs["folder"] == "bot-media"
+
+    asyncio.run(run_test())
+
+
+def test_cloudinary_gif_and_raw_file_urls_use_telegram_animation_and_document():
+    async def run_test():
+        bot = SimpleNamespace(
+            send_animation=AsyncMock(return_value=SimpleNamespace(message_id=1)),
+            send_document=AsyncMock(return_value=SimpleNamespace(message_id=2)),
+        )
+
+        sent = await bot_module.send_cloudinary_media(
+            bot,
+            "https://res.cloudinary.com/cloud/image/upload/loop.gif\n"
+            "https://res.cloudinary.com/cloud/raw/upload/instructions.txt",
+            chat_id=123,
+        )
+
+        assert [message.message_id for message in sent] == [1, 2]
+        bot.send_animation.assert_awaited_once_with(
+            chat_id=123,
+            animation="https://res.cloudinary.com/cloud/image/upload/loop.gif",
+        )
+        bot.send_document.assert_awaited_once_with(
+            chat_id=123,
+            document="https://res.cloudinary.com/cloud/raw/upload/instructions.txt",
+        )
+
+    asyncio.run(run_test())
+
+
 def test_product_video_creation_and_update_store_video_url():
     async def run_test():
         query = Mock()
@@ -2795,6 +2939,32 @@ def test_delivery_uses_one_unified_after_order_media_instead_of_legacy_fields():
         )
         bot.send_photo.assert_not_awaited()
         bot.send_video.assert_not_awaited()
+
+    asyncio.run(run_test())
+
+
+def test_delivery_sends_cloudinary_document_url_after_order():
+    async def run_test():
+        key = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
+        media_url = "https://res.cloudinary.com/cloud/raw/upload/instructions.txt"
+        bot = SimpleNamespace(
+            send_message=AsyncMock(),
+            send_document=AsyncMock(),
+        )
+        store = SimpleNamespace(
+            payment_message=AsyncMock(return_value=None),
+            order_delivery_details=AsyncMock(
+                return_value={"delivery_media_url": media_url}
+            ),
+            fulfill_order=AsyncMock(return_value=[encrypt_stock("CODE-001", key)]),
+            mark_delivered=AsyncMock(),
+        )
+
+        await deliver_order(
+            bot, store, SimpleNamespace(stock_encryption_key=key), "order-123", 123
+        )
+
+        bot.send_document.assert_awaited_once_with(chat_id=123, document=media_url)
 
     asyncio.run(run_test())
 

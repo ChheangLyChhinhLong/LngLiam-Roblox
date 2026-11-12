@@ -13,8 +13,10 @@ from urllib.parse import urlsplit
 
 import qrcode
 import cloudinary.uploader
+from cloudinary.exceptions import Error as CloudinaryError
+from httpx import RequestError as HttpRequestError
 from aiogram import Bot, Dispatcher, F, Router
-from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
+from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramRetryAfter
 from aiogram.types import (
     BufferedInputFile,
     CallbackQuery,
@@ -27,6 +29,8 @@ from aiogram.types import (
     Message,
     ReplyKeyboardMarkup,
 )
+from postgrest.exceptions import APIError as SupabaseAPIError
+from urllib3.exceptions import HTTPError as CloudinaryHTTPError
 
 from app.config import Settings
 from app.payments import (
@@ -40,6 +44,15 @@ from app.store import Store
 
 logger = logging.getLogger(__name__)
 router = Router()
+MEDIA_UPLOAD_ERRORS = (
+    TelegramAPIError,
+    CloudinaryError,
+    CloudinaryHTTPError,
+    OSError,
+    RuntimeError,
+    ValueError,
+)
+MEDIA_SAVE_ERRORS = MEDIA_UPLOAD_ERRORS + (SupabaseAPIError, HttpRequestError)
 
 
 class InputValidationError(ValueError):
@@ -312,6 +325,128 @@ def telegram_content_item(message: Message) -> dict[str, Any]:
         "media_group_id": message.media_group_id,
         "source_chat_id": message.chat.id,
     }
+
+
+def telegram_media_upload_item(message: Message) -> dict[str, str] | None:
+    candidates = (
+        ("photo", "image"),
+        ("video", "video"),
+        ("animation", "animation"),
+        ("document", "document"),
+        ("audio", "audio"),
+        ("voice", "audio"),
+        ("video_note", "video"),
+        ("sticker", "sticker"),
+    )
+    for attribute, media_type in candidates:
+        value = getattr(message, attribute, None)
+        if not value:
+            continue
+        if attribute == "photo":
+            value = value[-1]
+        file_id = getattr(value, "file_id", None)
+        if not file_id:
+            continue
+        mime_type = getattr(value, "mime_type", None) or ""
+        if attribute == "document":
+            if mime_type.startswith("image/"):
+                media_type = "image"
+            elif mime_type.startswith("video/"):
+                media_type = "video"
+            elif mime_type.startswith("audio/"):
+                media_type = "audio"
+        file_name = getattr(value, "file_name", None)
+        if not file_name:
+            file_name = f"{media_type}-{message.message_id}"
+        return {
+            "file_id": file_id,
+            "media_type": media_type,
+            "file_name": file_name,
+        }
+    return None
+
+
+def stored_telegram_content_reference(value: str | None) -> str | None:
+    if not value:
+        return None
+    if decode_telegram_content_reference(value):
+        return value
+    post_link = parse_telegram_post_link(value)
+    if not post_link:
+        return None
+    source_chat_id, message_id = post_link
+    return encode_telegram_content_reference(
+        [
+            {
+                "message_id": message_id,
+                "media_group_id": None,
+                "source_chat_id": source_chat_id,
+            }
+        ]
+    )
+
+
+def cloudinary_media_urls(value: str | None) -> list[str]:
+    if not value:
+        return []
+    return [url.strip() for url in value.splitlines() if url.strip()]
+
+
+def cloudinary_media_method(url: str, fallback: str = "document") -> str:
+    path = urlsplit(url).path.lower()
+    suffix = path.rsplit(".", 1)[-1] if "." in path.rsplit("/", 1)[-1] else ""
+    if suffix in {"gif"}:
+        return "animation"
+    if suffix in {"mp3", "m4a", "ogg", "oga", "wav", "flac"}:
+        return "audio"
+    if "/image/upload/" in path or suffix in {
+        "jpg",
+        "jpeg",
+        "png",
+        "webp",
+        "bmp",
+        "avif",
+    }:
+        return "photo"
+    if "/video/upload/" in path or suffix in {"mp4", "mov", "m4v", "webm"}:
+        return "video"
+    if "/raw/upload/" in path:
+        return "document"
+    if fallback in {"photo", "video", "animation", "audio", "document"}:
+        return fallback
+    return "document"
+
+
+async def send_cloudinary_media(
+    target: Bot | Message,
+    media_value: str,
+    *,
+    chat_id: int | None = None,
+    fallback: str = "document",
+    **kwargs: Any,
+) -> list[Message]:
+    sent: list[Message] = []
+    for index, url in enumerate(cloudinary_media_urls(media_value)):
+        media_method = cloudinary_media_method(url, fallback)
+        method_name = (
+            f"send_{media_method}" if chat_id is not None else f"answer_{media_method}"
+        )
+        argument = {
+            "photo": "photo",
+            "video": "video",
+            "animation": "animation",
+            "audio": "audio",
+            "document": "document",
+        }[media_method]
+        options = dict(kwargs) if index == 0 else {}
+        sender = getattr(target, method_name)
+        if chat_id is not None:
+            sent.append(
+                await sender(chat_id=chat_id, **{argument: url}, **options)
+            )
+        else:
+            sent.append(await sender(**{argument: url}, **options))
+    return sent
 
 
 def paginate(items: list[Any], page: int) -> tuple[list[Any], int, int]:
@@ -1209,11 +1344,28 @@ def cloudinary_is_configured(settings: Settings) -> bool:
 async def upload_product_media(
     bot: Bot, settings: Settings, file_id: str, media_type: str
 ) -> str:
-    if not cloudinary_is_configured(settings):
-        raise RuntimeError("Cloudinary credentials are not configured")
     if media_type not in {"image", "video"}:
         raise ValueError("Unsupported product media type")
+    return await upload_cloudinary_file(
+        bot, settings, file_id, "products", media_type
+    )
+
+
+async def upload_cloudinary_file(
+    bot: Bot,
+    settings: Settings,
+    file_id: str,
+    folder: str,
+    resource_type: str = "auto",
+    file_name: str | None = None,
+) -> str:
+    if not cloudinary_is_configured(settings):
+        raise RuntimeError("Cloudinary credentials are not configured")
+    if resource_type not in {"auto", "image", "video", "raw"}:
+        raise ValueError("Unsupported Cloudinary resource type")
     media_stream = io.BytesIO()
+    if file_name:
+        media_stream.name = file_name
     await bot.download(file_id, destination=media_stream)
     media_stream.seek(0)
     result = await asyncio.to_thread(
@@ -1222,13 +1374,99 @@ async def upload_product_media(
         cloud_name=settings.cloudinary_cloud_name,
         api_key=settings.cloudinary_api_key,
         api_secret=settings.cloudinary_api_secret,
-        resource_type=media_type,
-        folder="products",
+        resource_type=resource_type,
+        folder=folder,
     )
     secure_url = result.get("secure_url")
     if not isinstance(secure_url, str) or not secure_url.startswith("https://"):
-        raise ValueError(f"Cloudinary did not return a secure HTTPS {media_type} URL")
+        raise ValueError("Cloudinary did not return a secure HTTPS URL")
     return secure_url
+
+
+async def upload_telegram_media_items(
+    bot: Bot,
+    settings: Settings,
+    items: list[dict[str, str]],
+    folder: str,
+) -> str:
+    urls = []
+    for item in items:
+        file_id = item.get("file_id")
+        if file_id:
+            url = await upload_cloudinary_file(
+                bot,
+                settings,
+                file_id,
+                folder,
+                resource_type="auto",
+                file_name=item.get("file_name"),
+            )
+        else:
+            url = item.get("url")
+        if not url:
+            raise ValueError("Media item has neither a Telegram file nor a URL")
+        urls.append(url)
+    if not urls:
+        raise ValueError("No media was provided for Cloudinary upload")
+    return "\n".join(urls)
+
+
+async def send_welcome_content(
+    target: Bot | Message,
+    chat_id: int,
+    text: str,
+    media_value: str | None,
+    fallback: str,
+    reply_markup: ReplyKeyboardMarkup,
+    *,
+    via_bot: bool = False,
+) -> tuple[Message, list[int]]:
+    reference = stored_telegram_content_reference(media_value)
+    if reference:
+        media_bot = target if via_bot else target.bot
+        copied = await copy_telegram_content_reference(
+            media_bot, chat_id, reference
+        )
+        if via_bot:
+            sent = await target.send_message(
+                chat_id,
+                text,
+                parse_mode="HTML",
+                reply_markup=reply_markup,
+            )
+        else:
+            sent = await target.answer(
+                text,
+                parse_mode="HTML",
+                reply_markup=reply_markup,
+            )
+        return sent, [item.message_id for item in copied]
+
+    media = await send_cloudinary_media(
+        target,
+        media_value or "",
+        chat_id=chat_id if via_bot else None,
+        fallback=fallback,
+        caption=text,
+        parse_mode="HTML",
+        reply_markup=reply_markup,
+    )
+    if media:
+        return media[0], [item.message_id for item in media[1:]]
+    if via_bot:
+        sent = await target.send_message(
+            chat_id,
+            text,
+            parse_mode="HTML",
+            reply_markup=reply_markup,
+        )
+    else:
+        sent = await target.answer(
+            text,
+            parse_mode="HTML",
+            reply_markup=reply_markup,
+        )
+    return sent, []
 
 
 def menu(
@@ -1970,43 +2208,18 @@ async def send_welcome(
         text = welcome_text(user, language)
         reply_markup = welcome_keyboard(user.id, settings)
         media_settings = welcome_media_cache or {}
-        telegram_reference = decode_telegram_content_reference(
+        welcome_media = (
             media_settings.get("welcome_video_url")
             or media_settings.get("welcome_photo_url")
         )
-        if telegram_reference:
-            copied = await copy_telegram_content_reference(
-                message.bot,
-                user.id,
-                media_settings.get("welcome_video_url")
-                or media_settings["welcome_photo_url"],
-            )
-            welcome_content_message_ids = [item.message_id for item in copied]
-            welcome_message = await message.answer(
-                text,
-                parse_mode="HTML",
-                reply_markup=reply_markup,
-            )
-        elif media_settings.get("welcome_video_url"):
-            welcome_message = await message.answer_video(
-                video=media_settings["welcome_video_url"],
-                caption=text,
-                parse_mode="HTML",
-                reply_markup=reply_markup,
-            )
-        elif media_settings.get("welcome_photo_url"):
-            welcome_message = await message.answer_photo(
-                photo=media_settings["welcome_photo_url"],
-                caption=text,
-                parse_mode="HTML",
-                reply_markup=reply_markup,
-            )
-        else:
-            welcome_message = await message.answer(
-                text,
-                parse_mode="HTML",
-                reply_markup=reply_markup,
-            )
+        welcome_message, welcome_content_message_ids = await send_welcome_content(
+            message,
+            user.id,
+            text,
+            welcome_media,
+            "video" if media_settings.get("welcome_video_url") else "photo",
+            reply_markup,
+        )
         if active_screen_messages.get(user.id) is previous_message:
             active_screen_messages.pop(user.id, None)
         if menu_keyboard_messages.get(user.id) is previous_menu_message:
@@ -2016,10 +2229,8 @@ async def send_welcome(
         welcome_message_ids[user.id] = welcome_message.message_id
         menu_keyboard_messages[user.id] = welcome_message
         active_screen_messages[user.id] = welcome_message
-        if telegram_reference:
-            active_screen_auxiliary_message_ids[user.id] = (
-                welcome_content_message_ids
-            )
+        if welcome_content_message_ids:
+            active_screen_auxiliary_message_ids[user.id] = welcome_content_message_ids
         task = asyncio.create_task(
             finish_immediate_welcome(
                 message,
@@ -2080,38 +2291,16 @@ async def send_welcome(
         settings_data.get("welcome_video_url")
         or settings_data.get("welcome_photo_url")
     )
-    if decode_telegram_content_reference(welcome_reference):
-        copied = await copy_telegram_content_reference(
-            message.bot, user.id, welcome_reference
-        )
-        welcome_message = await message.answer(
-            text,
-            parse_mode="HTML",
-            reply_markup=reply_markup,
-        )
-        active_screen_auxiliary_message_ids[user.id] = [
-            item.message_id for item in copied
-        ]
-    elif settings_data.get("welcome_video_url"):
-        welcome_message = await message.answer_video(
-            video=settings_data["welcome_video_url"],
-            caption=text,
-            parse_mode="HTML",
-            reply_markup=reply_markup,
-        )
-    elif settings_data.get("welcome_photo_url"):
-        welcome_message = await message.answer_photo(
-            photo=settings_data["welcome_photo_url"],
-            caption=text,
-            parse_mode="HTML",
-            reply_markup=reply_markup,
-        )
-    else:
-        welcome_message = await message.answer(
-            text,
-            parse_mode="HTML",
-            reply_markup=reply_markup,
-        )
+    welcome_message, welcome_media_message_ids = await send_welcome_content(
+        message,
+        user.id,
+        text,
+        welcome_reference,
+        "video" if settings_data.get("welcome_video_url") else "photo",
+        reply_markup,
+    )
+    if welcome_media_message_ids:
+        active_screen_auxiliary_message_ids[user.id] = welcome_media_message_ids
     await delete_replaced_message(message)
     welcome_message_ids[user.id] = welcome_message.message_id
     menu_keyboard_messages[user.id] = welcome_message
@@ -2165,42 +2354,17 @@ async def send_home_screen(
     video_url = settings_data.get("welcome_video_url")
     photo_url = settings_data.get("welcome_photo_url")
     welcome_reference = video_url or photo_url
-    if decode_telegram_content_reference(welcome_reference):
-        copied = await copy_telegram_content_reference(
-            bot, user.id, welcome_reference
-        )
-        sent = await bot.send_message(
-            user.id,
-            text,
-            parse_mode="HTML",
-            reply_markup=reply_markup,
-        )
-        active_screen_auxiliary_message_ids[user.id] = [
-            item.message_id for item in copied
-        ]
-    elif video_url:
-        sent = await bot.send_video(
-            user.id,
-            video=video_url,
-            caption=text,
-            parse_mode="HTML",
-            reply_markup=reply_markup,
-        )
-    elif photo_url:
-        sent = await bot.send_photo(
-            user.id,
-            photo=photo_url,
-            caption=text,
-            parse_mode="HTML",
-            reply_markup=reply_markup,
-        )
-    else:
-        sent = await bot.send_message(
-            user.id,
-            text,
-            parse_mode="HTML",
-            reply_markup=reply_markup,
-        )
+    sent, media_message_ids = await send_welcome_content(
+        bot,
+        user.id,
+        text,
+        welcome_reference,
+        "video" if video_url else "photo",
+        reply_markup,
+        via_bot=True,
+    )
+    if media_message_ids:
+        active_screen_auxiliary_message_ids[user.id] = media_message_ids
     active_screen_messages[user.id] = sent
     welcome_message_ids[user.id] = sent.message_id
     menu_keyboard_messages[user.id] = sent
@@ -2225,19 +2389,28 @@ async def deliver_order(
         )
     delivery_media_reference = (delivery or {}).get("delivery_media_url")
     if delivery_media_reference:
-        if decode_telegram_content_reference(delivery_media_reference):
+        stored_reference = stored_telegram_content_reference(
+            delivery_media_reference
+        )
+        if stored_reference:
             try:
                 await copy_telegram_content_reference(
-                    bot, chat_id, delivery_media_reference
+                    bot, chat_id, stored_reference
                 )
             except TelegramBadRequest:
                 logger.exception(
                     "Could not copy after-order media for order %s", order_id
                 )
         else:
-            logger.error(
-                "Invalid after-order media reference for order %s", order_id
-            )
+            try:
+                await send_cloudinary_media(
+                    bot, delivery_media_reference, chat_id=chat_id
+                )
+            except TelegramAPIError:
+                logger.exception(
+                    "Could not send after-order Cloudinary media for order %s",
+                    order_id,
+                )
     else:
         if delivery and delivery.get("delivery_image_url"):
             image_reference = delivery["delivery_image_url"]
@@ -2795,10 +2968,11 @@ def register_handlers(
             settings_data.get(f"how_to_buy_caption_{language}")
             or settings_data.get("how_to_buy_caption", "")
         ).strip()[:1024]
-        if decode_telegram_content_reference(video):
+        reference = stored_telegram_content_reference(video)
+        if reference:
             try:
                 copied = await copy_telegram_content_reference(
-                    bot, message.chat.id, video
+                    bot, message.chat.id, reference
                 )
             except TelegramBadRequest as exc:
                 logger.warning("Could not copy configured How to Buy media: %s", exc)
@@ -2824,9 +2998,23 @@ def register_handlers(
                     if item.message_id != sent.message_id
                 ]
             return
-        sent = await message.answer_video(video=video, caption=caption or None)
+        sent_messages = await send_cloudinary_media(
+            message,
+            video,
+            fallback="video",
+            caption=caption or None,
+        )
+        if not sent_messages:
+            await answer(copy(language, "Media មិនត្រឹមត្រូវទេ។", "Invalid media URL."))
+            return
+        sent = sent_messages[0]
         if replace_user_screen and user_id is not None:
             await switch_active_screen(user_id, sent, message)
+            active_screen_auxiliary_message_ids[user_id] = [
+                item.message_id
+                for item in sent_messages[1:]
+                if item.message_id != sent.message_id
+            ]
 
     async def show_admin_settings(
         message: Message, language: str, section: str | None = None
@@ -3267,7 +3455,7 @@ def register_handlers(
                     f"{copy(language, 'តម្លៃអតិថិជន៖', 'Customer price:')} {money(values['price'])}\n"
                     f"{copy(language, 'តម្លៃ Reseller៖', 'Reseller price:')} {money(values['reseller_price'])}\n"
                     f"{copy(language, 'Media៖', 'Media:')} "
-                    f"{'✅' if values.get('image_url') or values.get('video_url') or values.get('media_content_ref') else '—'}\n"
+                    f"{'✅' if values.get('image_url') or values.get('video_url') or values.get('media_url') or values.get('media_content_ref') else '—'}\n"
                     f"{copy(language, 'សារក្រោយ Order៖', 'After-order message:')} "
                     f"{'✅' if values.get('delivery_message') else '—'}\n"
                     f"{copy(language, 'Media ក្រោយ Order៖', 'After-order media:')} "
@@ -3334,8 +3522,8 @@ def register_handlers(
         if step in telegram_media_steps:
             prompts[step] = copy(
                 language,
-                "ផ្ញើអត្ថបទ, Media, ឯកសារ, Album ឬ Telegram post link។ Telegram នឹង copy ដោយផ្ទាល់ មិន download/upload តាម Bot ទេ។ ចុច Save media ពេលរួច។",
-                "Send text, media, a file, an album, or a Telegram post link. Telegram copies it directly; the bot does not download or re-upload it. Choose Save media when done.",
+                "ផ្ញើរូបភាព, វីដេអូ, GIF ឬឯកសារ។ Bot នឹង upload ទៅ Cloudinary ហើយរក្សាទុក URL។ អាចផ្ញើ Telegram post link ជំនួសបាន។ ចុច Save media ពេលរួច។",
+                "Send an image, video, GIF, or file. The bot uploads files to Cloudinary and saves the URL. You may send a Telegram post link instead. Choose Save media when done.",
             )
         wizard["step_index"] = step_number - 1
         rows: list[list[InlineKeyboardButton]] = []
@@ -3429,7 +3617,26 @@ def register_handlers(
                 preserve_input=True,
             )
             return True
-        items.append(telegram_content_item(message))
+        file_item = telegram_media_upload_item(message)
+        if file_item:
+            items.append(file_item)
+        else:
+            post_link = parse_telegram_post_link(message.text or "")
+            if not post_link:
+                await show_admin_wizard(
+                    message,
+                    user_id,
+                    language,
+                    edit_message=False,
+                    notice=copy(
+                        language,
+                        "សូមផ្ញើឯកសារ Media ឬ Telegram post link។",
+                        "Send a media file or a Telegram post link.",
+                    ),
+                    preserve_input=True,
+                )
+                return True
+            items.append({"url": (message.text or "").strip(), "media_type": "link"})
         await show_admin_wizard(
             message,
             user_id,
@@ -3447,8 +3654,8 @@ def register_handlers(
             return
         text = copy(
             language,
-            "ផ្ញើអត្ថបទ, Media, ឯកសារ, Album ឬ Telegram post link (t.me/channel/123)។ Telegram នឹង copy ដោយផ្ទាល់ មិន download/upload តាម Bot ទេ។ ចុច Save media ពេលរួច; កុំលុបសារដើម ហើយត្រូវប្រាកដថា Bot អាចចូល source chat/channel បាន។",
-            "Send text, media, a file, an album, or a Telegram post link (t.me/channel/123). Telegram copies it directly; the bot does not download or re-upload it. Choose Save media when done; keep the source and ensure the bot can access its chat/channel.",
+            "ផ្ញើរូបភាព, វីដេអូ, GIF ឬឯកសារ។ Bot នឹង upload ឯកសារទៅ Cloudinary ហើយរក្សាទុក URL ក្នុង Supabase។ អាចផ្ញើ Telegram post link ជំនួសបាន។ ចុច Save media ពេលរួច។",
+            "Send an image, video, GIF, or file. The bot uploads it to Cloudinary and saves the URL in Supabase. You may send a Telegram post link instead. Choose Save media when done.",
         )
         if pending["items"]:
             text += copy(
@@ -3496,12 +3703,25 @@ def register_handlers(
                 ),
             )
             return True
-        post_link = parse_telegram_post_link(message.text or "")
-        if post_link and not pending["items"]:
-            pending["post_link"] = (message.text or "").strip()
+        file_item = telegram_media_upload_item(message)
+        if file_item:
+            pending["items"].append(file_item)
         else:
-            pending.pop("post_link", None)
-        pending["items"].append(telegram_content_item(message))
+            post_link = parse_telegram_post_link(message.text or "")
+            if not post_link:
+                await show_pending_admin_media_prompt(
+                    user_id,
+                    language,
+                    copy(
+                        language,
+                        "សូមផ្ញើឯកសារ Media ឬ Telegram post link។",
+                        "Send a media file or a Telegram post link.",
+                    ),
+                )
+                return True
+            pending["items"].append(
+                {"url": (message.text or "").strip(), "media_type": "link"}
+            )
         await show_pending_admin_media_prompt(user_id, language)
         return True
 
@@ -3554,7 +3774,7 @@ def register_handlers(
                     values["name"],
                     str(price),
                     values.get("description", ""),
-                    image_url=media_url if media_type in {"image", "telegram"} else None,
+                    image_url=media_url if media_type != "video" else None,
                     video_url=media_url if media_type == "video" else None,
                     reseller_price=str(reseller_price),
                     delivery_message=values.get("delivery_message", ""),
@@ -3570,7 +3790,7 @@ def register_handlers(
                 str(price),
                 str(reseller_price),
                 values.get("description", ""),
-                image_url=media_url if media_type in {"image", "telegram"} else None,
+                image_url=media_url if media_type != "video" else None,
                 video_url=media_url if media_type == "video" else None,
                 update_media=media_type is not None,
                 delivery_message=values.get("delivery_message", ""),
@@ -3985,11 +4205,12 @@ def register_handlers(
         media_url = video_url or image_url
         sent_message: Message | None = None
         if media_url:
-            if decode_telegram_content_reference(media_url):
+            reference = stored_telegram_content_reference(media_url)
+            if reference:
                 copied = await copy_telegram_content_reference(
                     bot,
                     message.chat.id if message.chat else message.from_user.id,
-                    media_url,
+                    reference,
                 )
                 sent_message = await message.answer(
                     text, parse_mode="HTML", reply_markup=markup
@@ -4004,10 +4225,23 @@ def register_handlers(
                         item.message_id for item in copied
                     ]
                 return sent_message
-            if edit_message and (message.photo or message.video):
+            media_urls = cloudinary_media_urls(media_url)
+            media_method = (
+                cloudinary_media_method(
+                    media_urls[0], "video" if video_url else "photo"
+                )
+                if media_urls
+                else "document"
+            )
+            if (
+                edit_message
+                and (message.photo or message.video)
+                and len(media_urls) == 1
+                and media_method in {"photo", "video"}
+            ):
                 media = (
                     InputMediaVideo(media=media_url, caption=text, parse_mode="HTML")
-                    if video_url
+                    if media_method == "video"
                     else InputMediaPhoto(
                         media=media_url, caption=text, parse_mode="HTML"
                     )
@@ -4016,30 +4250,23 @@ def register_handlers(
                     media=media,
                     reply_markup=markup,
                 )
-            elif video_url:
-                sent_message = await message.answer_video(
-                    video=video_url,
+            else:
+                sent_media = await send_cloudinary_media(
+                    message,
+                    media_url,
+                    fallback="video" if video_url else "photo",
                     caption=text,
                     parse_mode="HTML",
                     reply_markup=markup,
                 )
+                if sent_media:
+                    sent_message = sent_media[0]
+                    if message.from_user and len(sent_media) > 1:
+                        active_screen_auxiliary_message_ids[
+                            message.from_user.id
+                        ] = [item.message_id for item in sent_media[1:]]
                 if edit_message:
                     await delete_replaced_message(message)
-            else:
-                sent_message = await message.answer_photo(
-                    photo=image_url,
-                    caption=text,
-                    parse_mode="HTML",
-                    reply_markup=markup,
-                )
-                if edit_message:
-                    try:
-                        await message.delete()
-                    except TelegramBadRequest:
-                        logger.debug(
-                            "Could not delete previous product message %s",
-                            message.message_id,
-                        )
         elif edit_message and (message.photo or message.video):
             await message.edit_caption(
                 caption=text, parse_mode="HTML", reply_markup=markup
@@ -5047,8 +5274,8 @@ def register_handlers(
             callback,
             copy(
                 language,
-                "ផ្ញើអត្ថបទ, Media, ឯកសារ, Album ឬ Telegram post link (t.me/channel/123)។ Telegram នឹង copy ដោយផ្ទាល់ មិន download/upload តាម Bot ទេ។ ចុច Save media ពេលរួច; កុំលុបសារដើម និងត្រូវប្រាកដថា Bot អាចចូល source chat/channel បាន។",
-                "Send text, media, a file, an album, or a Telegram post link (t.me/channel/123). Telegram copies it directly; the bot does not download or re-upload it. Choose Save media when done; keep the source and ensure the bot can access its chat/channel.",
+                "ផ្ញើរូបភាព, វីដេអូ, GIF ឬឯកសារ។ Bot នឹង upload ឯកសារទៅ Cloudinary ហើយរក្សាទុក URL ក្នុង Supabase។ អាចផ្ញើ Telegram post link ជំនួសបាន។ ចុច Save media ពេលរួច។",
+                "Send an image, video, GIF, or file. The bot uploads files to Cloudinary and saves the URL in Supabase. You may send a Telegram post link instead. Choose Save media when done.",
             ),
             keyboard([back_button("admin:settings:section:media", language)]),
         )
@@ -5072,21 +5299,26 @@ def register_handlers(
             )
             return
         try:
-            reference = pending.get("post_link") or encode_telegram_content_reference(
-                pending["items"]
+            media_urls = await upload_telegram_media_items(
+                bot, settings, pending["items"], "bot-media"
             )
+            media_type = pending["items"][0].get("media_type", "document")
             if pending["kind"] == "tutorial":
-                await store.set_bot_setting("how_to_buy_video_url", reference)
+                await store.set_bot_setting("how_to_buy_video_url", media_urls)
             else:
-                await store.set_bot_setting("welcome_photo_url", reference)
-                await store.set_bot_setting("welcome_video_url", "")
+                if media_type == "video":
+                    await store.set_bot_setting("welcome_video_url", media_urls)
+                    await store.set_bot_setting("welcome_photo_url", "")
+                else:
+                    await store.set_bot_setting("welcome_photo_url", media_urls)
+                    await store.set_bot_setting("welcome_video_url", "")
                 welcome_media_cache = None
         except ValueError as exc:
             await callback.answer(str(exc), show_alert=True)
             return
-        except Exception:
+        except MEDIA_SAVE_ERRORS:
             logger.exception(
-                "Could not save Telegram %s media for admin %s",
+                "Could not upload/save %s media for admin %s",
                 pending["kind"],
                 callback.from_user.id,
             )
@@ -5315,7 +5547,8 @@ def register_handlers(
         )
 
     @router.message(
-        F.photo | F.video, F.caption.startswith(("setphoto", "setvideo", "setmedia"))
+        F.photo | F.video | F.animation | F.document,
+        F.caption.startswith(("setphoto", "setvideo", "setmedia")),
     )
     async def set_product_media(message: Message) -> None:
         if not message.from_user or message.from_user.id not in settings.admin_ids:
@@ -5339,17 +5572,33 @@ def register_handlers(
             )
             return
         product_id = parts[1].strip()
-        is_video = message.video is not None
+        media_item = telegram_media_upload_item(message)
+        if not media_item:
+            await send_replacing_screen(
+                message,
+                message.from_user.id,
+                copy(
+                    language,
+                    "សូមផ្ញើឯកសារ Media ដែលគាំទ្រ។",
+                    "Send a supported media file.",
+                ),
+            )
+            return
+        is_video = media_item["media_type"] == "video"
         try:
-            media_reference = encode_telegram_content_reference(
-                [telegram_content_item(message)],
-                drop_caption=bool(message.caption),
+            media_url = await upload_cloudinary_file(
+                bot,
+                settings,
+                media_item["file_id"],
+                "products",
+                resource_type="auto",
+                file_name=media_item["file_name"],
             )
             update_media = (
                 store.update_product_video if is_video else store.update_product_image
             )
-            updated = await update_media(product_id, media_reference)
-        except Exception:
+            updated = await update_media(product_id, media_url)
+        except MEDIA_SAVE_ERRORS:
             logger.exception("Could not update product media %s", product_id)
             await send_replacing_screen(
                 message,
@@ -5591,16 +5840,32 @@ def register_handlers(
                 )
             return
         try:
-            reference = encode_telegram_content_reference(items)
-        except ValueError as exc:
-            await callback.answer(str(exc), show_alert=True)
+            media_urls = await upload_telegram_media_items(
+                bot, settings, items, "products"
+            )
+        except MEDIA_UPLOAD_ERRORS:
+            logger.exception(
+                "Could not upload package media for admin %s",
+                callback.from_user.id,
+            )
+            await callback.answer(
+                copy(
+                    language,
+                    "មិនអាច upload Media ទៅ Cloudinary បានទេ។ សូមពិនិត្យ Cloudinary settings ហើយព្យាយាមម្ដងទៀត។",
+                    "Could not upload media to Cloudinary. Check Cloudinary settings and try again.",
+                ),
+                show_alert=True,
+            )
             return
         values = wizard["values"]
+        media_type = items[0].get("media_type", "document")
+        if media_type == "link":
+            media_type = "telegram"
         if step == "media":
-            values["media_content_ref"] = reference
-            values["media_type"] = "telegram"
+            values["media_url"] = media_urls
+            values["media_type"] = media_type
         else:
-            values[f"{step}_url"] = reference
+            values[f"{step}_url"] = media_urls
         wizard.pop("telegram_media_items", None)
         if step == "delivery_media":
             values["delivery_image_url"] = None

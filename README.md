@@ -1,6 +1,6 @@
 # PU_MMO169_Sale_Mod — Telegram Digital Key Shop
 
-Project នេះជា Telegram shop សម្រាប់លក់ Digital Key, Code និងផលិតផល Digital ផ្សេងៗដែល Admin បង្កើតតាម Catalog និង Package ដោយសេរី។ វាមាន wallet, order history និង How to Buy។ អ្នកប្រើអាចបញ្ចូលសមតុល្យតាម KHQRPay ហើយបង់ទំនិញដោយ wallet ឬ ABA KHQR checkout។ Bot ផ្ញើ digital goods បន្ទាប់ពីការទូទាត់ត្រូវបានផ្ទៀងផ្ទាត់ជាមួយ KHQRPay។ Database ប្រើ Supabase; media ថ្មីត្រូវបានរក្សាទុកជាការយោង Telegram ហើយ Telegram copy ដោយផ្ទាល់ ដោយមិន download/upload តាម Bot។ Cloudinary URLs ដែលមានស្រាប់នៅតែអាចប្រើសម្រាប់ compatibility។ Backend ដំណើរការលើ Render និងមាន health endpoint `/health`។
+Project នេះជា Telegram shop សម្រាប់លក់ Digital Key, Code និងផលិតផល Digital ផ្សេងៗដែល Admin បង្កើតតាម Catalog និង Package ដោយសេរី។ វាមាន wallet, order history និង How to Buy។ អ្នកប្រើអាចបញ្ចូលសមតុល្យតាម KHQRPay ហើយបង់ទំនិញដោយ wallet ឬ ABA KHQR checkout។ Bot ផ្ញើ digital goods បន្ទាប់ពីការទូទាត់ត្រូវបានផ្ទៀងផ្ទាត់ជាមួយ KHQRPay។ Database ប្រើ Supabase; ឯកសារ media ដែល Admin upload ត្រូវបាន upload ទៅ Cloudinary ហើយ Supabase រក្សាទុក URL។ Telegram post links ដែលបាន paste នៅតែអាចប្រើជាតំណដើម។ Backend ដំណើរការលើ Render និងមាន health endpoint `/health`។
 
 ## មាតិកា
 
@@ -36,7 +36,7 @@ Project នេះជា Telegram shop សម្រាប់លក់ Digital Key
 - Python និង PowerShell សម្រាប់ការដំឡើង/សាកល្បងក្នុង Windows។
 - Python 3.13 (តាម `.python-version`; បញ្ជាក់ interpreter ជាក់លាក់ពេលបង្កើត virtual environment)។
 - Telegram account និង bot token ពី [@BotFather](https://t.me/BotFather)។
-- Supabase project និង KHQRPay API key។ Cloudinary មិនចាំបាច់សម្រាប់ media ថ្មីទេ; Cloudinary URLs ដែលមានស្រាប់នៅតែអាចបង្ហាញបាន។
+- Supabase project និង KHQRPay API key។ Cloudinary ត្រូវការសម្រាប់ upload media ថ្មីតាម Admin panel។
 - GitHub repository ដែល Render អាចចូលប្រើបាន ប្រសិនបើ deploy តាម Render។
 
 ## 1. រៀបចំ Telegram Bot
@@ -82,9 +82,9 @@ notepad .env
 | `KHQRPAY_BAKONG_WEBHOOK_SECRET` | ស្រេចចិត្ត | Webhook secret របស់ Bakong key។ ចាំបាច់បើប្រើ webhook សម្រាប់ Bakong។ |
 | `KHQRPAY_WEBHOOK_SECRET` | ស្រេចចិត្ត | Secret រួម/legacy; អាចប្រើដដែល ប្រសិនបើទាំងពីរ key ប្រើ secret ដូចគ្នា។ |
 | `PUBLIC_BASE_URL` | សម្រាប់ ABA link | URL HTTPS សាធារណៈរបស់ Render ដោយមិនបញ្ចូល path។ |
-| `CLOUDINARY_CLOUD_NAME` | ស្រេចចិត្ត | Cloud name សម្រាប់ការរួមបញ្ចូល Cloudinary ផ្សេងៗ; media ដែលកំណត់តាម Bot ប្រើ Telegram copy។ |
-| `CLOUDINARY_API_KEY` | ស្រេចចិត្ត | Cloudinary API key សម្រាប់ការរួមបញ្ចូល Cloudinary ផ្សេងៗ។ |
-| `CLOUDINARY_API_SECRET` | ស្រេចចិត្ត | Cloudinary API secret; រក្សាសម្ងាត់។ Media URLs ចាស់អាចបន្តប្រើបានដោយមិនចាំបាច់បំពេញ API credentials។ |
+| `CLOUDINARY_CLOUD_NAME` | ត្រូវការ សម្រាប់ upload media | Cloud name របស់ Cloudinary។ |
+| `CLOUDINARY_API_KEY` | ត្រូវការ សម្រាប់ upload media | Cloudinary API key។ |
+| `CLOUDINARY_API_SECRET` | ត្រូវការ សម្រាប់ upload media | Cloudinary API secret; រក្សាសម្ងាត់។ |
 | `POLL_INTERVAL_SECONDS` | មាន default | ចន្លោះពេលពិនិត្យ payment background; default `20` វិនាទី។ |
 | `PORT` | មាន default | Port របស់ web service; default `10000`។ Render អាចកំណត់ port ផ្ទាល់។ |
 
@@ -145,11 +145,11 @@ Webhook និង ABA deep link ត្រូវការអាសយដ្ឋា
 
 4. បើក Catalog ដែលទើបបង្កើត ហើយចុច **Add Package**។ Wizard នឹងសួរតាមលំដាប់៖ រូបភាព/វីដេអូ Package, ឈ្មោះ, ព័ត៌មានលម្អិត, តម្លៃអតិថិជន, តម្លៃ Reseller, សារ/របៀបប្រើក្រោយ Order និង Media ក្រោយ Order តែមួយ។ ចុច **Skip** លើជំហានស្រេចចិត្តដើម្បីរំលង។ ឈ្មោះ និងតម្លៃអតិថិជនត្រូវបញ្ចូល។ ពិនិត្យព័ត៌មាន រួចចុច **Confirm save**។ ពេលកែ Package អាច Skip ដើម្បីទុកតម្លៃដដែល ឬ Clear Media ក្រោយ Order។ ចុច **Cancel** បានគ្រប់ជំហាន។
 
-តម្លៃទាំងពីរត្រូវធំជាងសូន្យ។ តម្លៃ Reseller អាចស្មើ ឬខ្ពស់ជាងតម្លៃអតិថិជនបាន។ Media ជាជម្រើស។ អាចផ្ញើអត្ថបទ, Media, ឯកសារ, Album ឬ Telegram post link (t.me/channel/123) ក្នុងជំហាន media/after-order; Bot រក្សាទុក Telegram reference ក្នុង Supabase ហើយប្រើ Telegram copy ដោយផ្ទាល់ ដោយមិនទាញយក/បញ្ចូលឡើងវិញ និងមិនដាក់ size limit ផ្ទាល់ខ្លួន។ កុំលុបសារដើម ហើយត្រូវប្រាកដថា Bot អាចចូល source chat/channel បាន។ Package នឹងបង្ហាញ media នោះក្នុងទំព័រព័ត៌មានរបស់វា។
+តម្លៃទាំងពីរត្រូវធំជាងសូន្យ។ តម្លៃ Reseller អាចស្មើ ឬខ្ពស់ជាងតម្លៃអតិថិជនបាន។ Media ជាជម្រើស។ ផ្ញើរូបភាព, វីដេអូ, GIF ឬឯកសារក្នុងជំហាន media/after-order; Bot upload file ទៅ Cloudinary ហើយ Supabase រក្សាទុក HTTPS URL។ Telegram post link ដែល paste នឹងរក្សាទុកជាតំណដើម ហើយត្រូវប្រាកដថា Bot អាចចូល source chat/channel បាន។ Package នឹងបង្ហាញ media នោះក្នុងទំព័រព័ត៌មានរបស់វា។
 
-សារ និង Media ក្រោយ Order ត្រូវបានកំណត់តាម **Edit Package** ហើយ Bot ផ្ញើវាបន្ទាប់ពីទូទាត់ជោគជ័យ មុនពេលផ្ញើ Digital Key/Code។ Digital Key ឬ Code បញ្ចូលតាម **Add stock/Import stock (.txt)** សម្រាប់ Package នីមួយៗ; Bot រក្សាទុកជាទម្រង់ encrypted និងផ្ញើតាមចំនួនដែលបានទិញ។
+សារ និង Media ក្រោយ Order ត្រូវបានកំណត់តាម **Edit Package** ហើយ Bot ផ្ញើ URL ពី Cloudinary បន្ទាប់ពីទូទាត់ជោគជ័យ មុនពេលផ្ញើ Digital Key/Code។ Digital Key ឬ Code បញ្ចូលតាម **Add stock/Import stock (.txt)** សម្រាប់ Package នីមួយៗ; Bot រក្សាទុកជាទម្រង់ encrypted និងផ្ញើតាមចំនួនដែលបានទិញ។
 
-មុនប្រើមុខងារនេះ សូម run `schema.sql` ចុងក្រោយក្នុង Supabase SQL Editor ដើម្បីបន្ថែម delivery fields លើ products។ Telegram post link ចម្លងតែសារដែលតំណនោះចង្អុលទៅ; បើចង់បាន Album ទាំងមូល សូមផ្ញើ Album ដោយផ្ទាល់។
+មុនប្រើមុខងារនេះ សូម run `schema.sql` ចុងក្រោយក្នុង Supabase SQL Editor ដើម្បីបន្ថែម delivery fields លើ products។ ត្រូវកំណត់ Cloudinary credentials ក្នុង environment ដើម្បីឲ្យ Bot upload ឯកសារ។
 
 Admin អាចបើក **Store admin → Manage resellers → Add reseller** រួចផ្ញើ Telegram user ID ជាលេខ។ ចុចលើ ID ក្នុងបញ្ជីដើម្បីដកសិទ្ធិ។ Reseller ប្រើ bot ដូចអតិថិជនធម្មតា ប៉ុន្តែ catalog, ព័ត៌មាន package និងការកក់ទិញនឹងប្រើតម្លៃ Reseller។ តម្លៃ checkout ត្រូវបានគណនាដោយ Supabase តាម Telegram ID មិនមែនតាមតម្លៃដែលបានផ្ញើពី UI ទេ។
 
@@ -201,7 +201,7 @@ Script អាន `.env` ពី project root។ វាត្រូវការ `S
 
 ### វីដេអូ “How to buy”
 
-នៅ **Store admin → Settings → Media → How to Buy** ផ្ញើអត្ថបទ, Video, Media, ឯកសារ, Album ឬ Telegram post link ដែលចង់ឲ្យ Bot បង្ហាញ ហើយចុច **Save media**។ Supabase រក្សាទុក Telegram reference ហើយ Telegram copy content ដោយផ្ទាល់; Bot មិន download/upload ទេ។ បើផ្ញើ post link វារក្សាទុកជា URL ដើម ដូចជា `https://t.me/channel/123`; Media/message/album ផ្សេងៗរក្សាទុកជា message reference។ កុំលុបសារដើម ហើយត្រូវប្រាកដថា Bot អាចចូល source chat/channel បាន។ តំណ post ចម្លងតែសារដែលតំណនោះចង្អុលទៅ; បើចង់បាន Album ទាំងមូល សូមផ្ញើ Album ដោយផ្ទាល់។ បើកំណត់តាម Supabase ដោយដៃ អាចដាក់ URL នេះជា value ដោយផ្ទាល់។ Caption ខ្មែរ/អង់គ្លេសអាចកំណត់នៅ **Settings → Captions**។
+នៅ **Store admin → Settings → Media → How to Buy** ផ្ញើ Video, Media ឬឯកសារ ហើយចុច **Save media**។ Bot upload ឯកសារទៅ Cloudinary ហើយ Supabase រក្សាទុក URL ដើម្បីផ្ញើឯកសារនោះ។ បើ paste Telegram post link វារក្សាទុកជា URL ដើម ដូចជា `https://t.me/channel/123`; Bot ចម្លង post តាម Telegram ដោយផ្ទាល់. Caption ខ្មែរ/អង់គ្លេសអាចកំណត់នៅ **Settings → Captions**។
 
 ```sql
 insert into public.bot_settings (key, value)
@@ -214,7 +214,7 @@ on conflict (key) do update set value = excluded.value;
 
 Bot ទាញ settings ថ្មីរាល់ពេលអ្នកប្រើបើក tutorial ដូច្នេះមិនចាំបាច់ restart bot បន្ទាប់ពីកែទេ។
 
-នៅ **Store admin → Settings → Media → Welcome media** ផ្ញើ Welcome media ដោយផ្ទាល់ដូចគ្នា ហើយចុច **Save media**។ Text, media, files, albums និង post links ត្រូវបានរក្សាទុកជាមួយ Telegram reference ក្នុង Supabase ហើយ copy ដោយ Telegram ដោយមិន download/upload តាម Bot។ កុំលុបសារដើម និងត្រូវប្រាកដថា Bot អាចចូល source chat/channel បាន។ ក្នុង Settings → **Store links** អាចកំណត់ Support username និង Join group URL (បង្ហាញជាប៊ូតុង **Join Group** ក្នុងម៉ឺនុយ) ហើយ **Notifications** អាចកំណត់ group IDs សម្រាប់ stock/order notifications។ ការកំណត់ទាំងនេះត្រូវរក្សាទុកក្នុង Admin panel មិនមែន Environment Variables ទេ។
+នៅ **Store admin → Settings → Media → Welcome media** upload រូបភាព, វីដេអូ, GIF ឬឯកសារ ហើយចុច **Save media**។ Bot upload ទៅ Cloudinary រួចរក្សាទុក URL ក្នុង `welcome_photo_url` ឬ `welcome_video_url` ក្នុង Supabase។ Telegram post link ដែល paste នឹងរក្សាទុកជា URL ដើម។ ក្នុង Settings → **Store links** អាចកំណត់ Support username និង Join group URL (បង្ហាញជាប៊ូតុង **Join Group** ក្នុងម៉ឺនុយ) ហើយ **Notifications** អាចកំណត់ group IDs សម្រាប់ stock/order notifications។ ការកំណត់ទាំងនេះត្រូវរក្សាទុកក្នុង Admin panel មិនមែន Environment Variables ទេ។
 
 ```sql
 insert into public.bot_settings (key, value)
@@ -231,13 +231,13 @@ on conflict (key) do update set value = excluded.value;
 
 ### រូបភាព និងវីដេអូ Package
 
-នៅពេលបង្កើត ឬកែ Package ផ្ញើអត្ថបទ, Media, ឯកសារ, Album ឬ Telegram post link ក្នុងជំហាន media/after-order រួចចុច **Save media**។ Telegram copy ដោយផ្ទាល់ ហើយ Supabase រក្សាទុក reference ទៅប្រភព; Bot មិន download/upload និងមិនដាក់ size limit ផ្ទាល់ខ្លួន។ កុំលុបសារដើម ហើយ Bot ត្រូវអាចចូល source chat/channel។ ដើម្បីដាក់/ប្តូរ media package ដែលមានស្រាប់តាម command ផ្ញើ Photo/Video ជាមួយ caption:
+នៅពេលបង្កើត ឬកែ Package ផ្ញើរូបភាព, វីដេអូ, GIF ឬឯកសារក្នុងជំហាន media/after-order រួចចុច **Save media**។ Bot upload ឯកសារទៅ Cloudinary ហើយ Supabase រក្សាទុក URL; Telegram post link ដែល paste រក្សាទុកជាតំណដើម។ ដើម្បីដាក់/ប្តូរ media package ដែលមានស្រាប់តាម command ផ្ញើរូបភាព/វីដេអូជាមួយ caption:
 
 ```text
 setmedia PRODUCT_UUID
 ```
 
-រក្សាភាពចាស់ដដែលផងដែរ ដោយប្រើ `setphoto PRODUCT_UUID` ជាមួយរូបភាព។ Command `setmedia`/`setphoto` រក្សាទុក Telegram reference ហើយបិទបាំង caption command ពេលចម្លង Media ទៅអ្នកទិញ។ ត្រូវ run `schema.sql` ឡើងវិញដើម្បីបន្ថែម `video_url` មុនប្រើមុខងារវីដេអូ។
+ឬប្រើ `setphoto PRODUCT_UUID` ជាមួយរូបភាព។ Command `setmedia`/`setphoto` upload file ទៅ Cloudinary ហើយរក្សាទុក URL ក្នុង `products.image_url` ឬ `products.video_url`។ ត្រូវ run `schema.sql` ឡើងវិញដើម្បីបន្ថែម `video_url` មុនប្រើមុខងារវីដេអូ។
 
 ## 7. ដាក់ពី GitHub ទៅ Render
 
@@ -262,7 +262,7 @@ git push origin main
 3. Render រកឃើញ `render.yaml` នៅ project root. ពិនិត្យ configuration ហើយចុច **Deploy Blueprint**។ Blueprint កំណត់ Python web service, build/start command, health check `/health` និង `numInstances: 1`។
 4. នៅពេល Render ស្នើ environment variables សូមបញ្ចូល secrets ពិតតាមតារាងក្នុងផ្នែកទី 3។ តម្លៃចាំបាច់យ៉ាងហោចណាស់មាន `BOT_TOKEN`, `TELEGRAM_ADMIN_IDS`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, key មួយក្នុងចំណោម `KHQRPAY_ABA_KEY`/`KHQRPAY_BAKONG_KEY` និង `STOCK_ENCRYPTION_KEY`។ កុំប្រើតម្លៃឧទាហរណ៍ក្នុង `.env.example` ជា production secrets។
 5. កំណែ Python ត្រូវបានកំណត់ដោយ `.python-version` (`3.13`)។ Render អនុវត្តកំណែនេះ ហើយប្រើ patch release ចុងក្រោយដែលមានសម្រាប់ Python 3.13។ មើល [Render Python version guide](https://render.com/docs/python-version)។
-6. Cloudinary credentials មិនត្រូវការសម្រាប់ media ដែលបានកំណត់តាម Bot; Telegram copy ប្រើតែ source message reference។ `PUBLIC_BASE_URL` ត្រូវបញ្ចូលក្រោយទទួលបាន service URL។ Support, Join group និង notification destinations អាចកំណត់ក្នុង Telegram តាម **Admin → Settings**។
+6. កំណត់ Cloudinary credentials ដើម្បីឲ្យ Admin upload រូបភាព/វីដេអូ/ឯកសារបាន។ `PUBLIC_BASE_URL` ត្រូវបញ្ចូលក្រោយទទួលបាន service URL។ Support, Join group និង notification destinations អាចកំណត់ក្នុង Telegram តាម **Admin → Settings**។
 7. រង់ចាំ deploy ជោគជ័យ។ ក្នុង service **Settings/Overview** ចម្លង URL HTTPS ដែល Render ផ្ដល់ឲ្យ (`https://YOUR-SERVICE.onrender.com`)។
 8. នៅ Render **Environment** បន្ថែម/កែ:
 
@@ -335,7 +335,7 @@ Admin panel អាចបន្ថែម/កែ Catalog និង Package, បិ
 | Supabase request បរាជ័យ | ពិនិត្យ `SUPABASE_URL`, service-role key និងថា `schema.sql` បាន run ជោគជ័យ។ កុំបិទ RLS ដើម្បីជៀសបញ្ហា។ |
 | `PGRST205` រកមិនឃើញ table ដូចជា `categories`, `users`, `orders`, `user_wallets` ឬ `broadcast_jobs` | បើក Supabase SQL Editor របស់ project ដែល URL ត្រូវគ្នានឹង `SUPABASE_URL` ក្នុង Render ហើយ run `schema.sql` ចុងក្រោយទាំងមូល ដោយពិនិត្យឲ្យប្រាកដថា query បញ្ចប់ដោយគ្មាន SQL error។ Script នឹង reload PostgREST schema cache នៅចុងក្រោយ។ បន្ទាប់មករង់ចាំបន្តិច ហើយសាកល្បងម្តងទៀត។ |
 | Import stock មិនជោគជ័យ | ពិនិត្យ Product UUID, file UTF-8, format មួយ Digital Key/Code ក្នុងមួយបន្ទាត់ និង encryption key។ |
-| Media មិនបង្ហាញ | សូមកុំលុបសារដើម ហើយប្រាកដថា Bot អាចចូល source chat/channel; Telegram បដិសេធបើ source មិនមាន ឬ Bot គ្មានសិទ្ធិ។ ពិនិត្យ schema ចុងក្រោយដែលមាន `products.video_url` ផងដែរ។ Cloudinary URLs ចាស់ក៏អាចប្រើបានដែរ។ |
+| Media មិនបង្ហាញ | ពិនិត្យ URL ដែលបានរក្សាទុកក្នុង Supabase និងសិទ្ធិ/ការកំណត់ delivery របស់ Cloudinary។ សម្រាប់ Telegram post links ឬ Telegram references ចាស់ សូមប្រាកដថា Bot អាចចូល source chat/channel និងសារដើមនៅមាន។ ពិនិត្យ schema ចុងក្រោយដែលមាន `products.video_url` ផងដែរ។ |
 | KHQRPay checkout បរាជ័យ | ពិនិត្យ ABA API key, `KHQRPAY_BASE_URL`, ABA static PayWay link ក្នុង Dashboard និង Render Logs។ |
 | Webhook បាន `401` | ពិនិត្យថា webhook secret សម្រាប់ ABA/Bakong key ត្រូវនឹង secret ក្នុង KHQRPay Dashboard ហើយ redeploy បន្ទាប់ពី update។ |
 | ABA button មិនដំណើរការ | `PUBLIC_BASE_URL` ត្រូវជា public HTTPS URL របស់ Render ដោយគ្មាន path; ពិនិត្យថា order នៅ pending។ |
