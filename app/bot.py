@@ -75,8 +75,7 @@ ADMIN_WIZARD_STEPS = {
         "price",
         "reseller_price",
         "delivery_message",
-        "delivery_image",
-        "delivery_video",
+        "delivery_media",
     ),
     "category": ("name", "description"),
 }
@@ -1093,16 +1092,12 @@ def parse_product_caption(
                     "The reseller price is invalid.",
                 )
             ) from None
-        if (
-            not reseller_price.is_finite()
-            or reseller_price <= 0
-            or reseller_price >= price
-        ):
+        if not reseller_price.is_finite() or reseller_price <= 0:
             raise ValueError(
                 copy(
                     language,
-                    "តម្លៃ Reseller ត្រូវតែធំជាង 0 និងទាបជាងតម្លៃធម្មតា។",
-                    "The reseller price must be greater than 0 and lower than the regular price.",
+                    "តម្លៃ Reseller ត្រូវតែធំជាង 0។",
+                    "The reseller price must be greater than 0.",
                 )
             )
         description = fields[3]
@@ -1809,10 +1804,8 @@ async def notify_order_success(
     reseller_price = Decimal(
         str(product.get("reseller_price", product.get("price", "0")))
     )
-    regular_price = Decimal(str(product.get("price", "0")))
     reseller_order = (
-        reseller_price < regular_price
-        and Decimal(str(order["total"])) == reseller_price * quantity
+        Decimal(str(order["total"])) == reseller_price * quantity
     )
     price_type = "Reseller Price" if reseller_order else "Regular Price"
     reference = order.get("transaction_id") or order["id"]
@@ -2230,28 +2223,48 @@ async def deliver_order(
         await bot.send_message(
             chat_id, html.escape(delivery_message), parse_mode="HTML"
         )
-    if delivery and delivery.get("delivery_image_url"):
-        image_reference = delivery["delivery_image_url"]
-        if decode_telegram_content_reference(image_reference):
+    delivery_media_reference = (delivery or {}).get("delivery_media_url")
+    if delivery_media_reference:
+        if decode_telegram_content_reference(delivery_media_reference):
             try:
-                await copy_telegram_content_reference(bot, chat_id, image_reference)
+                await copy_telegram_content_reference(
+                    bot, chat_id, delivery_media_reference
+                )
             except TelegramBadRequest:
                 logger.exception(
-                    "Could not copy after-order image for order %s", order_id
+                    "Could not copy after-order media for order %s", order_id
                 )
         else:
-            await bot.send_photo(chat_id, photo=image_reference)
-    if delivery and delivery.get("delivery_video_url"):
-        video_reference = delivery["delivery_video_url"]
-        if decode_telegram_content_reference(video_reference):
-            try:
-                await copy_telegram_content_reference(bot, chat_id, video_reference)
-            except TelegramBadRequest:
-                logger.exception(
-                    "Could not copy after-order video for order %s", order_id
-                )
-        else:
-            await bot.send_video(chat_id, video=video_reference)
+            logger.error(
+                "Invalid after-order media reference for order %s", order_id
+            )
+    else:
+        if delivery and delivery.get("delivery_image_url"):
+            image_reference = delivery["delivery_image_url"]
+            if decode_telegram_content_reference(image_reference):
+                try:
+                    await copy_telegram_content_reference(
+                        bot, chat_id, image_reference
+                    )
+                except TelegramBadRequest:
+                    logger.exception(
+                        "Could not copy after-order image for order %s", order_id
+                    )
+            else:
+                await bot.send_photo(chat_id, photo=image_reference)
+        if delivery and delivery.get("delivery_video_url"):
+            video_reference = delivery["delivery_video_url"]
+            if decode_telegram_content_reference(video_reference):
+                try:
+                    await copy_telegram_content_reference(
+                        bot, chat_id, video_reference
+                    )
+                except TelegramBadRequest:
+                    logger.exception(
+                        "Could not copy after-order video for order %s", order_id
+                    )
+            else:
+                await bot.send_video(chat_id, video=video_reference)
     key_lines = "\n".join(f"- <code>{html.escape(value)}</code>" for value in keys)
     text = (
         "✅ ទំនិញបានជោគជ័យ\n\n"
@@ -3257,10 +3270,8 @@ def register_handlers(
                     f"{'✅' if values.get('image_url') or values.get('video_url') or values.get('media_content_ref') else '—'}\n"
                     f"{copy(language, 'សារក្រោយ Order៖', 'After-order message:')} "
                     f"{'✅' if values.get('delivery_message') else '—'}\n"
-                    f"{copy(language, 'រូបភាពក្រោយ Order៖', 'After-order image:')} "
-                    f"{'✅' if values.get('delivery_image_url') else '—'}\n"
-                    f"{copy(language, 'វីដេអូក្រោយ Order៖', 'After-order video:')} "
-                    f"{'✅' if values.get('delivery_video_url') else '—'}"
+                    f"{copy(language, 'Media ក្រោយ Order៖', 'After-order media:')} "
+                    f"{'✅' if values.get('delivery_media_url') or values.get('delivery_image_url') or values.get('delivery_video_url') else '—'}"
                 )
             else:
                 summary = (
@@ -3284,11 +3295,8 @@ def register_handlers(
             "delivery_message": copy(
                 language, "សារ/របៀបប្រើក្រោយទិញ", "After-order message/instructions"
             ),
-            "delivery_image": copy(
-                language, "Media ក្រោយទិញ ១", "After-order media 1"
-            ),
-            "delivery_video": copy(
-                language, "Media ក្រោយទិញ ២", "After-order media 2"
+            "delivery_media": copy(
+                language, "Media ក្រោយទិញ", "After-order media"
             ),
         }
         prompts = {
@@ -3308,26 +3316,21 @@ def register_handlers(
             ),
             "reseller_price": copy(
                 language,
-                "សូមបញ្ចូលតម្លៃ Reseller (USD) ដែលទាបជាងតម្លៃទូទៅ។",
-                "Enter a reseller price (USD) lower than the customer price.",
+                "សូមបញ្ចូលតម្លៃ Reseller (USD)។",
+                "Enter a reseller price (USD).",
             ),
             "delivery_message": copy(
                 language,
                 "ផ្ញើសារ ឬរបៀបប្រើដែលចង់ឲ្យអតិថិជនទទួលក្រោយ Order។ ផ្ញើ - ដើម្បីលុប។",
                 "Send the message or usage instructions customers should receive after ordering. Send - to clear.",
             ),
-            "delivery_image": copy(
+            "delivery_media": copy(
                 language,
-                "ផ្ញើរូបភាពសម្រាប់ផ្ញើក្រោយ Order។",
-                "Send the image customers should receive after ordering.",
-            ),
-            "delivery_video": copy(
-                language,
-                "ផ្ញើវីដេអូសម្រាប់ផ្ញើក្រោយ Order។",
-                "Send the video customers should receive after ordering.",
+                "ផ្ញើ Media មួយ ឬ Album សម្រាប់ផ្ញើក្រោយ Order។",
+                "Send one media item or album for customers to receive after ordering.",
             ),
         }
-        telegram_media_steps = {"media", "delivery_image", "delivery_video"}
+        telegram_media_steps = {"media", "delivery_media"}
         if step in telegram_media_steps:
             prompts[step] = copy(
                 language,
@@ -3341,12 +3344,9 @@ def register_handlers(
             "description",
             "reseller_price",
             "delivery_message",
-            "delivery_image",
-            "delivery_video",
+            "delivery_media",
         }
-        can_skip = (wizard["edit"] or optional) and not (
-            step == "reseller_price" and wizard.get("must_set_reseller_price")
-        )
+        can_skip = wizard["edit"] or optional
         if can_skip:
             rows.append(
                 [
@@ -3367,14 +3367,15 @@ def register_handlers(
                     )
                 ]
             )
-        delivery_url_fields = {
-            "delivery_image": "delivery_image_url",
-            "delivery_video": "delivery_video_url",
-        }
+        has_delivery_media = bool(
+            values.get("delivery_media_url")
+            or values.get("delivery_image_url")
+            or values.get("delivery_video_url")
+        )
         if (
             wizard["edit"]
-            and step in delivery_url_fields
-            and values.get(delivery_url_fields[step])
+            and step == "delivery_media"
+            and has_delivery_media
         ):
             rows.append(
                 [
@@ -3410,8 +3411,7 @@ def register_handlers(
         wizard = admin_wizards.get(user_id)
         if not wizard or wizard.get("step") not in {
             "media",
-            "delivery_image",
-            "delivery_video",
+            "delivery_media",
         }:
             return False
         items = wizard.setdefault("telegram_media_items", [])
@@ -3525,19 +3525,19 @@ def register_handlers(
                 or price <= 0
                 or not reseller_price.is_finite()
                 or reseller_price <= 0
-                or reseller_price > price
             ):
                 raise InputValidationError(
                     copy(
                         language,
-                        "តម្លៃមិនត្រឹមត្រូវទេ។ តម្លៃ Reseller ត្រូវមិនលើសតម្លៃអតិថិជន។",
-                        "Invalid prices. Reseller price must not exceed the customer price.",
+                        "តម្លៃមិនត្រឹមត្រូវទេ។ តម្លៃ Reseller ត្រូវតែធំជាង 0។",
+                        "Invalid prices. Reseller price must be greater than 0.",
                     )
                 )
 
             media_content_ref = values.get("media_content_ref")
             media_url = media_content_ref or values.get("media_url")
             media_type = "telegram" if media_content_ref else values.get("media_type")
+            delivery_media_url = values.get("delivery_media_url")
             delivery_image_url = values.get("delivery_image_url")
             delivery_video_url = values.get("delivery_video_url")
             if wizard["action"] == "product_add":
@@ -3558,6 +3558,7 @@ def register_handlers(
                     video_url=media_url if media_type == "video" else None,
                     reseller_price=str(reseller_price),
                     delivery_message=values.get("delivery_message", ""),
+                    delivery_media_url=delivery_media_url,
                     delivery_image_url=delivery_image_url,
                     delivery_video_url=delivery_video_url,
                 )
@@ -3573,6 +3574,7 @@ def register_handlers(
                 video_url=media_url if media_type == "video" else None,
                 update_media=media_type is not None,
                 delivery_message=values.get("delivery_message", ""),
+                delivery_media_url=delivery_media_url,
                 delivery_image_url=delivery_image_url,
                 delivery_video_url=delivery_video_url,
                 update_delivery=True,
@@ -5297,10 +5299,8 @@ def register_handlers(
         delivery_status = (
             f"{copy(language, 'សារក្រោយ Order៖', 'After-order message:')} "
             f"{'✅' if product_data.get('delivery_message') else '—'} · "
-            f"{copy(language, 'រូបភាព៖', 'Image:')} "
-            f"{'✅' if product_data.get('delivery_image_url') else '—'} · "
-            f"{copy(language, 'វីដេអូ៖', 'Video:')} "
-            f"{'✅' if product_data.get('delivery_video_url') else '—'}"
+            f"{copy(language, 'Media៖', 'Media:')} "
+            f"{'✅' if product_data.get('delivery_media_url') or product_data.get('delivery_image_url') or product_data.get('delivery_video_url') else '—'}"
         )
         await callback.message.edit_text(
             f"📦 <b>{html.escape(product_data['name'])}</b>\n"
@@ -5473,6 +5473,7 @@ def register_handlers(
                 "image_url": product.get("image_url"),
                 "video_url": product.get("video_url"),
                 "delivery_message": product.get("delivery_message") or "",
+                "delivery_media_url": product.get("delivery_media_url"),
                 "delivery_image_url": product.get("delivery_image_url"),
                 "delivery_video_url": product.get("delivery_video_url"),
             },
@@ -5573,7 +5574,7 @@ def register_handlers(
         items = wizard.get("telegram_media_items", []) if wizard else []
         if (
             not wizard
-            or step not in {"media", "delivery_image", "delivery_video"}
+            or step not in {"media", "delivery_media"}
             or not items
         ):
             await callback.answer(
@@ -5601,6 +5602,9 @@ def register_handlers(
         else:
             values[f"{step}_url"] = reference
         wizard.pop("telegram_media_items", None)
+        if step == "delivery_media":
+            values["delivery_image_url"] = None
+            values["delivery_video_url"] = None
         steps = ADMIN_WIZARD_STEPS[wizard["kind"]]
         step_index = steps.index(step)
         wizard["step"] = steps[step_index + 1] if step_index + 1 < len(steps) else None
@@ -5637,23 +5641,12 @@ def register_handlers(
             "description",
             "reseller_price",
             "delivery_message",
-            "delivery_image",
-            "delivery_video",
+            "delivery_media",
         }
         if not step or (step not in optional_steps and not wizard["edit"]):
             await callback.answer(
                 copy(
                     language, "ជំហាននេះមិនអាចរំលងបានទេ។", "This step cannot be skipped."
-                ),
-                show_alert=True,
-            )
-            return
-        if step == "reseller_price" and wizard.get("must_set_reseller_price"):
-            await callback.answer(
-                copy(
-                    language,
-                    "សូមបញ្ចូលតម្លៃ Reseller ថ្មី ព្រោះតម្លៃទូទៅត្រូវបានបន្ថយ។",
-                    "Enter a new reseller price because the customer price was reduced.",
                 ),
                 show_alert=True,
             )
@@ -5676,10 +5669,7 @@ def register_handlers(
             return
         wizard = admin_wizards.get(callback.from_user.id)
         step = callback.data.removeprefix("admin:wizard-clear:")
-        fields = {
-            "delivery_image": "delivery_image_url",
-            "delivery_video": "delivery_video_url",
-        }
+        fields = {"delivery_media": "delivery_media_url"}
         if (
             not wizard
             or not wizard["edit"]
@@ -5702,6 +5692,8 @@ def register_handlers(
             return
         url_field = fields[step]
         wizard["values"][url_field] = None
+        wizard["values"]["delivery_image_url"] = None
+        wizard["values"]["delivery_video_url"] = None
         steps = ADMIN_WIZARD_STEPS[wizard["kind"]]
         current_index = steps.index(step)
         wizard["step"] = (
@@ -5997,7 +5989,7 @@ def register_handlers(
             step = wizard.get("step")
             values = wizard["values"]
             try:
-                if step in {"media", "delivery_image", "delivery_video"}:
+                if step in {"media", "delivery_media"}:
                     raise ValueError(
                         copy(
                             language,
@@ -6043,16 +6035,10 @@ def register_handlers(
                             )
                         )
                     values["price"] = str(price)
-                    if (
-                        wizard["edit"]
-                        and Decimal(str(values.get("reseller_price", "0"))) >= price
-                    ):
-                        wizard["must_set_reseller_price"] = True
                 elif step == "reseller_price":
                     try:
                         reseller_price = Decimal(text)
-                        customer_price = Decimal(str(values["price"]))
-                    except (InvalidOperation, KeyError):
+                    except InvalidOperation:
                         raise ValueError(
                             copy(
                                 language,
@@ -6063,17 +6049,15 @@ def register_handlers(
                     if (
                         not reseller_price.is_finite()
                         or reseller_price <= 0
-                        or reseller_price >= customer_price
                     ):
                         raise ValueError(
                             copy(
                                 language,
-                                "តម្លៃ Reseller ត្រូវតែធំជាង 0 និងទាបជាងតម្លៃទូទៅ។",
-                                "Reseller price must be greater than 0 and lower than the customer price.",
+                                "តម្លៃ Reseller ត្រូវតែធំជាង 0។",
+                                "Reseller price must be greater than 0.",
                             )
                         )
                     values["reseller_price"] = str(reseller_price)
-                    wizard.pop("must_set_reseller_price", None)
                 else:
                     raise ValueError(
                         copy(language, "Wizard មិនសកម្មទេ។", "No active wizard step.")

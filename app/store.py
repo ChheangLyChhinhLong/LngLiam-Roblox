@@ -417,7 +417,7 @@ class Store:
             self.client.table("products")
             .select(
                 "id,category_id,name,description,price,reseller_price,image_url,video_url,"
-                "delivery_message,delivery_image_url,delivery_video_url"
+                "delivery_message,delivery_media_url,delivery_image_url,delivery_video_url"
             )
             .eq("id", product_id)
             .eq("active", True)
@@ -438,6 +438,7 @@ class Store:
         delivery_message: str | None = None,
         delivery_image_url: str | None = None,
         delivery_video_url: str | None = None,
+        delivery_media_url: str | None = None,
     ) -> str:
         if image_url and video_url:
             raise ValueError("A product cannot have both an image and a video")
@@ -454,11 +455,17 @@ class Store:
             product_data["video_url"] = video_url
         if any(
             value is not None
-            for value in (delivery_message, delivery_image_url, delivery_video_url)
+            for value in (
+                delivery_message,
+                delivery_media_url,
+                delivery_image_url,
+                delivery_video_url,
+            )
         ):
             product_data.update(
                 {
                     "delivery_message": delivery_message or "",
+                    "delivery_media_url": delivery_media_url,
                     "delivery_image_url": delivery_image_url,
                     "delivery_video_url": delivery_video_url,
                 }
@@ -489,6 +496,7 @@ class Store:
         delivery_image_url: str | None = None,
         delivery_video_url: str | None = None,
         update_delivery: bool = False,
+        delivery_media_url: str | None = None,
     ) -> None:
         values: dict[str, Any] = {
             "name": name,
@@ -503,6 +511,7 @@ class Store:
             values.update(
                 {
                     "delivery_message": delivery_message or "",
+                    "delivery_media_url": delivery_media_url,
                     "delivery_image_url": delivery_image_url,
                     "delivery_video_url": delivery_video_url,
                 }
@@ -658,7 +667,9 @@ class Store:
             return None
         product_result = await (
             self.client.table("products")
-            .select("delivery_message,delivery_image_url,delivery_video_url")
+            .select(
+                "delivery_message,delivery_media_url,delivery_image_url,delivery_video_url"
+            )
             .eq("id", order["product_id"])
             .maybe_single()
             .execute()

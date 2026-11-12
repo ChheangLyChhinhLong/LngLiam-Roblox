@@ -143,11 +143,11 @@ Webhook និង ABA deep link ត្រូវការអាសយដ្ឋា
 2. បើក bot ដោយ admin account ហើយចុច **Store admin → Catalogs and packages → Add Catalog**។
 3. ចុច **Add catalog** ហើយបញ្ចូលឈ្មោះ និងព័ត៌មានលម្អិតតាមសំណួរដែល bot បង្ហាញម្តងមួយៗ។ ព័ត៌មានលម្អិតអាចរំលងបាន។
 
-4. បើក Catalog ដែលទើបបង្កើត ហើយចុច **Add Package**។ Wizard នឹងសួរតាមលំដាប់៖ រូបភាព/វីដេអូ, ឈ្មោះ, ព័ត៌មានលម្អិត, តម្លៃអតិថិជន, តម្លៃ Reseller, សារ/របៀបប្រើក្រោយ Order, រូបភាព និងវីដេអូក្រោយ Order។ ចុច **Skip** លើជំហានស្រេចចិត្តដើម្បីរំលង។ ឈ្មោះ និងតម្លៃអតិថិជនត្រូវបញ្ចូល។ ពិនិត្យព័ត៌មាន រួចចុច **Confirm save**។ ពេលកែ Package អាច Skip ដើម្បីទុកតម្លៃដដែល ឬ Clear រូបភាព/វីដេអូក្រោយ Order. ចុច **Cancel** បានគ្រប់ជំហាន។
+4. បើក Catalog ដែលទើបបង្កើត ហើយចុច **Add Package**។ Wizard នឹងសួរតាមលំដាប់៖ រូបភាព/វីដេអូ Package, ឈ្មោះ, ព័ត៌មានលម្អិត, តម្លៃអតិថិជន, តម្លៃ Reseller, សារ/របៀបប្រើក្រោយ Order និង Media ក្រោយ Order តែមួយ។ ចុច **Skip** លើជំហានស្រេចចិត្តដើម្បីរំលង។ ឈ្មោះ និងតម្លៃអតិថិជនត្រូវបញ្ចូល។ ពិនិត្យព័ត៌មាន រួចចុច **Confirm save**។ ពេលកែ Package អាច Skip ដើម្បីទុកតម្លៃដដែល ឬ Clear Media ក្រោយ Order។ ចុច **Cancel** បានគ្រប់ជំហាន។
 
-តម្លៃទាំងពីរត្រូវធំជាងសូន្យ ហើយតម្លៃ Reseller ដែលបញ្ចូលត្រូវទាបជាងតម្លៃអតិថិជន។ Media ជាជម្រើស។ អាចផ្ញើអត្ថបទ, Media, ឯកសារ, Album ឬ Telegram post link (t.me/channel/123) ក្នុងជំហាន media/after-order; Bot រក្សាទុក Telegram reference ក្នុង Supabase ហើយប្រើ Telegram copy ដោយផ្ទាល់ ដោយមិនទាញយក/បញ្ចូលឡើងវិញ និងមិនដាក់ size limit ផ្ទាល់ខ្លួន។ កុំលុបសារដើម ហើយត្រូវប្រាកដថា Bot អាចចូល source chat/channel បាន។ Package នឹងបង្ហាញ media នោះក្នុងទំព័រព័ត៌មានរបស់វា។
+តម្លៃទាំងពីរត្រូវធំជាងសូន្យ។ តម្លៃ Reseller អាចស្មើ ឬខ្ពស់ជាងតម្លៃអតិថិជនបាន។ Media ជាជម្រើស។ អាចផ្ញើអត្ថបទ, Media, ឯកសារ, Album ឬ Telegram post link (t.me/channel/123) ក្នុងជំហាន media/after-order; Bot រក្សាទុក Telegram reference ក្នុង Supabase ហើយប្រើ Telegram copy ដោយផ្ទាល់ ដោយមិនទាញយក/បញ្ចូលឡើងវិញ និងមិនដាក់ size limit ផ្ទាល់ខ្លួន។ កុំលុបសារដើម ហើយត្រូវប្រាកដថា Bot អាចចូល source chat/channel បាន។ Package នឹងបង្ហាញ media នោះក្នុងទំព័រព័ត៌មានរបស់វា។
 
-សារ រូបភាព និងវីដេអូក្រោយ Order ត្រូវបានកំណត់តាម **Edit Package** ហើយ Bot ផ្ញើវាបន្ទាប់ពីទូទាត់ជោគជ័យ មុនពេលផ្ញើ Digital Key/Code។ Digital Key ឬ Code បញ្ចូលតាម **Add stock/Import stock (.txt)** សម្រាប់ Package នីមួយៗ; Bot រក្សាទុកជាទម្រង់ encrypted និងផ្ញើតាមចំនួនដែលបានទិញ។
+សារ និង Media ក្រោយ Order ត្រូវបានកំណត់តាម **Edit Package** ហើយ Bot ផ្ញើវាបន្ទាប់ពីទូទាត់ជោគជ័យ មុនពេលផ្ញើ Digital Key/Code។ Digital Key ឬ Code បញ្ចូលតាម **Add stock/Import stock (.txt)** សម្រាប់ Package នីមួយៗ; Bot រក្សាទុកជាទម្រង់ encrypted និងផ្ញើតាមចំនួនដែលបានទិញ។
 
 មុនប្រើមុខងារនេះ សូម run `schema.sql` ចុងក្រោយក្នុង Supabase SQL Editor ដើម្បីបន្ថែម delivery fields លើ products។ Telegram post link ចម្លងតែសារដែលតំណនោះចង្អុលទៅ; បើចង់បាន Album ទាំងមូល សូមផ្ញើ Album ដោយផ្ទាល់។
 

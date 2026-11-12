@@ -783,14 +783,29 @@ def test_parse_package_caption_with_reseller_price_and_details():
     )
 
 
-def test_parse_package_caption_rejects_reseller_price_not_below_customer_price():
-    for caption in ("Key 1h | 0.50 | 0.50 | Details", "Key 1h | 0.50 | 0.60 | Details"):
+def test_parse_package_caption_accepts_reseller_price_equal_or_above_regular_price():
+    assert parse_product_caption("Key 1h | 0.50 | 0.50 | Details") == (
+        "Key 1h",
+        "0.50",
+        "0.50",
+        "Details",
+    )
+    assert parse_product_caption("Key 1h | 0.50 | 0.60 | Details") == (
+        "Key 1h",
+        "0.50",
+        "0.60",
+        "Details",
+    )
+
+
+def test_parse_package_caption_still_rejects_nonpositive_reseller_price():
+    for caption in ("Key 1h | 0.50 | 0 | Details", "Key 1h | 0.50 | -1 | Details"):
         try:
             parse_product_caption(caption, "en")
         except ValueError as exc:
             assert "reseller price" in str(exc)
         else:
-            raise AssertionError("Expected invalid reseller pricing to be rejected")
+            raise AssertionError("Expected a nonpositive reseller price to be rejected")
 
 
 def test_product_price_uses_reseller_price_only_for_resellers():
@@ -1290,7 +1305,7 @@ def test_stale_edit_wizard_skip_refreshes_the_current_step():
             "target_id": "product-123",
             "category_id": "category-123",
             "edit": True,
-            "step": "delivery_video",
+            "step": "delivery_media",
             "values": {},
         }
         bot_module.active_screen_messages.pop(user_id, None)
@@ -1314,10 +1329,88 @@ def test_stale_edit_wizard_skip_refreshes_the_current_step():
             "The form was updated. Continue from the current step."
         )
         prompt.edit_text.assert_awaited_once()
-        assert "Step 8/8" in prompt.edit_text.await_args.args[0]
-        assert bot_module.admin_wizards[user_id]["step"] == "delivery_video"
+        assert "Step 7/7" in prompt.edit_text.await_args.args[0]
+        assert bot_module.admin_wizards[user_id]["step"] == "delivery_media"
 
         bot_module.admin_wizards.pop(user_id, None)
+        bot_module.active_screen_messages.pop(user_id, None)
+        bot_module.user_language_cache.pop(user_id, None)
+
+    asyncio.run(run_test())
+
+
+def test_edit_reseller_price_can_be_kept_unchanged_and_saved_above_customer_price():
+    async def run_test():
+        user_id = 7654323
+        edited_message = SimpleNamespace(message_id=989)
+        prompt = SimpleNamespace(
+            message_id=989,
+            edit_text=AsyncMock(return_value=edited_message),
+        )
+        callback = SimpleNamespace(
+            data="admin:wizard-skip:stale-step",
+            from_user=SimpleNamespace(id=user_id),
+            message=prompt,
+            answer=AsyncMock(),
+        )
+        store = SimpleNamespace(
+            user_language=AsyncMock(return_value="en"),
+            update_product=AsyncMock(),
+        )
+        bot_module.admin_wizards[user_id] = {
+            "kind": "product",
+            "action": "product_edit",
+            "target_id": "product-123",
+            "category_id": "category-123",
+            "edit": True,
+            "step": "reseller_price",
+            "must_set_reseller_price": True,
+            "values": {
+                "name": "Key 1h",
+                "price": "0.50",
+                "reseller_price": "0.75",
+                "description": "",
+            },
+        }
+        bot_module.active_screen_messages.pop(user_id, None)
+
+        register_handlers(
+            SimpleNamespace(include_router=Mock()),
+            SimpleNamespace(),
+            store,
+            SimpleNamespace(),
+            SimpleNamespace(admin_ids={user_id}),
+        )
+        handler = [
+            handler.callback
+            for handler in bot_module.router.callback_query.handlers
+            if handler.callback.__name__ == "skip_admin_wizard_step"
+        ][-1]
+
+        await handler(callback)
+
+        markup = prompt.edit_text.await_args.kwargs["reply_markup"]
+        assert any(
+            button.text == "⏩ Skip / Keep current"
+            for row in markup.inline_keyboard
+            for button in row
+        )
+
+        callback.data = "admin:wizard-skip:reseller_price"
+        await handler(callback)
+        assert bot_module.admin_wizards[user_id]["step"] == "delivery_message"
+
+        bot_module.admin_wizards[user_id]["step"] = None
+        callback.data = "admin:wizard-save"
+        save_handler = [
+            handler.callback
+            for handler in bot_module.router.callback_query.handlers
+            if handler.callback.__name__ == "save_admin_wizard"
+        ][-1]
+        await save_handler(callback)
+
+        assert store.update_product.await_args.args[3] == "0.75"
+        assert user_id not in bot_module.admin_wizards
         bot_module.active_screen_messages.pop(user_id, None)
         bot_module.user_language_cache.pop(user_id, None)
 
@@ -2016,12 +2109,14 @@ def test_product_creation_saves_optional_after_order_message_and_media():
             "1.00",
             "",
             delivery_message="Redeem at example.com",
+            delivery_media_url="telegram:media-reference",
             delivery_image_url="https://res.cloudinary.com/example/image/upload/delivery.png",
             delivery_video_url="https://res.cloudinary.com/example/video/upload/guide.mp4",
         )
 
         values = query.insert.call_args.args[0]
         assert values["delivery_message"] == "Redeem at example.com"
+        assert values["delivery_media_url"] == "telegram:media-reference"
         assert values["delivery_image_url"].endswith("delivery.png")
         assert values["delivery_video_url"].endswith("guide.mp4")
 
@@ -2076,6 +2171,7 @@ def test_product_update_can_replace_and_clear_after_order_content():
             "0.35",
             "Updated details",
             delivery_message="",
+            delivery_media_url="telegram:media-reference",
             delivery_image_url=None,
             delivery_video_url="https://res.cloudinary.com/example/video/upload/guide.mp4",
             update_delivery=True,
@@ -2083,6 +2179,7 @@ def test_product_update_can_replace_and_clear_after_order_content():
 
         values = query.update.call_args.args[0]
         assert values["delivery_message"] == ""
+        assert values["delivery_media_url"] == "telegram:media-reference"
         assert values["delivery_image_url"] is None
         assert values["delivery_video_url"].endswith("guide.mp4")
 
@@ -2658,6 +2755,46 @@ def test_delivery_copies_telegram_media_reference_without_downloading():
             from_chat_id=999,
             message_ids=[45, 46],
         )
+
+    asyncio.run(run_test())
+
+
+def test_delivery_uses_one_unified_after_order_media_instead_of_legacy_fields():
+    async def run_test():
+        key = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
+        reference = encode_telegram_content_reference(
+            [{"message_id": 45, "source_chat_id": 999}]
+        )
+        bot = SimpleNamespace(
+            send_message=AsyncMock(),
+            send_photo=AsyncMock(),
+            send_video=AsyncMock(),
+            copy_messages=AsyncMock(return_value=[SimpleNamespace(message_id=101)]),
+        )
+        store = SimpleNamespace(
+            payment_message=AsyncMock(return_value=None),
+            order_delivery_details=AsyncMock(
+                return_value={
+                    "delivery_media_url": reference,
+                    "delivery_image_url": "https://example.com/old.png",
+                    "delivery_video_url": "https://example.com/old.mp4",
+                }
+            ),
+            fulfill_order=AsyncMock(return_value=[encrypt_stock("CODE-001", key)]),
+            mark_delivered=AsyncMock(),
+        )
+
+        await deliver_order(
+            bot, store, SimpleNamespace(stock_encryption_key=key), "order-123", 123
+        )
+
+        bot.copy_messages.assert_awaited_once_with(
+            chat_id=123,
+            from_chat_id=999,
+            message_ids=[45],
+        )
+        bot.send_photo.assert_not_awaited()
+        bot.send_video.assert_not_awaited()
 
     asyncio.run(run_test())
 
