@@ -3,6 +3,7 @@ import base64
 import html
 import io
 import logging
+import re
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
@@ -123,8 +124,38 @@ def bot_setting_section(key: str) -> str:
     raise ValueError(f"Unknown bot setting: {key}")
 
 
+def keyboard_button_style(button: InlineKeyboardButton) -> str:
+    if button.style:
+        return button.style
+
+    callback_data = (button.callback_data or "").casefold()
+    text = button.text.casefold()
+    callback_words = set(re.split(r"[^a-z]+", callback_data))
+    text_words = set(re.findall(r"\b[a-z]+\b", text))
+    danger_words = {"cancel", "stop", "disable", "remove", "delete", "clear", "discard"}
+    if callback_words & danger_words or text_words & danger_words or any(
+        word in text for word in ("លុប", "បិទ", "ដក", "បោះបង់", "បញ្ឈប់")
+    ):
+        return "danger"
+
+    success_words = {"add", "send", "save", "confirm", "pay", "paid", "check", "submit"}
+    if callback_words & success_words or text_words & success_words or any(
+        word in text for word in ("បន្ថែម", "បញ្ជាក់", "រក្សាទុក", "ផ្ញើ", "ទូទាត់")
+    ):
+        return "success"
+
+    return "primary"
+
+
 def keyboard(rows: list[list[InlineKeyboardButton]]) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+    styled_rows = [
+        [
+            button.model_copy(update={"style": keyboard_button_style(button)})
+            for button in row
+        ]
+        for row in rows
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=styled_rows)
 
 
 def package_id_from_start(text: str) -> str | None:
@@ -805,6 +836,10 @@ def quantity_limit(stock: int) -> int:
     return max(0, min(3, stock))
 
 
+def stock_button_style(stock: int) -> str:
+    return "success" if stock > 0 else "danger"
+
+
 def checkout_payment_rows(
     product_id: str,
     quantity: int,
@@ -1054,19 +1089,19 @@ def menu(
 def welcome_keyboard(user_id: int, settings: Settings) -> ReplyKeyboardMarkup:
     rows = []
     if user_id in settings.admin_ids:
-        rows.append([KeyboardButton(text="⚙️ ADMIN")])
+        rows.append([KeyboardButton(text="⚙️ ADMIN", style="primary")])
     rows.extend(
         [
             [
-                KeyboardButton(text="👤 Account"),
+                KeyboardButton(text="👤 Account", style="primary"),
                 KeyboardButton(text="💰 Add funds", style="success"),
             ],
             [KeyboardButton(text="🛍 Digital Products", style="primary")],
             [
                 KeyboardButton(text="🛒 My Orders", style="primary"),
-                KeyboardButton(text="🎥 How to Buy"),
+                KeyboardButton(text="🎥 How to Buy", style="primary"),
             ],
-            [KeyboardButton(text="🔗 Join Group")],
+            [KeyboardButton(text="🔗 Join Group", style="primary")],
         ]
     )
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, is_persistent=True)
@@ -2329,6 +2364,7 @@ def register_handlers(
                     InlineKeyboardButton(
                         text=f"📦 {item['name']} • {money(price)} ({stock_label})",
                         callback_data=f"p:{item['id']}",
+                        style=stock_button_style(stock),
                     )
                 ]
             )
@@ -4666,6 +4702,7 @@ def register_handlers(
                 InlineKeyboardButton(
                     text=f"📦 {item['name'][:40]} · {stock} {copy(language, 'នៅសល់', 'available')}",
                     callback_data=f"ap:{item['id']}",
+                    style=stock_button_style(stock),
                 )
             ]
             for item, stock in zip(products, stock_counts)

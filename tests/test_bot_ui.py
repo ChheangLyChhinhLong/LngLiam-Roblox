@@ -47,6 +47,7 @@ from app.bot import (
     safe_user_language,
     send_replacing_screen,
     send_welcome,
+    stock_button_style,
     stock_notification_url,
     track_payment_message,
     update_active_screen,
@@ -566,6 +567,12 @@ def test_quantity_limit_matches_available_stock_and_order_cap():
     assert quantity_limit(1) == 1
     assert quantity_limit(2) == 2
     assert quantity_limit(8) == 3
+
+
+def test_stock_buttons_are_green_when_available_and_red_when_empty():
+    assert stock_button_style(1) == "success"
+    assert stock_button_style(150) == "success"
+    assert stock_button_style(0) == "danger"
 
 
 def test_product_description_is_limited_to_three_lines():
@@ -1103,7 +1110,32 @@ def test_reply_keyboard_styles_primary_shop_and_successful_wallet_action():
 
     assert buttons["🛍 Digital Products"].style == "primary"
     assert buttons["💰 Add funds"].style == "success"
-    assert buttons["👤 Account"].style is None
+    assert buttons["👤 Account"].style == "primary"
+    assert all(button.style for row in markup.keyboard for button in row)
+
+
+def test_inline_keyboard_styles_every_button_by_action():
+    markup = bot_module.keyboard(
+        [
+            [
+                bot_module.InlineKeyboardButton(
+                    text="Browse", callback_data="shop"
+                ),
+                bot_module.InlineKeyboardButton(
+                    text="Save", callback_data="admin:wizard-save"
+                ),
+                bot_module.InlineKeyboardButton(
+                    text="Cancel", callback_data="admin:wizard-cancel"
+                ),
+            ]
+        ]
+    )
+
+    assert [button.style for button in markup.inline_keyboard[0]] == [
+        "primary",
+        "success",
+        "danger",
+    ]
 
 
 def test_bakong_payment_keyboard_links_to_checkout_page():
