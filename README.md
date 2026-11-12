@@ -201,7 +201,7 @@ Script អាន `.env` ពី project root។ វាត្រូវការ `S
 
 ### វីដេអូ “How to buy”
 
-នៅ **Store admin → Settings → Media → How to Buy** ផ្ញើអត្ថបទ, Video, Media, ឯកសារ, Album ឬ Telegram post link ដែលចង់ឲ្យ Bot បង្ហាញ ហើយចុច **Save media**។ Supabase រក្សាទុក Telegram reference ហើយ Telegram copy content ដោយផ្ទាល់; Bot មិន download/upload ទេ។ កុំលុបសារដើម ហើយត្រូវប្រាកដថា Bot អាចចូល source chat/channel បាន។ តំណ post ចម្លងតែសារដែលតំណនោះចង្អុលទៅ; បើចង់បាន Album ទាំងមូល សូមផ្ញើ Album ដោយផ្ទាល់។ បើកំណត់តាម Supabase ដោយដៃ អាចដាក់ `https://t.me/channel/123` ជា value ដោយផ្ទាល់។ Caption ខ្មែរ/អង់គ្លេសអាចកំណត់នៅ **Settings → Captions**។
+នៅ **Store admin → Settings → Media → How to Buy** ផ្ញើអត្ថបទ, Video, Media, ឯកសារ, Album ឬ Telegram post link ដែលចង់ឲ្យ Bot បង្ហាញ ហើយចុច **Save media**។ Supabase រក្សាទុក Telegram reference ហើយ Telegram copy content ដោយផ្ទាល់; Bot មិន download/upload ទេ។ បើផ្ញើ post link វារក្សាទុកជា URL ដើម ដូចជា `https://t.me/channel/123`; Media/message/album ផ្សេងៗរក្សាទុកជា message reference។ កុំលុបសារដើម ហើយត្រូវប្រាកដថា Bot អាចចូល source chat/channel បាន។ តំណ post ចម្លងតែសារដែលតំណនោះចង្អុលទៅ; បើចង់បាន Album ទាំងមូល សូមផ្ញើ Album ដោយផ្ទាល់។ បើកំណត់តាម Supabase ដោយដៃ អាចដាក់ URL នេះជា value ដោយផ្ទាល់។ Caption ខ្មែរ/អង់គ្លេសអាចកំណត់នៅ **Settings → Captions**។
 
 ```sql
 insert into public.bot_settings (key, value)

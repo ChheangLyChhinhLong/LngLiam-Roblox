@@ -1423,6 +1423,70 @@ def test_admin_media_uses_telegram_copy_without_upload(monkeypatch):
     asyncio.run(run_test())
 
 
+def test_tutorial_post_link_is_saved_as_plain_url():
+    async def run_test():
+        user_id = 7654328
+        screen = SimpleNamespace(message_id=993, text="Media settings")
+        screen.edit_text = AsyncMock(return_value=screen)
+        bot_module.active_screen_messages[user_id] = screen
+        bot_module.pending_admin_media[user_id] = {
+            "kind": "tutorial",
+            "items": [],
+        }
+        store = SimpleNamespace(
+            user_language=AsyncMock(return_value="en"),
+            bot_settings=AsyncMock(return_value={}),
+            set_bot_setting=AsyncMock(),
+        )
+        register_handlers(
+            SimpleNamespace(include_router=Mock()),
+            SimpleNamespace(),
+            store,
+            SimpleNamespace(),
+            SimpleNamespace(admin_ids={user_id}),
+        )
+        receive_handler = [
+            handler.callback
+            for handler in bot_module.router.message.handlers
+            if handler.callback.__name__ == "receive_admin_input"
+        ][-1]
+        post_link = "https://t.me/PU_MMO169/704"
+        message = SimpleNamespace(
+            from_user=SimpleNamespace(id=user_id),
+            chat=SimpleNamespace(id=user_id),
+            message_id=204,
+            text=post_link,
+            caption=None,
+            delete=AsyncMock(),
+        )
+
+        await receive_handler(message)
+
+        assert bot_module.pending_admin_media[user_id]["post_link"] == post_link
+
+        save_callback = SimpleNamespace(
+            data="admin:media-save",
+            from_user=SimpleNamespace(id=user_id),
+            message=screen,
+            answer=AsyncMock(),
+        )
+        save_handler = [
+            handler.callback
+            for handler in bot_module.router.callback_query.handlers
+            if handler.callback.__name__ == "save_admin_telegram_media"
+        ][-1]
+        await save_handler(save_callback)
+
+        store.set_bot_setting.assert_awaited_once_with(
+            "how_to_buy_video_url", post_link
+        )
+        assert user_id not in bot_module.pending_admin_media
+        bot_module.active_screen_messages.pop(user_id, None)
+        bot_module.user_language_cache.pop(user_id, None)
+
+    asyncio.run(run_test())
+
+
 def test_package_wizard_uses_telegram_copy_without_upload(monkeypatch):
     async def run_test():
         user_id = 7654325

@@ -3481,6 +3481,11 @@ def register_handlers(
                 ),
             )
             return True
+        post_link = parse_telegram_post_link(message.text or "")
+        if post_link and not pending["items"]:
+            pending["post_link"] = (message.text or "").strip()
+        else:
+            pending.pop("post_link", None)
         pending["items"].append(telegram_content_item(message))
         await show_pending_admin_media_prompt(user_id, language)
         return True
@@ -5041,7 +5046,9 @@ def register_handlers(
             )
             return
         try:
-            reference = encode_telegram_content_reference(pending["items"])
+            reference = pending.get("post_link") or encode_telegram_content_reference(
+                pending["items"]
+            )
             if pending["kind"] == "tutorial":
                 await store.set_bot_setting("how_to_buy_video_url", reference)
             else:
