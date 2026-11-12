@@ -27,7 +27,12 @@ from aiogram.types import (
 )
 
 from app.config import Settings
-from app.payments import KHQRPayClient, aba_mobile_deeplink, aba_mobile_redirect_url
+from app.payments import (
+    KHQRPayGateway,
+    PaymentMethod,
+    aba_mobile_deeplink,
+    aba_mobile_redirect_url,
+)
 from app.security import decrypt_stock
 from app.store import Store
 
@@ -806,6 +811,7 @@ def checkout_payment_rows(
     total: Decimal,
     wallet_balance: Decimal,
     language: str,
+    payment_methods: tuple[PaymentMethod, ...] = ("aba",),
 ) -> list[list[InlineKeyboardButton]]:
     rows: list[list[InlineKeyboardButton]] = []
     if wallet_balance >= total:
@@ -817,14 +823,16 @@ def checkout_payment_rows(
                 )
             ]
         )
-    rows.append(
-        [
-            InlineKeyboardButton(
-                text=f"💳 {copy(language, 'បង់តាម ABA', 'Pay via ABA')} • {money(total)}",
-                callback_data=f"b:{product_id}:{quantity}",
-            )
-        ]
-    )
+    for payment_method in payment_methods:
+        method_label = "ABA" if payment_method == "aba" else "Bakong"
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=f"💳 {copy(language, 'បង់តាម', 'Pay via')} {method_label} • {money(total)}",
+                    callback_data=f"b:{payment_method}:{product_id}:{quantity}",
+                )
+            ]
+        )
     return rows
 
 
@@ -1119,31 +1127,43 @@ def admin_product_actions(
 
 def payment_keyboard(
     order_id: str,
-    open_url: str,
+    open_url: str | None,
     language: str = "km",
+    payment_method: PaymentMethod = "aba",
 ) -> InlineKeyboardMarkup:
-    return keyboard(
-        [
+    rows: list[list[InlineKeyboardButton]] = []
+    if open_url:
+        open_label_km = (
+            "🏦 បើកក្នុង ABA Mobile"
+            if payment_method == "aba"
+            else "🔗 បើកទំព័រទូទាត់"
+        )
+        open_label_en = (
+            "🏦 Open in ABA Mobile"
+            if payment_method == "aba"
+            else "🔗 Open payment page"
+        )
+        rows.append(
             [
                 InlineKeyboardButton(
-                    text=copy(
-                        language, "🏦 បើកក្នុង ABA Mobile", "🏦 Open in ABA Mobile"
-                    ),
+                    text=copy(language, open_label_km, open_label_en),
                     url=open_url,
                 )
-            ],
-            [
-                InlineKeyboardButton(
-                    text=copy(
-                        language,
-                        "✅ ខ្ញុំបានទូទាត់ · ពិនិត្យ",
-                        "✅ I have paid · Check",
-                    ),
-                    callback_data=f"check_payment_{order_id}",
-                )
-            ],
+            ]
+        )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                text=copy(
+                    language,
+                    "✅ ខ្ញុំបានទូទាត់ · ពិនិត្យ",
+                    "✅ I have paid · Check",
+                ),
+                callback_data=f"check_payment_{order_id}",
+            )
         ]
     )
+    return keyboard(rows)
 
 
 def wallet_deposit_keyboard(language: str = "km") -> InlineKeyboardMarkup:
@@ -1180,19 +1200,52 @@ def wallet_custom_amount_prompt(language: str) -> str:
     )
 
 
-def wallet_payment_keyboard(
-    deposit_id: str, open_url: str, language: str = "km"
+def wallet_payment_method_keyboard(
+    amount: str,
+    payment_methods: tuple[PaymentMethod, ...],
+    language: str = "km",
 ) -> InlineKeyboardMarkup:
-    return keyboard(
+    rows = [
         [
+            InlineKeyboardButton(
+                text=f"💳 {method.upper()}",
+                callback_data=f"wallet:method:{method}:{amount}",
+            )
+        ]
+        for method in payment_methods
+    ]
+    rows.append(back_button("home", language))
+    return keyboard(rows)
+
+
+def wallet_payment_keyboard(
+    deposit_id: str,
+    open_url: str | None,
+    language: str = "km",
+    payment_method: PaymentMethod = "aba",
+) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    if open_url:
+        open_label_km = (
+            "🏦 បើកក្នុង ABA Mobile"
+            if payment_method == "aba"
+            else "🔗 បើកទំព័រទូទាត់"
+        )
+        open_label_en = (
+            "🏦 Open in ABA Mobile"
+            if payment_method == "aba"
+            else "🔗 Open payment page"
+        )
+        rows.append(
             [
                 InlineKeyboardButton(
-                    text=copy(
-                        language, "🏦 បើកក្នុង ABA Mobile", "🏦 Open in ABA Mobile"
-                    ),
+                    text=copy(language, open_label_km, open_label_en),
                     url=open_url,
                 )
-            ],
+            ]
+        )
+    rows.extend(
+        [
             [
                 InlineKeyboardButton(
                     text=copy(
@@ -1206,6 +1259,7 @@ def wallet_payment_keyboard(
             back_button("home", language),
         ]
     )
+    return keyboard(rows)
 
 
 async def close_wallet_deposit_message(bot: Bot, store: Store, deposit_id: str) -> None:
@@ -1899,7 +1953,7 @@ def register_handlers(
     dispatcher: Dispatcher,
     bot: Bot,
     store: Store,
-    payments: KHQRPayClient,
+    payments: KHQRPayGateway,
     settings: Settings,
 ) -> None:
     async def replace_callback_screen(
@@ -2485,16 +2539,34 @@ def register_handlers(
             reply_markup=keyboard(rows),
         )
 
-    async def start_wallet_deposit(user: Any, amount_text: str, language: str) -> None:
+    async def start_wallet_deposit(
+        user: Any,
+        amount_text: str,
+        language: str,
+        payment_method: PaymentMethod,
+    ) -> None:
         amount = parse_wallet_deposit_amount(amount_text, language)
 
         deposit = await store.create_wallet_deposit(user.id, f"{amount:.2f}")
         deposit_id = str(deposit["id"])
-        payment = await payments.create_payment(f"{amount:.2f}", deposit_id)
-        deeplink = aba_mobile_deeplink(payment["qr_string"])
-        open_url = aba_mobile_redirect_url(settings.app_base_url or "", deposit_id)
+        payment = await payments.create_payment(
+            f"{amount:.2f}", deposit_id, payment_method
+        )
+        deeplink = (
+            aba_mobile_deeplink(payment["qr_string"])
+            if payment_method == "aba"
+            else None
+        )
+        open_url = (
+            aba_mobile_redirect_url(settings.app_base_url or "", deposit_id)
+            if payment_method == "aba"
+            else payment.get("checkout_url")
+        )
         await store.set_wallet_deposit_payment(
-            deposit_id, str(payment["transaction_id"]), deeplink
+            deposit_id,
+            str(payment["transaction_id"]),
+            deeplink,
+            payment_method,
         )
         caption = copy(
             language,
@@ -2506,7 +2578,9 @@ def register_handlers(
             payment_qr(payment),
             caption=caption,
             parse_mode="HTML",
-            reply_markup=wallet_payment_keyboard(deposit_id, open_url, language),
+            reply_markup=wallet_payment_keyboard(
+                deposit_id, open_url, language, payment_method
+            ),
         )
         await store.set_wallet_deposit_message(deposit_id, sent.message_id)
 
@@ -3085,10 +3159,62 @@ def register_handlers(
         language = await safe_user_language(store, callback.from_user.id)
         amount = callback.data.removeprefix("wallet:amount:")
         await callback.answer()
+        if len(payments.available_methods) > 1:
+            await edit_text_message(
+                callback.message,
+                copy(
+                    language,
+                    "សូមជ្រើសរើសវិធីទូទាត់សម្រាប់ការបញ្ចូលប្រាក់។",
+                    "Choose a payment method for this deposit.",
+                ),
+                reply_markup=wallet_payment_method_keyboard(
+                    amount, payments.available_methods, language
+                ),
+            )
+            return
         await clear_active_screen(callback.from_user.id)
         await delete_replaced_message(callback.message)
         try:
-            await start_wallet_deposit(callback.from_user, amount, language)
+            await start_wallet_deposit(
+                callback.from_user, amount, language, payments.default_method()
+            )
+        except Exception:
+            logger.exception(
+                "Could not start wallet deposit for Telegram user %s",
+                callback.from_user.id,
+            )
+            await bot.send_message(
+                callback.from_user.id,
+                wallet_error_message(language),
+                reply_markup=welcome_keyboard(callback.from_user.id, settings),
+            )
+
+    @router.callback_query(F.data.startswith("wallet:method:"))
+    async def wallet_method_selected(callback: CallbackQuery) -> None:
+        language = await safe_user_language(store, callback.from_user.id)
+        parts = callback.data.split(":", 3)
+        if len(parts) != 4:
+            await callback.answer(
+                copy(language, "វិធីទូទាត់មិនត្រឹមត្រូវទេ។", "Invalid payment method."),
+                show_alert=True,
+            )
+            return
+        _, _, payment_method_text, amount = parts
+        try:
+            payment_method = payments.require_method(payment_method_text)
+        except RuntimeError:
+            await callback.answer(
+                copy(language, "វិធីទូទាត់នេះមិនមានទេ។", "Payment method unavailable."),
+                show_alert=True,
+            )
+            return
+        await callback.answer()
+        await clear_active_screen(callback.from_user.id)
+        await delete_replaced_message(callback.message)
+        try:
+            await start_wallet_deposit(
+                callback.from_user, amount, language, payment_method
+            )
         except Exception:
             logger.exception(
                 "Could not start wallet deposit for Telegram user %s",
@@ -3112,7 +3238,9 @@ def register_handlers(
             )
             return
         try:
-            payment = await payments.check_payment(str(deposit["transaction_id"]))
+            payment = await payments.check_payment(
+                str(deposit["transaction_id"]), deposit.get("payment_provider")
+            )
             status = payment.get("status")
             if status == "paid":
                 if Decimal(str(payment.get("amount"))) != Decimal(
@@ -3272,6 +3400,7 @@ def register_handlers(
                     total,
                     wallet_balance,
                     language,
+                    payments.available_methods,
                 )
             )
         else:
@@ -3399,9 +3528,17 @@ def register_handlers(
         await callback.answer(
             copy(language, "កំពុងបង្កើតការទូទាត់...", "Creating payment...")
         )
-        _, product_id, quantity_text = callback.data.split(":")
         order = None
         try:
+            parts = callback.data.split(":")
+            if len(parts) == 4:
+                payment_method = payments.require_method(parts[1])
+                _, _, product_id, quantity_text = parts
+            elif len(parts) == 3:
+                payment_method = payments.default_method()
+                _, product_id, quantity_text = parts
+            else:
+                raise RuntimeError("Invalid payment method callback")
             product_data = await store.product(product_id)
             if not product_data:
                 raise RuntimeError("Product is no longer available")
@@ -3411,13 +3548,23 @@ def register_handlers(
             payment = await payments.create_payment(
                 str(order["total"]),
                 str(order["id"]),
+                payment_method,
             )
-            aba_deeplink = aba_mobile_deeplink(payment["qr_string"])
-            open_url = aba_mobile_redirect_url(
-                settings.app_base_url or "", str(order["id"])
+            payment_url = (
+                aba_mobile_deeplink(payment["qr_string"])
+                if payment_method == "aba"
+                else None
+            )
+            open_url = (
+                aba_mobile_redirect_url(settings.app_base_url or "", str(order["id"]))
+                if payment_method == "aba"
+                else payment.get("checkout_url")
             )
             await store.set_payment(
-                order["id"], payment["transaction_id"], aba_deeplink
+                order["id"],
+                payment["transaction_id"],
+                payment_url,
+                payment_method,
             )
         except Exception:
             logger.exception(
@@ -3446,7 +3593,9 @@ def register_handlers(
             payment_qr(payment),
             caption=caption,
             parse_mode="HTML",
-            reply_markup=payment_keyboard(str(order["id"]), open_url, language),
+            reply_markup=payment_keyboard(
+                str(order["id"]), open_url, language, payment_method
+            ),
         )
         await delete_replaced_message(callback.message)
         await track_payment_message(
@@ -3490,7 +3639,7 @@ def register_handlers(
         order_id = callback.data[7:]
         result = await (
             store.client.table("orders")
-            .select("status,transaction_id")
+            .select("status,transaction_id,payment_provider")
             .eq("id", order_id)
             .eq("chat_id", callback.from_user.id)
             .maybe_single()
@@ -3515,7 +3664,9 @@ def register_handlers(
         if data.get("transaction_id"):
             try:
                 payment_status = (
-                    await payments.check_payment(data["transaction_id"])
+                    await payments.check_payment(
+                        data["transaction_id"], data.get("payment_provider")
+                    )
                 ).get("status")
             except Exception:
                 logger.exception(
@@ -3552,7 +3703,7 @@ def register_handlers(
         try:
             result = await (
                 store.client.table("orders")
-                .select("transaction_id,chat_id,status")
+                .select("transaction_id,chat_id,status,payment_provider")
                 .eq("id", order_id)
                 .eq("chat_id", callback.from_user.id)
                 .maybe_single()
@@ -3578,7 +3729,9 @@ def register_handlers(
                     )
                 )
                 return
-            payment = await payments.check_payment(data["transaction_id"])
+            payment = await payments.check_payment(
+                data["transaction_id"], data.get("payment_provider")
+            )
             status = payment.get("status")
             if status == "paid":
                 await deliver_order(
@@ -5234,8 +5387,29 @@ def register_handlers(
                         f"⚠️ {str(exc)}\n\n{wallet_custom_amount_prompt(language)}",
                     )
                 return
+            if len(payments.available_methods) > 1:
+                await send_replacing_screen(
+                    message,
+                    message.from_user.id,
+                    copy(
+                        language,
+                        "សូមជ្រើសរើសវិធីទូទាត់សម្រាប់ការបញ្ចូលប្រាក់។",
+                        "Choose a payment method for this deposit.",
+                    ),
+                    reply_markup=wallet_payment_method_keyboard(
+                        text, payments.available_methods, language
+                    ),
+                )
+                pending_wallet_amount.discard(message.from_user.id)
+                await delete_replaced_message(message)
+                return
             try:
-                await start_wallet_deposit(message.from_user, text, language)
+                await start_wallet_deposit(
+                    message.from_user,
+                    text,
+                    language,
+                    payments.default_method(),
+                )
             except Exception:
                 logger.exception(
                     "Could not start custom wallet deposit for Telegram user %s",
@@ -5826,14 +6000,16 @@ def register_handlers(
 
 
 async def reconcile_payments(
-    bot: Bot, store: Store, payments: KHQRPayClient, settings: Settings
+    bot: Bot, store: Store, payments: KHQRPayGateway, settings: Settings
 ) -> None:
     wallet_schema_warning_logged = False
     while True:
         try:
             for order in await store.pending_orders():
                 try:
-                    payment = await payments.check_payment(order["transaction_id"])
+                    payment = await payments.check_payment(
+                        order["transaction_id"], order.get("payment_provider")
+                    )
                     status = payment.get("status")
                     if status == "paid":
                         await deliver_order(
@@ -5870,7 +6046,9 @@ async def reconcile_payments(
             wallet_schema_warning_logged = False
             for deposit in deposits:
                 try:
-                    payment = await payments.check_payment(deposit["transaction_id"])
+                    payment = await payments.check_payment(
+                        deposit["transaction_id"], deposit.get("payment_provider")
+                    )
                     status = payment.get("status")
                     if status == "paid":
                         if Decimal(str(payment.get("amount"))) != Decimal(

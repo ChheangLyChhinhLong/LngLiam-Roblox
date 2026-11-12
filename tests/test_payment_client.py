@@ -3,7 +3,12 @@ from unittest.mock import AsyncMock
 
 import httpx
 
-from app.payments import KHQRPayClient, aba_mobile_deeplink, aba_mobile_redirect_url
+from app.payments import (
+    KHQRPayClient,
+    KHQRPayGateway,
+    aba_mobile_deeplink,
+    aba_mobile_redirect_url,
+)
 
 
 def test_client_sends_bearer_api_key():
@@ -11,6 +16,63 @@ def test_client_sends_bearer_api_key():
         client = KHQRPayClient("sentinel-api-key", "https://khqrpay.site/api/v1")
         try:
             assert client._client.headers["Authorization"] == "Bearer sentinel-api-key"
+        finally:
+            await client.close()
+
+    asyncio.run(run_test())
+
+
+def test_gateway_uses_separate_keys_and_only_exposes_configured_methods():
+    async def run_test():
+        gateway = KHQRPayGateway(
+            "aba-key",
+            "bakong-key",
+            "https://khqrpay.site/api/v1",
+        )
+        try:
+            assert gateway.available_methods == ("aba", "bakong")
+            assert gateway._client_for("aba")._client.headers[
+                "Authorization"
+            ].endswith("aba-key")
+            assert gateway._client_for("bakong")._client.headers[
+                "Authorization"
+            ].endswith("bakong-key")
+            assert gateway.require_method("bakong") == "bakong"
+        finally:
+            await gateway.close()
+
+    asyncio.run(run_test())
+
+
+def test_bakong_payment_uses_its_documented_endpoint():
+    async def run_test():
+        client = KHQRPayClient(
+            "bakong-key",
+            "https://khqrpay.site/api/v1",
+            payment_method="bakong",
+        )
+        response = httpx.Response(
+            200,
+            json={
+                "ok": True,
+                "id": 847291036184,
+                "type": "bakong",
+                "amount": 5,
+                "status": "Pending",
+                "qr": "KHQR+payload/123",
+                "checkout_url": "https://khqrpay.site/pay/847291036184",
+            },
+            request=httpx.Request(
+                "POST", "https://khqrpay.site/api/v1/bakong/create"
+            ),
+        )
+        post = AsyncMock(return_value=response)
+        client._client.post = post
+        try:
+            payment = await client.create_payment("5.00", "order-456")
+            assert post.await_args.args[0] == "/bakong/create"
+            assert payment["transaction_id"] == "847291036184"
+            assert payment["checkout_url"] == "https://khqrpay.site/pay/847291036184"
         finally:
             await client.close()
 

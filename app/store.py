@@ -279,7 +279,8 @@ class Store:
         self,
         deposit_id: str,
         transaction_id: str,
-        payment_url: str,
+        payment_url: str | None,
+        payment_provider: str,
     ) -> None:
         await self.client.rpc(
             "set_wallet_deposit_payment",
@@ -287,6 +288,7 @@ class Store:
                 "p_deposit_id": deposit_id,
                 "p_transaction_id": transaction_id,
                 "p_payment_url": payment_url,
+                "p_payment_provider": payment_provider,
             },
         ).execute()
 
@@ -304,7 +306,7 @@ class Store:
     async def wallet_deposit_by_transaction(self, transaction_id: str) -> dict[str, Any] | None:
         result = await (
             self.client.table("wallet_deposits")
-            .select("id,chat_id,amount,status,transaction_id")
+            .select("id,chat_id,amount,status,transaction_id,payment_provider")
             .eq("transaction_id", transaction_id)
             .maybe_single()
             .execute()
@@ -318,7 +320,7 @@ class Store:
     ) -> dict[str, Any] | None:
         result = await (
             self.client.table("wallet_deposits")
-            .select("id,chat_id,amount,status,transaction_id")
+            .select("id,chat_id,amount,status,transaction_id,payment_provider")
             .eq("id", deposit_id)
             .eq("chat_id", telegram_id)
             .maybe_single()
@@ -329,7 +331,7 @@ class Store:
     async def pending_wallet_deposits(self) -> list[dict[str, Any]]:
         result = await (
             self.client.table("wallet_deposits")
-            .select("id,chat_id,amount,transaction_id")
+            .select("id,chat_id,amount,transaction_id,payment_provider")
             .eq("status", "pending")
             .not_.is_("transaction_id", "null")
             .execute()
@@ -549,10 +551,21 @@ class Store:
         ).execute()
         return result.data
 
-    async def set_payment(self, order_id: str, transaction_id: str, payment_url: str | None) -> None:
+    async def set_payment(
+        self,
+        order_id: str,
+        transaction_id: str,
+        payment_url: str | None,
+        payment_provider: str,
+    ) -> None:
         await self.client.rpc(
             "set_order_payment",
-            {"p_order_id": order_id, "p_transaction_id": transaction_id, "p_payment_url": payment_url},
+            {
+                "p_order_id": order_id,
+                "p_transaction_id": transaction_id,
+                "p_payment_url": payment_url,
+                "p_payment_provider": payment_provider,
+            },
         ).execute()
 
     async def pending_payment_deeplink(self, order_id: str) -> str | None:
@@ -598,7 +611,7 @@ class Store:
     async def order_by_transaction(self, transaction_id: str) -> dict[str, Any] | None:
         result = await (
             self.client.table("orders")
-            .select("id,chat_id,total,status")
+            .select("id,chat_id,total,status,payment_provider")
             .eq("transaction_id", transaction_id)
             .maybe_single()
             .execute()
@@ -611,7 +624,7 @@ class Store:
     async def pending_orders(self) -> list[dict[str, Any]]:
         result = await (
             self.client.table("orders")
-            .select("id,chat_id,transaction_id,status")
+            .select("id,chat_id,transaction_id,status,payment_provider")
             .eq("status", "pending")
             .not_.is_("transaction_id", "null")
             .execute()

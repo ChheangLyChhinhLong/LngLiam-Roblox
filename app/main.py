@@ -24,15 +24,16 @@ from app.bot import (
     schedule_welcome_media_preload,
 )
 from app.config import get_settings
-from app.payments import KHQRPayClient, verify_webhook_signature
+from app.payments import KHQRPayGateway, verify_webhook_signature
 from app.store import Store
 
 logging.basicConfig(level=logging.INFO)
 settings = get_settings()
 bot = Bot(settings.bot_token)
 dispatcher = Dispatcher()
-payments = KHQRPayClient(
-    settings.khqrpay_api_key,
+payments = KHQRPayGateway(
+    settings.khqrpay_aba_api_key,
+    settings.khqrpay_bakong_key,
     settings.khqrpay_base_url,
     settings.khqrpay_webhook_url,
 )
@@ -104,15 +105,16 @@ async def open_aba_mobile(order_id: str, request: Request) -> RedirectResponse:
 
 @app.post("/webhook/khqrpay")
 async def khqrpay_webhook(request: Request) -> dict[str, bool | str]:
-    if not settings.khqrpay_webhook_secret:
+    if not settings.khqrpay_webhook_secrets:
         raise HTTPException(
             status_code=503, detail="Webhook service is unavailable"
         )
 
     raw_body = await request.body()
     signature = request.headers.get("x-webhook-signature", "")
-    if not verify_webhook_signature(
-        raw_body, signature, settings.khqrpay_webhook_secret
+    if not any(
+        verify_webhook_signature(raw_body, signature, secret)
+        for secret in settings.khqrpay_webhook_secrets
     ):
         raise HTTPException(status_code=401, detail="Invalid webhook signature")
 
@@ -152,7 +154,9 @@ async def khqrpay_webhook(request: Request) -> dict[str, bool | str]:
             return {"received": True, "status": "deposit_already_closed"}
 
         try:
-            payment = await payments.check_payment(transaction_id)
+            payment = await payments.check_payment(
+                transaction_id, deposit.get("payment_provider")
+            )
         except Exception:
             logging.getLogger(__name__).exception("KHQRPay status verification failed for %s", transaction_id)
             raise HTTPException(status_code=503, detail="Could not verify payment") from None
@@ -179,7 +183,9 @@ async def khqrpay_webhook(request: Request) -> dict[str, bool | str]:
         return {"received": True, "status": "order_already_closed"}
 
     try:
-        payment = await payments.check_payment(transaction_id)
+        payment = await payments.check_payment(
+            transaction_id, order.get("payment_provider")
+        )
     except Exception:
         logging.getLogger(__name__).exception("KHQRPay status verification failed for %s", transaction_id)
         raise HTTPException(status_code=503, detail="Could not verify payment") from None

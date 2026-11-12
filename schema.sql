@@ -25,11 +25,13 @@ create table if not exists public.wallet_deposits (
     amount numeric(10, 2) not null check (amount >= 1 and amount <= 500),
     status text not null default 'pending' check (status in ('pending', 'paid', 'expired', 'failed')),
     transaction_id text unique,
+    payment_provider text check (payment_provider in ('aba', 'bakong')),
     payment_url text,
     message_id bigint,
     created_at timestamptz not null default now(),
     credited_at timestamptz
 );
+alter table public.wallet_deposits add column if not exists payment_provider text;
 
 create table if not exists public.broadcast_jobs (
     id uuid primary key default gen_random_uuid(),
@@ -112,6 +114,7 @@ create table if not exists public.orders (
     total numeric(10, 2) not null,
     status text not null default 'pending' check (status in ('pending', 'paid', 'expired', 'failed', 'cancelled')),
     transaction_id text unique,
+    payment_provider text check (payment_provider in ('aba', 'bakong')),
     payment_url text,
     created_at timestamptz not null default now(),
     delivery_claimed_at timestamptz,
@@ -119,6 +122,7 @@ create table if not exists public.orders (
 );
 
 alter table public.orders add column if not exists message_id bigint;
+alter table public.orders add column if not exists payment_provider text;
 
 do $$
 begin
@@ -258,10 +262,18 @@ begin
 end;
 $$;
 
-create or replace function public.set_order_payment(p_order_id uuid, p_transaction_id text, p_payment_url text)
+create or replace function public.set_order_payment(
+    p_order_id uuid,
+    p_transaction_id text,
+    p_payment_url text,
+    p_payment_provider text
+)
 returns void language plpgsql security definer set search_path = public as $$
 begin
-    update orders set transaction_id = p_transaction_id, payment_url = p_payment_url
+    update orders
+    set transaction_id = p_transaction_id,
+        payment_url = p_payment_url,
+        payment_provider = p_payment_provider
     where id = p_order_id and status = 'pending';
     if not found then raise exception 'Pending order not found'; end if;
 end;
@@ -342,12 +354,15 @@ $$;
 create or replace function public.set_wallet_deposit_payment(
     p_deposit_id uuid,
     p_transaction_id text,
-    p_payment_url text
+    p_payment_url text,
+    p_payment_provider text
 )
 returns void language plpgsql security definer set search_path = public as $$
 begin
     update wallet_deposits
-    set transaction_id = p_transaction_id, payment_url = p_payment_url
+    set transaction_id = p_transaction_id,
+        payment_url = p_payment_url,
+        payment_provider = p_payment_provider
     where id = p_deposit_id and status = 'pending';
     if not found then raise exception 'Pending wallet deposit not found'; end if;
 end;

@@ -50,7 +50,7 @@ Project នេះជា Telegram shop សម្រាប់លក់ Digital Key
 
 1. បង្កើត project ថ្មីនៅ [Supabase](https://supabase.com/) ហើយរង់ចាំ database រួចរាល់។
 2. បើក **SQL Editor → New query**។ បើក [schema.sql](schema.sql), ចម្លង SQL ទាំងមូលទៅក្នុង editor ហើយចុច **Run**។ Script នេះបង្កើត tables, indexes និង database functions ដែល bot ត្រូវការ។
-3. បើមាន database ចាស់ អាច run `schema.sql` ម្តងទៀត ដើម្បីអនុវត្តការបន្ថែម schema ដែល idempotent។ វាបន្ថែម `products.video_url`, តម្លៃ Reseller, តារាង `resellers`, wallet/deposit tables, scheduled broadcast jobs និង functions សម្រាប់បញ្ចូល/ប្រើសមតុល្យ។ `schema.sql` បង្កើតតែ tables, indexes និង functions ប៉ុណ្ណោះ មិនបញ្ចូលទិន្នន័យ Catalog ឬ Package ណាមួយទេ។ បន្ទាប់ពី run schema រួច បង្កើត Catalog និង Package តាម Telegram Admin → Catalogs។ Package ចាស់នឹងមានតម្លៃ Reseller ស្មើតម្លៃអតិថិជន រហូតដល់អ្នកកែវា។ ត្រូវ run schema ចុងក្រោយមុនប្រើមុខងារទាំងនេះ។
+3. បើមាន database ចាស់ អាច run `schema.sql` ម្តងទៀត ដើម្បីអនុវត្តការបន្ថែម schema ដែល idempotent។ វាបន្ថែម `products.video_url`, តម្លៃ Reseller, តារាង `resellers`, wallet/deposit tables, scheduled broadcast jobs, payment provider fields និង functions សម្រាប់បញ្ចូល/ប្រើសមតុល្យ។ `schema.sql` បង្កើតតែ tables, indexes និង functions ប៉ុណ្ណោះ មិនបញ្ចូលទិន្នន័យ Catalog ឬ Package ណាមួយទេ។ បន្ទាប់ពី run schema រួច បង្កើត Catalog និង Package តាម Telegram Admin → Catalogs។ Package ចាស់នឹងមានតម្លៃ Reseller ស្មើតម្លៃអតិថិជន រហូតដល់អ្នកកែវា។ ត្រូវ run schema ចុងក្រោយមុនប្រើមុខងារទាំងនេះ។
 4. បើក **Project Settings → API** រួចចម្លង Project URL និង `service_role` key ទៅ environment variables។ ប្រើ `service_role` key តែក្នុង backend/Render ប៉ុណ្ណោះ។
 5. ទុក Row Level Security (RLS) ឲ្យបើក។ កុំបង្កើត public policies សម្រាប់ stock ឬ orders។
 
@@ -74,10 +74,13 @@ notepad .env
 | `SUPABASE_URL` | ចាំបាច់ | Project URL ពី Supabase។ |
 | `SUPABASE_SERVICE_ROLE_KEY` | ចាំបាច់ | `service_role` API key; រក្សាសម្ងាត់។ |
 | `STOCK_ENCRYPTION_KEY` | ចាំបាច់ | Fernet key សម្រាប់ encrypt Digital Key/Code។ បង្កើតម្តង ហើយរក្សាទុកឲ្យបានល្អ។ |
-| `KHQRPAY_API_KEY` | ចាំបាច់ | ABA API key ពី [KHQRPay Dashboard](https://khqrpay.site/dashboard)។ |
+| `KHQRPAY_ABA_KEY` | ស្រេចចិត្ត | ABA API key ពី [KHQRPay Dashboard](https://khqrpay.site/dashboard)។ ចាំបាច់ប្រសិនបើបង់តាម ABA។ |
+| `KHQRPAY_BAKONG_KEY` | ស្រេចចិត្ត | Bakong API key ពី KHQRPay Dashboard។ ចាំបាច់ប្រសិនបើបង់តាម Bakong។ ត្រូវកំណត់ key យ៉ាងហោចណាស់មួយក្នុង ABA/Bakong។ |
 | `KHQRPAY_BASE_URL` | មាន default | `https://khqrpay.site/api/v1`។ |
 | `KHQRPAY_WEBHOOK_URL` | ស្រេចចិត្ត | URL សាធារណៈ HTTPS ដូចជា `https://YOUR-SERVICE.onrender.com/webhook/khqrpay`។ |
-| `KHQRPAY_WEBHOOK_SECRET` | ស្រេចចិត្ត | Webhook secret ដែលកំណត់សម្រាប់ ABA API key ក្នុង KHQRPay Dashboard។ ចាំបាច់បើប្រើ webhook។ |
+| `KHQRPAY_ABA_WEBHOOK_SECRET` | ស្រេចចិត្ត | Webhook secret របស់ ABA key។ ចាំបាច់បើប្រើ webhook សម្រាប់ ABA។ |
+| `KHQRPAY_BAKONG_WEBHOOK_SECRET` | ស្រេចចិត្ត | Webhook secret របស់ Bakong key។ ចាំបាច់បើប្រើ webhook សម្រាប់ Bakong។ |
+| `KHQRPAY_WEBHOOK_SECRET` | ស្រេចចិត្ត | Secret រួម/legacy; អាចប្រើដដែល ប្រសិនបើទាំងពីរ key ប្រើ secret ដូចគ្នា។ |
 | `PUBLIC_BASE_URL` | សម្រាប់ ABA link | URL HTTPS សាធារណៈរបស់ Render ដោយមិនបញ្ចូល path។ |
 | `CLOUDINARY_CLOUD_NAME` | ស្រេចចិត្ត | Cloud name; ត្រូវបំពេញជាមួយ API key/secret ប្រសិនបើប្រើរូបភាព ឬវីដេអូ Package។ |
 | `CLOUDINARY_API_KEY` | ស្រេចចិត្ត | Cloudinary API key។ |
@@ -257,7 +260,7 @@ git push origin main
 1. ចូល [Render Dashboard](https://dashboard.render.com/) ហើយជ្រើស **New → Blueprint**។
 2. ភ្ជាប់ GitHub account បើមិនទាន់ភ្ជាប់, ជ្រើស repository `PU_MMO169_Sale_Mod` និង branch `main`។ សូមមើល [Render Blueprints guide](https://render.com/docs/infrastructure-as-code) បើត្រូវការជំនួយក្នុងជំហានភ្ជាប់ repository។
 3. Render រកឃើញ `render.yaml` នៅ project root. ពិនិត្យ configuration ហើយចុច **Deploy Blueprint**។ Blueprint កំណត់ Python web service, build/start command, health check `/health` និង `numInstances: 1`។
-4. នៅពេល Render ស្នើ environment variables សូមបញ្ចូល secrets ពិតតាមតារាងក្នុងផ្នែកទី 3។ តម្លៃចាំបាច់យ៉ាងហោចណាស់មាន `BOT_TOKEN`, `TELEGRAM_ADMIN_IDS`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `KHQRPAY_API_KEY` និង `STOCK_ENCRYPTION_KEY`។ កុំប្រើតម្លៃឧទាហរណ៍ក្នុង `.env.example` ជា production secrets។
+4. នៅពេល Render ស្នើ environment variables សូមបញ្ចូល secrets ពិតតាមតារាងក្នុងផ្នែកទី 3។ តម្លៃចាំបាច់យ៉ាងហោចណាស់មាន `BOT_TOKEN`, `TELEGRAM_ADMIN_IDS`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, key មួយក្នុងចំណោម `KHQRPAY_ABA_KEY`/`KHQRPAY_BAKONG_KEY` និង `STOCK_ENCRYPTION_KEY`។ កុំប្រើតម្លៃឧទាហរណ៍ក្នុង `.env.example` ជា production secrets។
 5. កំណែ Python ត្រូវបានកំណត់ដោយ `.python-version` (`3.13`)។ Render អនុវត្តកំណែនេះ ហើយប្រើ patch release ចុងក្រោយដែលមានសម្រាប់ Python 3.13។ មើល [Render Python version guide](https://render.com/docs/python-version)។
 6. បើប្រើ media Package ត្រូវបន្ថែម `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY` និង `CLOUDINARY_API_SECRET` នៅ Render **Environment**។ `PUBLIC_BASE_URL` ក៏ត្រូវបញ្ចូលក្រោយទទួលបាន service URL ដែរ។ Support, Join group និង notification destinations អាចកំណត់ក្នុង Telegram តាម **Admin → Settings**។
 7. រង់ចាំ deploy ជោគជ័យ។ ក្នុង service **Settings/Overview** ចម្លង URL HTTPS ដែល Render ផ្ដល់ឲ្យ (`https://YOUR-SERVICE.onrender.com`)។
@@ -270,7 +273,7 @@ KHQRPAY_WEBHOOK_URL=https://YOUR-SERVICE.onrender.com/webhook/khqrpay
 
 ចុច **Save, rebuild, and deploy** (ឬប៊ូតុង deploy ដែល Render បង្ហាញ)។ បន្ទាប់ពី commit/push ទៅ `main` Render នឹង deploy commit ថ្មីដោយស្វ័យប្រវត្តិតាមការកំណត់ auto-deploy។
 9. បើក `https://YOUR-SERVICE.onrender.com/health`។ លទ្ធផលដែលរំពឹងទុកគឺ `{"status":"ok"}`. ពិនិត្យ Render **Logs** និងសាកល្បង bot ក្នុង Telegram; `/health` បញ្ជាក់ web service ឆ្លើយតបប៉ុណ្ណោះ មិនធានាថា Supabase, Telegram polling ឬ KHQRPay ដំណើរការត្រឹមត្រូវទាំងអស់ទេ។
-10. កំណត់ KHQRPay តាមផ្នែកទី 8។ បើប្រើ webhook ត្រូវដាក់ `KHQRPAY_WEBHOOK_SECRET` ក្នុង Render **Environment** និង deploy ឡើងវិញ។
+10. កំណត់ KHQRPay តាមផ្នែកទី 8។ បើប្រើ webhook ត្រូវដាក់ secret តាម key ក្នុង Render **Environment** និង deploy ឡើងវិញ។
 
 កុំបង្កើត Render instances ច្រើនជាងមួយ ខណៈ bot ប្រើ Telegram long polling ព្រោះ instances ច្រើនអាចប៉ះទង្គិចគ្នា។ ក្រោយ deployment លើកដំបូង សូមពិនិត្យ Render Logs ម្តងទៀត ដើម្បីប្រាកដថាមិនមាន database/schema error។
 
@@ -278,10 +281,12 @@ KHQRPAY_WEBHOOK_URL=https://YOUR-SERVICE.onrender.com/webhook/khqrpay
 
 មុនប្ដូរ provider សូមដោះស្រាយ ឬត្រួតពិនិត្យ payment ចាស់ៗដែលនៅ pending ជាមុន។ Payment ID មកពី provider មួយមិនអាចយកទៅសួរ provider ថ្មីបានទេ; កុំបញ្ចេញ stock ឬបញ្ចូល wallet ដោយសន្មត់ថាបានទូទាត់។
 
-1. ចូល [KHQRPay Dashboard](https://khqrpay.site/dashboard), បង្កើត **ABA key**, ហើយកំណត់ ABA static PayWay link របស់អ្នក។ ដាក់ key ជា `KHQRPAY_API_KEY` ក្នុង `.env` ឬ Render Environment.
-2. កំណត់ `KHQRPAY_BASE_URL=https://khqrpay.site/api/v1`។ Bot បង្កើត ABA KHQR តាម `POST /aba/create` ហើយពិនិត្យស្ថានភាពតាម `GET /payment?id=...`។ មើល [ABA API docs](https://khqrpay.site/aba), [status docs](https://khqrpay.site/status) និង [errors](https://khqrpay.site/errors)។
+បើមាន database ចាស់ សូម run [schema.sql](schema.sql) ចុងក្រោយក្នុង Supabase SQL Editor មុន deploy ដើម្បីរក្សាទុកប្រភេទ ABA/Bakong របស់ payment នីមួយៗ និងប្រើ API key ត្រឹមត្រូវពេលពិនិត្យស្ថានភាព។
+
+1. ចូល [KHQRPay Dashboard](https://khqrpay.site/dashboard) ហើយបង្កើត key មួយ ឬទាំងពីរ៖ **ABA key** ជាមួយ ABA static PayWay link ដាក់ជា `KHQRPAY_ABA_KEY`; **Bakong key** ដាក់ជា `KHQRPAY_BAKONG_KEY` ក្នុង `.env` ឬ Render Environment។ ប្រសិនបើកំណត់ key ទាំងពីរ អ្នកទិញអាចជ្រើស ABA ឬ Bakong នៅពេលទូទាត់។ បើមានតែ key មួយ bot ប្រើវិធីនោះដោយស្វ័យប្រវត្តិ។
+2. កំណត់ `KHQRPAY_BASE_URL=https://khqrpay.site/api/v1`។ Bot ប្រើ `POST /aba/create` ឬ `POST /bakong/create` ជាមួយ key តាមវិធីដែលបានជ្រើស ហើយពិនិត្យស្ថានភាពតាម `GET /payment?id=...`។ មើល [ABA API docs](https://khqrpay.site/aba), [Bakong API docs](https://khqrpay.site/bakong), [status docs](https://khqrpay.site/status) និង [errors](https://khqrpay.site/errors)។
 3. អាចទុក webhook មិនកំណត់បាន; bot នឹងពិនិត្យតាម `POLL_INTERVAL_SECONDS`។ បើប្រើ webhook សូមកំណត់ `KHQRPAY_WEBHOOK_URL` ជា URL សាធារណៈ HTTPS ដូចជា `https://YOUR-SERVICE.onrender.com/webhook/khqrpay`។ Bot នឹងបញ្ជូន URL នេះពេលបង្កើត QR។
-4. ក្នុងការកំណត់ ABA key នៅ Dashboard កំណត់ webhook secret (បើ Dashboard បង្ហាញជម្រើសនេះ)។ ដាក់ secret ដូចគ្នាជា `KHQRPAY_WEBHOOK_SECRET` ក្នុង Environment ហើយ redeploy។ មើល [webhook docs](https://khqrpay.site/webhooks)។
+4. ក្នុង Dashboard កំណត់ webhook secret សម្រាប់ key នីមួយៗ (បើប្រើ) ហើយដាក់ជា `KHQRPAY_ABA_WEBHOOK_SECRET` និង/ឬ `KHQRPAY_BAKONG_WEBHOOK_SECRET`។ បើ key ទាំងពីរប្រើ secret ដូចគ្នា អាចប្រើ `KHQRPAY_WEBHOOK_SECRET`។ មើល [webhook docs](https://khqrpay.site/webhooks)។
 
 KHQRPay ផ្ញើ `payment.update` ដែលមាន `id`, `status` និង `amount`។ Bot ផ្ទៀងផ្ទាត់ signature HMAC-SHA256 លើ raw body ហើយសួរ KHQRPay API ម្តងទៀត ដើម្បីផ្ទៀងផ្ទាត់ status និង amount មុនបញ្ចូលសមតុល្យ ឬប្រគល់ stock។ Webhook មិនចាំបាច់ register ដាច់ដោយឡែកទេ។ កុំប្រើ browser redirect ជាភស្តុតាងទូទាត់។
 
@@ -332,7 +337,7 @@ Admin panel អាចបន្ថែម/កែ Catalog និង Package, បិ
 | Import stock មិនជោគជ័យ | ពិនិត្យ Product UUID, file UTF-8, format មួយ Digital Key/Code ក្នុងមួយបន្ទាត់ និង encryption key។ |
 | រូបភាព/វីដេអូមិន upload ឬមិនបង្ហាញ | បំពេញ Cloudinary variables ទាំងបី, ពិនិត្យ `CLOUDINARY_CLOUD_NAME`, API key/secret នៅ local/Render និង run schema ចុងក្រោយដែលមាន `products.video_url`។ |
 | KHQRPay checkout បរាជ័យ | ពិនិត្យ ABA API key, `KHQRPAY_BASE_URL`, ABA static PayWay link ក្នុង Dashboard និង Render Logs។ |
-| Webhook បាន `401` | ពិនិត្យថា `KHQRPAY_WEBHOOK_SECRET` ត្រូវនឹង secret ដែលកំណត់សម្រាប់ ABA key ហើយ redeploy បន្ទាប់ពី update។ |
+| Webhook បាន `401` | ពិនិត្យថា webhook secret សម្រាប់ ABA/Bakong key ត្រូវនឹង secret ក្នុង KHQRPay Dashboard ហើយ redeploy បន្ទាប់ពី update។ |
 | ABA button មិនដំណើរការ | `PUBLIC_BASE_URL` ត្រូវជា public HTTPS URL របស់ Render ដោយគ្មាន path; ពិនិត្យថា order នៅ pending។ |
 | Health check មិនឆ្លើយ | សាកល្បង `/health`, ពិនិត្យ Render Logs និង environment variables ចាំបាច់។ |
 

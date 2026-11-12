@@ -15,11 +15,17 @@ services:
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
-      - key: KHQRPAY_API_KEY
+      - key: KHQRPAY_ABA_KEY
+        sync: false
+      - key: KHQRPAY_BAKONG_KEY
         sync: false
       - key: KHQRPAY_BASE_URL
         value: https://khqrpay.site/api/v1
       - key: KHQRPAY_WEBHOOK_SECRET
+        sync: false
+      - key: KHQRPAY_ABA_WEBHOOK_SECRET
+        sync: false
+      - key: KHQRPAY_BAKONG_WEBHOOK_SECRET
         sync: false
       - key: KHQRPAY_WEBHOOK_URL
         sync: false

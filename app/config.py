@@ -1,6 +1,7 @@
 from functools import lru_cache
 from urllib.parse import urlsplit
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -14,14 +15,42 @@ class Settings(BaseSettings):
     cloudinary_cloud_name: str = ""
     cloudinary_api_key: str = ""
     cloudinary_api_secret: str = ""
-    khqrpay_api_key: str
+    khqrpay_aba_key: str = ""
+    khqrpay_bakong_key: str = ""
+    khqrpay_api_key: str = ""
     khqrpay_base_url: str = "https://khqrpay.site/api/v1"
     khqrpay_webhook_secret: str = ""
+    khqrpay_aba_webhook_secret: str = ""
+    khqrpay_bakong_webhook_secret: str = ""
     khqrpay_webhook_url: str = ""
     public_base_url: str = ""
     stock_encryption_key: str
     poll_interval_seconds: int = 20
     port: int = 10000
+
+    @model_validator(mode="after")
+    def require_khqrpay_key(self) -> "Settings":
+        if not (self.khqrpay_aba_api_key or self.khqrpay_bakong_key.strip()):
+            raise ValueError(
+                "Configure KHQRPAY_ABA_KEY or KHQRPAY_BAKONG_KEY"
+            )
+        return self
+
+    @property
+    def khqrpay_aba_api_key(self) -> str:
+        return self.khqrpay_aba_key.strip() or self.khqrpay_api_key.strip()
+
+    @property
+    def khqrpay_webhook_secrets(self) -> tuple[str, ...]:
+        return tuple(
+            secret.strip()
+            for secret in (
+                self.khqrpay_aba_webhook_secret,
+                self.khqrpay_bakong_webhook_secret,
+                self.khqrpay_webhook_secret,
+            )
+            if secret.strip()
+        )
 
     @property
     def admin_ids(self) -> set[int]:

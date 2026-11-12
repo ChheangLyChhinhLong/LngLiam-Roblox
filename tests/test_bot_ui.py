@@ -56,6 +56,7 @@ from app.bot import (
     welcome_text,
     wallet_error_message,
     wallet_deposit_keyboard,
+    wallet_payment_method_keyboard,
 )
 import app.bot as bot_module
 
@@ -620,7 +621,9 @@ def test_checkout_payment_buttons_show_balance_only_when_it_covers_the_total():
         Decimal("0.00"),
         "en",
     )
-    assert [row[0].callback_data for row in no_balance_rows] == ["b:product-123:1"]
+    assert [row[0].callback_data for row in no_balance_rows] == [
+        "b:aba:product-123:1"
+    ]
     assert "Pay via ABA" in no_balance_rows[0][0].text
 
     funded_rows = checkout_payment_rows(
@@ -632,10 +635,28 @@ def test_checkout_payment_buttons_show_balance_only_when_it_covers_the_total():
     )
     assert [row[0].callback_data for row in funded_rows] == [
         "bw:product-123:1",
-        "b:product-123:1",
+        "b:aba:product-123:1",
     ]
     assert "Pay via balance" in funded_rows[0][0].text
     assert "Pay via ABA" in funded_rows[1][0].text
+
+
+def test_checkout_payment_buttons_offer_each_configured_khqrpay_key():
+    rows = checkout_payment_rows(
+        "product-123",
+        1,
+        Decimal("1.18"),
+        Decimal("0.00"),
+        "en",
+        ("aba", "bakong"),
+    )
+
+    assert [row[0].callback_data for row in rows] == [
+        "b:aba:product-123:1",
+        "b:bakong:product-123:1",
+    ]
+    assert ["ABA" in row[0].text for row in rows] == [True, False]
+    assert ["Bakong" in row[0].text for row in rows] == [False, True]
 
 
 def test_parse_stock_add_accepts_comma_and_newline_separated_codes():
@@ -685,6 +706,15 @@ def test_wallet_deposit_keyboard_has_presets_custom_and_back():
         ["$15", "$20", "$50"],
         ["✏️ Custom amount"],
         ["⬅️ Back"],
+    ]
+
+
+def test_wallet_payment_method_keyboard_keeps_amount_and_provider_in_callback():
+    markup = wallet_payment_method_keyboard("12.50", ("aba", "bakong"), "en")
+
+    assert [row[0].callback_data for row in markup.inline_keyboard[:2]] == [
+        "wallet:method:aba:12.50",
+        "wallet:method:bakong:12.50",
     ]
 
 
@@ -1050,6 +1080,21 @@ def test_khqr_payment_keyboard_supports_english():
         "🏦 Open in ABA Mobile",
         "✅ I have paid · Check",
     ]
+
+
+def test_bakong_payment_keyboard_links_to_checkout_page():
+    markup = payment_keyboard(
+        "order-123",
+        "https://khqrpay.site/pay/847291036184",
+        "en",
+        "bakong",
+    )
+
+    assert [row[0].text for row in markup.inline_keyboard] == [
+        "🔗 Open payment page",
+        "✅ I have paid · Check",
+    ]
+    assert markup.inline_keyboard[0][0].url == "https://khqrpay.site/pay/847291036184"
 
 
 def test_payment_caption_matches_requested_html_layout_and_escapes_data():
