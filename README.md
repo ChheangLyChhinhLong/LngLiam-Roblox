@@ -206,7 +206,7 @@ Script អាន `.env` ពី project root។ វាត្រូវការ `S
 ```sql
 insert into public.bot_settings (key, value)
 values
-    ('how_to_buy_video_url', 'https://t.me/PU_MMO169/704'),
+    ('how_to_buy_video_url', 'how_to_buy_video_url'),
     ('how_to_buy_caption_km', 'ការណែនាំអំពីរបៀបទិញ'),
     ('how_to_buy_caption_en', 'How to buy tutorial')
 on conflict (key) do update set value = excluded.value;

@@ -443,8 +443,7 @@ def test_copy_broadcast_content_uses_each_telegram_post_source_in_order():
 
         assert copied == [101, 102, 103]
         assert [
-            call.kwargs["from_chat_id"]
-            for call in bot.copy_messages.await_args_list
+            call.kwargs["from_chat_id"] for call in bot.copy_messages.await_args_list
         ] == [999, "@shop_channel", 999]
 
     asyncio.run(run_test())
@@ -823,9 +822,7 @@ def test_checkout_payment_buttons_show_balance_only_when_it_covers_the_total():
         Decimal("0.00"),
         "en",
     )
-    assert [row[0].callback_data for row in no_balance_rows] == [
-        "b:aba:product-123:1"
-    ]
+    assert [row[0].callback_data for row in no_balance_rows] == ["b:aba:product-123:1"]
     assert "Pay via ABA" in no_balance_rows[0][0].text
 
     funded_rows = checkout_payment_rows(
@@ -1451,8 +1448,7 @@ def test_request_admin_media_uses_direct_telegram_copy_without_mode_buttons():
 
         markup = prompt.edit_text.await_args.kwargs["reply_markup"]
         assert [
-            [button.callback_data for button in row]
-            for row in markup.inline_keyboard
+            [button.callback_data for button in row] for row in markup.inline_keyboard
         ] == [["admin:settings:section:media"]]
         assert "Cloudinary" in prompt.edit_text.await_args.args[0]
 
@@ -1524,8 +1520,7 @@ def test_admin_media_uploads_file_to_cloudinary_and_saves_secure_url(monkeypatch
         ]
         markup = screen.edit_text.await_args.kwargs["reply_markup"]
         assert [
-            [button.callback_data for button in row]
-            for row in markup.inline_keyboard
+            [button.callback_data for button in row] for row in markup.inline_keyboard
         ] == [["admin:media-save"], ["admin:media-cancel"]]
         assert "Cloudinary" in screen.edit_text.await_args.args[0]
 
@@ -1594,7 +1589,7 @@ def test_tutorial_post_link_is_saved_as_plain_url():
             for handler in bot_module.router.message.handlers
             if handler.callback.__name__ == "receive_admin_input"
         ][-1]
-        post_link = "https://t.me/PU_MMO169/704"
+        post_link = "how_to_buy_video_url"
         message = SimpleNamespace(
             from_user=SimpleNamespace(id=user_id),
             chat=SimpleNamespace(id=user_id),
@@ -1788,7 +1783,9 @@ def test_package_wizard_uploads_package_media_to_cloudinary(monkeypatch):
             resource_type="auto",
             file_name="image-201",
         )
-        assert bot_module.admin_wizards[user_id]["values"]["media_url"] == cloudinary_url
+        assert (
+            bot_module.admin_wizards[user_id]["values"]["media_url"] == cloudinary_url
+        )
         assert bot_module.admin_wizards[user_id]["values"]["media_type"] == "image"
         assert "telegram_media_items" not in bot_module.admin_wizards[user_id]
 
@@ -1885,9 +1882,7 @@ def test_how_to_buy_reports_when_telegram_source_message_is_unavailable():
         )
         store = SimpleNamespace(
             user_language=AsyncMock(return_value="en"),
-            bot_settings=AsyncMock(
-                return_value={"how_to_buy_video_url": reference}
-            ),
+            bot_settings=AsyncMock(return_value={"how_to_buy_video_url": reference}),
         )
         register_handlers(
             SimpleNamespace(include_router=Mock()),
@@ -1915,7 +1910,7 @@ def test_how_to_buy_reports_when_telegram_source_message_is_unavailable():
 def test_how_to_buy_falls_back_to_clickable_link_when_telegram_copy_fails():
     async def run_test():
         user_id = 7654322
-        post_link = "https://t.me/PU_MMO169/704"
+        post_link = "how_to_buy_video_url"
         message = SimpleNamespace(
             chat=SimpleNamespace(id=user_id),
             from_user=SimpleNamespace(id=user_id),
@@ -1934,9 +1929,7 @@ def test_how_to_buy_falls_back_to_clickable_link_when_telegram_copy_fails():
         )
         store = SimpleNamespace(
             user_language=AsyncMock(return_value="en"),
-            bot_settings=AsyncMock(
-                return_value={"how_to_buy_video_url": post_link}
-            ),
+            bot_settings=AsyncMock(return_value={"how_to_buy_video_url": post_link}),
         )
         register_handlers(
             SimpleNamespace(include_router=Mock()),
@@ -1958,7 +1951,9 @@ def test_how_to_buy_falls_back_to_clickable_link_when_telegram_copy_fails():
         assert message.answer.await_args.kwargs["parse_mode"] == "HTML"
         assert post_link in message.answer.await_args.args[0]
         assert "Open the tutorial in Telegram" in message.answer.await_args.args[0]
-        assert "Could not copy the tutorial media" not in message.answer.await_args.args[0]
+        assert (
+            "Could not copy the tutorial media" not in message.answer.await_args.args[0]
+        )
 
         bot_module.user_language_cache.pop(user_id, None)
 
@@ -1986,7 +1981,7 @@ def test_how_to_buy_copies_raw_telegram_post_link_from_supabase():
         store = SimpleNamespace(
             user_language=AsyncMock(return_value="en"),
             bot_settings=AsyncMock(
-                return_value={"how_to_buy_video_url": "https://t.me/PU_MMO169/704"}
+                return_value={"how_to_buy_video_url": "how_to_buy_video_url"}
             ),
         )
         register_handlers(
@@ -2056,9 +2051,7 @@ def test_inline_keyboard_styles_every_button_by_action():
     markup = bot_module.keyboard(
         [
             [
-                bot_module.InlineKeyboardButton(
-                    text="Browse", callback_data="shop"
-                ),
+                bot_module.InlineKeyboardButton(text="Browse", callback_data="shop"),
                 bot_module.InlineKeyboardButton(
                     text="Save", callback_data="admin:wizard-save"
                 ),
@@ -3227,7 +3220,9 @@ def test_stock_notification_reaches_users_and_configured_chats_once():
         assert "Newly added: <b>4</b>" in bot.send_message.await_args_list[0].args[1]
         assert "ទំនិញ៖ <b>VPN</b>" in bot.send_message.await_args_list[1].args[1]
         assert "កញ្ចប់៖ <b>Robux</b>" in bot.send_message.await_args_list[1].args[1]
-        assert "ចំនួនបន្ថែមថ្មី៖ <b>4</b>" in bot.send_message.await_args_list[1].args[1]
+        assert (
+            "ចំនួនបន្ថែមថ្មី៖ <b>4</b>" in bot.send_message.await_args_list[1].args[1]
+        )
         assert "Newly added: <b>4</b>" in bot.send_message.await_args_list[2].args[1]
         assert bot.send_message.await_args_list[0].kwargs["parse_mode"] == "HTML"
         button = (
