@@ -10,6 +10,7 @@ from aiogram.exceptions import TelegramBadRequest
 from app.bot import (
     admin_category_actions,
     admin_product_actions,
+    account_keyboard,
     account_text,
     broadcast_destinations,
     broadcast_draft_keyboard,
@@ -589,10 +590,12 @@ def test_welcome_sends_the_new_shop_keyboard_and_saves_profile():
             "💰 Add funds",
         ]
         assert sent_markup.keyboard[1][0].text == "🛍 Digital Products"
-        assert [button.text for button in sent_markup.keyboard[2]] == [
-            "🛒 My Orders",
-            "🎥 How to Buy",
-        ]
+        assert len(sent_markup.keyboard) == 2
+        assert all(
+            button.text not in {"🛒 My Orders", "🎥 How to Buy", "🔗 Join Group"}
+            for row in sent_markup.keyboard
+            for button in row
+        )
         assert all(
             "Roblox" not in button.text
             for row in sent_markup.keyboard
@@ -879,9 +882,21 @@ def test_admin_welcome_keyboard_includes_admin_access_and_store_actions():
     assert rows[0] == ["⚙️ ADMIN"]
     assert rows[1] == ["👤 Account", "💰 Add funds"]
     assert rows[2] == ["🛍 Digital Products"]
-    assert rows[3] == ["🛒 My Orders", "🎥 How to Buy"]
-    assert rows[4] == ["🔗 Join Group"]
     assert all("Roblox" not in button for row in rows for button in row)
+
+
+def test_account_keyboard_contains_moved_actions_and_existing_account_actions():
+    markup = account_keyboard("en")
+
+    assert [
+        [(button.text, button.callback_data) for button in row]
+        for row in markup.inline_keyboard
+    ] == [
+        [("🛒 My Orders", "history"), ("🎥 How to Buy", "how_to_buy")],
+        [("🔗 Join Group", "join_group")],
+        [("🌐 Language", "language"), ("💬 Support", "support")],
+        [("💰 Add funds", "wallet:add")],
+    ]
 
 
 def test_wallet_deposit_keyboard_has_presets_custom_and_back():

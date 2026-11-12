@@ -1286,14 +1286,48 @@ def welcome_keyboard(user_id: int, settings: Settings) -> ReplyKeyboardMarkup:
                 KeyboardButton(text="💰 Add funds", style="success"),
             ],
             [KeyboardButton(text="🛍 Digital Products", style="primary")],
-            [
-                KeyboardButton(text="🛒 My Orders", style="primary"),
-                KeyboardButton(text="🎥 How to Buy", style="primary"),
-            ],
-            [KeyboardButton(text="🔗 Join Group", style="primary")],
         ]
     )
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, is_persistent=True)
+
+
+def account_keyboard(language: str = "km") -> InlineKeyboardMarkup:
+    return keyboard(
+        [
+            [
+                InlineKeyboardButton(
+                    text=copy(language, "🛒 ការបញ្ជាទិញរបស់ខ្ញុំ", "🛒 My Orders"),
+                    callback_data="history",
+                ),
+                InlineKeyboardButton(
+                    text=copy(language, "🎥 របៀបទិញ", "🎥 How to Buy"),
+                    callback_data="how_to_buy",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text=copy(language, "🔗 ចូល Group", "🔗 Join Group"),
+                    callback_data="join_group",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=copy(language, "🌐 ភាសា", "🌐 Language"),
+                    callback_data="language",
+                ),
+                InlineKeyboardButton(
+                    text=copy(language, "💬 ជំនួយ", "💬 Support"),
+                    callback_data="support",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text=copy(language, "💰 បញ្ចូលប្រាក់", "💰 Add funds"),
+                    callback_data="wallet:add",
+                )
+            ],
+        ]
+    )
 
 
 def back_button(
@@ -3042,26 +3076,7 @@ def register_handlers(
                 user.id,
                 account_text(user, balance, language, is_reseller),
                 parse_mode="HTML",
-                reply_markup=keyboard(
-                    [
-                        [
-                            InlineKeyboardButton(
-                                text=copy(language, "🌐 ភាសា", "🌐 Language"),
-                                callback_data="language",
-                            ),
-                            InlineKeyboardButton(
-                                text=copy(language, "💬 ជំនួយ", "💬 Support"),
-                                callback_data="support",
-                            ),
-                        ],
-                        [
-                            InlineKeyboardButton(
-                                text=copy(language, "💰 បញ្ចូលប្រាក់", "💰 Add funds"),
-                                callback_data="wallet:add",
-                            )
-                        ],
-                    ]
-                ),
+                reply_markup=account_keyboard(language),
             )
         elif action in {"💰 add funds", "add funds"}:
             pending_wallet_amount.discard(user.id)
@@ -3641,6 +3656,15 @@ def register_handlers(
         await callback.answer()
         language = await safe_user_language(store, callback.from_user.id)
         await show_how_to_buy(callback.message, language)
+        await delete_replaced_message(callback.message)
+
+    @router.callback_query(F.data == "join_group")
+    async def join_group(callback: CallbackQuery) -> None:
+        await callback.answer()
+        language = await safe_user_language(store, callback.from_user.id)
+        await show_customer_action(
+            callback.message, callback.from_user, "join group", language
+        )
         await delete_replaced_message(callback.message)
 
     @router.callback_query(F.data == "wallet:add")
@@ -5889,6 +5913,8 @@ def register_handlers(
             "orders",
             "🎥 how to buy",
             "how to buy",
+            "🔗 join group",
+            "join group",
         }
         if (
             message.from_user.id in pending_wallet_amount
