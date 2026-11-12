@@ -2,6 +2,7 @@ import asyncio
 import base64
 import html
 import io
+import json
 import logging
 import re
 from collections.abc import Awaitable, Callable
@@ -47,7 +48,7 @@ class InputValidationError(ValueError):
 
 pending_stock_upload: dict[int, str] = {}
 pending_admin_input: dict[int, tuple[str, str | None]] = {}
-pending_admin_media: dict[int, str] = {}
+pending_admin_media: dict[int, dict[str, Any]] = {}
 pending_wallet_amount: set[int] = set()
 admin_wizards: dict[int, dict[str, Any]] = {}
 broadcast_drafts: dict[int, dict[str, Any]] = {}
@@ -55,6 +56,7 @@ broadcast_cancel_events: dict[str, asyncio.Event] = {}
 broadcast_tasks: dict[str, asyncio.Task[None]] = {}
 broadcast_active_keys: dict[int, str] = {}
 welcome_message_ids: dict[int, int] = {}
+active_screen_auxiliary_message_ids: dict[int, list[int]] = {}
 menu_keyboard_messages: dict[int, Message] = {}
 active_screen_messages: dict[int, Message] = {}
 user_language_cache: dict[int, str] = {}
@@ -218,6 +220,76 @@ def parse_telegram_post_link(text: str) -> tuple[int | str, int] | None:
     return f"@{parts[0]}", message_id
 
 
+TELEGRAM_CONTENT_PREFIX = "telegram-content:"
+
+
+def encode_telegram_content_reference(content: list[dict[str, Any]]) -> str:
+    if not content:
+        raise ValueError("Telegram content must contain at least one message")
+    source_chat_id = content[0].get("source_chat_id")
+    message_ids = [int(content[0]["message_id"])]
+    media_group_id = content[0].get("media_group_id")
+    for item in content[1:]:
+        if (
+            item.get("source_chat_id") != source_chat_id
+            or not media_group_id
+            or item.get("media_group_id") != media_group_id
+        ):
+            raise ValueError("Send one Telegram message or one album per setting")
+        message_ids.append(int(item["message_id"]))
+    if source_chat_id is None or any(message_id <= 0 for message_id in message_ids):
+        raise ValueError("Invalid Telegram message reference")
+    return TELEGRAM_CONTENT_PREFIX + json.dumps(
+        {"source_chat_id": source_chat_id, "message_ids": message_ids},
+        separators=(",", ":"),
+    )
+
+
+def decode_telegram_content_reference(
+    value: str | None,
+) -> tuple[int | str, list[int]] | None:
+    if not value or not value.startswith(TELEGRAM_CONTENT_PREFIX):
+        return None
+    try:
+        payload = json.loads(value.removeprefix(TELEGRAM_CONTENT_PREFIX))
+        source_chat_id = payload["source_chat_id"]
+        message_ids = payload["message_ids"]
+    except (KeyError, TypeError, json.JSONDecodeError) as exc:
+        raise ValueError("Invalid stored Telegram content reference") from exc
+    if (
+        not isinstance(source_chat_id, (int, str))
+        or isinstance(source_chat_id, bool)
+        or (isinstance(source_chat_id, str) and not source_chat_id)
+        or not isinstance(message_ids, list)
+        or not message_ids
+        or len(message_ids) > 100
+        or any(
+            not isinstance(message_id, int)
+            or isinstance(message_id, bool)
+            or message_id <= 0
+            for message_id in message_ids
+        )
+    ):
+        raise ValueError("Invalid stored Telegram content reference")
+    return source_chat_id, message_ids
+
+
+def telegram_content_item(message: Message) -> dict[str, Any]:
+    post_link = parse_telegram_post_link(message.text or "")
+    if post_link:
+        source_chat_id, message_id = post_link
+        return {
+            "message_id": message_id,
+            "media_group_id": None,
+            "source_chat_id": source_chat_id,
+        }
+    return {
+        "message_id": message.message_id,
+        "media_group_id": message.media_group_id,
+        "source_chat_id": message.chat.id,
+    }
+
+
 def paginate(items: list[Any], page: int) -> tuple[list[Any], int, int]:
     page_count = max(1, (len(items) + CATALOG_PAGE_SIZE - 1) // CATALOG_PAGE_SIZE)
     page = max(0, min(page, page_count - 1))
@@ -286,6 +358,14 @@ async def delete_replaced_message(message: Message) -> None:
         logger.debug("Could not delete replaced message %s", message.message_id)
 
 
+async def delete_active_screen_auxiliary_messages(bot: Bot, user_id: int) -> None:
+    for message_id in active_screen_auxiliary_message_ids.pop(user_id, []):
+        try:
+            await bot.delete_message(user_id, message_id)
+        except TelegramBadRequest:
+            logger.debug("Could not delete auxiliary screen message %s", message_id)
+
+
 async def clear_active_screen(user_id: int, keep_message_id: int | None = None) -> None:
     previous = active_screen_messages.pop(user_id, None)
     menu_message = menu_keyboard_messages.get(user_id)
@@ -294,6 +374,8 @@ async def clear_active_screen(user_id: int, keep_message_id: int | None = None) 
         and previous.message_id != keep_message_id
         and (menu_message is None or previous.message_id != menu_message.message_id)
     ):
+        if active_screen_auxiliary_message_ids.get(user_id):
+            await delete_active_screen_auxiliary_messages(previous.bot, user_id)
         await delete_replaced_message(previous)
         if welcome_message_ids.get(user_id) == previous.message_id:
             welcome_message_ids.pop(user_id, None)
@@ -311,6 +393,8 @@ async def switch_active_screen(
         and previous.message_id != sent.message_id
         and (menu_message is None or previous.message_id != menu_message.message_id)
     ):
+        if active_screen_auxiliary_message_ids.get(user_id):
+            await delete_active_screen_auxiliary_messages(previous.bot, user_id)
         await delete_replaced_message(previous)
         if welcome_message_ids.get(user_id) == previous.message_id:
             welcome_message_ids.pop(user_id, None)
@@ -710,6 +794,23 @@ async def copy_broadcast_content(
     return copied_ids
 
 
+async def copy_telegram_content_reference(
+    bot: Bot, chat_id: int | str, reference: str
+) -> list[Any]:
+    decoded = decode_telegram_content_reference(reference)
+    if not decoded:
+        raise ValueError("Not a Telegram content reference")
+    source_chat_id, message_ids = decoded
+    copied = await telegram_call_with_retry(
+        lambda: bot.copy_messages(
+            chat_id=chat_id,
+            from_chat_id=source_chat_id,
+            message_ids=sorted(message_ids),
+        )
+    )
+    return list(copied)
+
+
 async def delete_broadcast_source(
     bot: Bot, source_chat_id: int, content: list[dict[str, Any]]
 ) -> None:
@@ -1065,16 +1166,20 @@ async def upload_product_video(bot: Bot, settings: Settings, file_id: str) -> st
     return await upload_product_media(bot, settings, file_id, "video")
 
 
-async def upload_product_media(
-    bot: Bot, settings: Settings, file_id: str, media_type: str
-) -> str:
-    if not all(
+def cloudinary_is_configured(settings: Settings) -> bool:
+    return all(
         (
             settings.cloudinary_cloud_name,
             settings.cloudinary_api_key,
             settings.cloudinary_api_secret,
         )
-    ):
+    )
+
+
+async def upload_product_media(
+    bot: Bot, settings: Settings, file_id: str, media_type: str
+) -> str:
+    if not cloudinary_is_configured(settings):
         raise RuntimeError("Cloudinary credentials are not configured")
     if media_type not in {"image", "video"}:
         raise ValueError("Unsupported product media type")
@@ -1756,13 +1861,31 @@ async def send_welcome(
             language or await safe_user_language(store, user.id)
         )
     if immediate:
+        await delete_active_screen_auxiliary_messages(message.bot, user.id)
         previous_message = active_screen_messages.get(user.id)
         previous_menu_message = menu_keyboard_messages.get(user.id)
         previous_message_id = welcome_message_ids.get(user.id)
         text = welcome_text(user, language)
         reply_markup = welcome_keyboard(user.id, settings)
         media_settings = welcome_media_cache or {}
-        if media_settings.get("welcome_video_url"):
+        telegram_reference = decode_telegram_content_reference(
+            media_settings.get("welcome_video_url")
+            or media_settings.get("welcome_photo_url")
+        )
+        if telegram_reference:
+            copied = await copy_telegram_content_reference(
+                message.bot,
+                user.id,
+                media_settings.get("welcome_video_url")
+                or media_settings["welcome_photo_url"],
+            )
+            welcome_content_message_ids = [item.message_id for item in copied]
+            welcome_message = await message.answer(
+                text,
+                parse_mode="HTML",
+                reply_markup=reply_markup,
+            )
+        elif media_settings.get("welcome_video_url"):
             welcome_message = await message.answer_video(
                 video=media_settings["welcome_video_url"],
                 caption=text,
@@ -1791,6 +1914,10 @@ async def send_welcome(
         welcome_message_ids[user.id] = welcome_message.message_id
         menu_keyboard_messages[user.id] = welcome_message
         active_screen_messages[user.id] = welcome_message
+        if telegram_reference:
+            active_screen_auxiliary_message_ids[user.id] = (
+                welcome_content_message_ids
+            )
         task = asyncio.create_task(
             finish_immediate_welcome(
                 message,
@@ -1808,6 +1935,7 @@ async def send_welcome(
         return
 
     await safe_upsert_user(store, user.id, user.username, user.first_name, language)
+    await delete_active_screen_auxiliary_messages(message.bot, user.id)
     previous_message = active_screen_messages.pop(user.id, None)
     previous_menu_message = menu_keyboard_messages.pop(user.id, None)
     previous_message_id = welcome_message_ids.pop(user.id, None)
@@ -1846,7 +1974,23 @@ async def send_welcome(
             logger.exception("Could not load welcome media settings")
     text = welcome_text(user, language)
     reply_markup = welcome_keyboard(user.id, settings)
-    if settings_data.get("welcome_video_url"):
+    welcome_reference = (
+        settings_data.get("welcome_video_url")
+        or settings_data.get("welcome_photo_url")
+    )
+    if decode_telegram_content_reference(welcome_reference):
+        copied = await copy_telegram_content_reference(
+            message.bot, user.id, welcome_reference
+        )
+        welcome_message = await message.answer(
+            text,
+            parse_mode="HTML",
+            reply_markup=reply_markup,
+        )
+        active_screen_auxiliary_message_ids[user.id] = [
+            item.message_id for item in copied
+        ]
+    elif settings_data.get("welcome_video_url"):
         welcome_message = await message.answer_video(
             video=settings_data["welcome_video_url"],
             caption=text,
@@ -1881,6 +2025,7 @@ async def send_home_screen(
 ) -> Message:
     global welcome_media_cache
     language = normalize_language(language or await safe_user_language(store, user.id))
+    await delete_active_screen_auxiliary_messages(bot, user.id)
     previous_message = active_screen_messages.pop(user.id, None)
     previous_menu_message = menu_keyboard_messages.pop(user.id, None)
     previous_message_id = welcome_message_ids.pop(user.id, None)
@@ -1917,7 +2062,21 @@ async def send_home_screen(
     reply_markup = welcome_keyboard(user.id, settings)
     video_url = settings_data.get("welcome_video_url")
     photo_url = settings_data.get("welcome_photo_url")
-    if video_url:
+    welcome_reference = video_url or photo_url
+    if decode_telegram_content_reference(welcome_reference):
+        copied = await copy_telegram_content_reference(
+            bot, user.id, welcome_reference
+        )
+        sent = await bot.send_message(
+            user.id,
+            text,
+            parse_mode="HTML",
+            reply_markup=reply_markup,
+        )
+        active_screen_auxiliary_message_ids[user.id] = [
+            item.message_id for item in copied
+        ]
+    elif video_url:
         sent = await bot.send_video(
             user.id,
             video=video_url,
@@ -1963,9 +2122,27 @@ async def deliver_order(
             chat_id, html.escape(delivery_message), parse_mode="HTML"
         )
     if delivery and delivery.get("delivery_image_url"):
-        await bot.send_photo(chat_id, photo=delivery["delivery_image_url"])
+        image_reference = delivery["delivery_image_url"]
+        if decode_telegram_content_reference(image_reference):
+            try:
+                await copy_telegram_content_reference(bot, chat_id, image_reference)
+            except TelegramBadRequest:
+                logger.exception(
+                    "Could not copy after-order image for order %s", order_id
+                )
+        else:
+            await bot.send_photo(chat_id, photo=image_reference)
     if delivery and delivery.get("delivery_video_url"):
-        await bot.send_video(chat_id, video=delivery["delivery_video_url"])
+        video_reference = delivery["delivery_video_url"]
+        if decode_telegram_content_reference(video_reference):
+            try:
+                await copy_telegram_content_reference(bot, chat_id, video_reference)
+            except TelegramBadRequest:
+                logger.exception(
+                    "Could not copy after-order video for order %s", order_id
+                )
+        else:
+            await bot.send_video(chat_id, video=video_reference)
     key_lines = "\n".join(f"- <code>{html.escape(value)}</code>" for value in keys)
     text = (
         "✅ ទំនិញបានជោគជ័យ\n\n"
@@ -2496,6 +2673,24 @@ def register_handlers(
             settings_data.get(f"how_to_buy_caption_{language}")
             or settings_data.get("how_to_buy_caption", "")
         ).strip()[:1024]
+        if decode_telegram_content_reference(video):
+            copied = await copy_telegram_content_reference(
+                bot, message.chat.id, video
+            )
+            sent = (
+                await message.answer(
+                    caption
+                    or copy(language, "🎥 វីដេអូណែនាំ", "🎥 Tutorial media")
+                )
+            )
+            if replace_user_screen and user_id is not None:
+                await switch_active_screen(user_id, sent, message)
+                active_screen_auxiliary_message_ids[user_id] = [
+                    item.message_id
+                    for item in copied
+                    if item.message_id != sent.message_id
+                ]
+            return
         sent = await message.answer_video(video=video, caption=caption or None)
         if replace_user_screen and user_id is not None:
             await switch_active_screen(user_id, sent, message)
@@ -2905,6 +3100,7 @@ def register_handlers(
         language: str,
         edit_message: bool = True,
         notice: str | None = None,
+        preserve_input: bool = False,
     ) -> None:
         async def render(text: str, **kwargs: Any) -> None:
             if edit_message:
@@ -2912,13 +3108,21 @@ def register_handlers(
                 await clear_active_screen(user_id, keep_message_id=message.message_id)
                 active_screen_messages[user_id] = sent or message
             else:
-                await send_replacing_screen(
-                    message,
-                    user_id,
-                    text,
-                    parse_mode=kwargs.get("parse_mode"),
-                    reply_markup=kwargs.get("reply_markup"),
-                )
+                if preserve_input:
+                    sent = await message.answer(
+                        text,
+                        parse_mode=kwargs.get("parse_mode"),
+                        reply_markup=kwargs.get("reply_markup"),
+                    )
+                    await switch_active_screen(user_id, sent)
+                else:
+                    await send_replacing_screen(
+                        message,
+                        user_id,
+                        text,
+                        parse_mode=kwargs.get("parse_mode"),
+                        reply_markup=kwargs.get("reply_markup"),
+                    )
 
         wizard = admin_wizards[user_id]
         kind = wizard["kind"]
@@ -2949,7 +3153,7 @@ def register_handlers(
                     f"{copy(language, 'តម្លៃអតិថិជន៖', 'Customer price:')} {money(values['price'])}\n"
                     f"{copy(language, 'តម្លៃ Reseller៖', 'Reseller price:')} {money(values['reseller_price'])}\n"
                     f"{copy(language, 'Media៖', 'Media:')} "
-                    f"{'✅' if values.get('image_url') or values.get('video_url') or values.get('media_file_id') else '—'}\n"
+                    f"{'✅' if values.get('image_url') or values.get('video_url') or values.get('media_file_id') or values.get('media_content_ref') else '—'}\n"
                     f"{copy(language, 'សារក្រោយ Order៖', 'After-order message:')} "
                     f"{'✅' if values.get('delivery_message') else '—'}\n"
                     f"{copy(language, 'រូបភាពក្រោយ Order៖', 'After-order image:')} "
@@ -3018,6 +3222,21 @@ def register_handlers(
                 "Send the video customers should receive after ordering.",
             ),
         }
+        telegram_media_steps = {"media", "delivery_image", "delivery_video"}
+        media_mode = wizard.get("media_modes", {}).get(step)
+        if step in telegram_media_steps:
+            if media_mode == "telegram":
+                prompts[step] = copy(
+                    language,
+                    "ផ្ញើសារមួយ, Album មួយ ឬ Telegram post link (t.me/channel/123) រួចចុច Save media។",
+                    "Send one message, one album, or a Telegram post link (t.me/channel/123), then choose Save media.",
+                )
+            elif media_mode == "cloudinary":
+                prompts[step] = copy(
+                    language,
+                    "ផ្ញើរូបភាព/វីដេអូមួយ ដើម្បី Upload ទៅ Cloudinary។",
+                    "Send one photo or video to upload to Cloudinary.",
+                )
         wizard["step_index"] = step_number - 1
         rows: list[list[InlineKeyboardButton]] = []
         optional = step in {
@@ -3039,6 +3258,31 @@ def register_handlers(
                             language, "⏩ រំលង / ទុកដដែល", "⏩ Skip / Keep current"
                         ),
                         callback_data=f"admin:wizard-skip:{step}",
+                    )
+                ]
+            )
+        if step in telegram_media_steps:
+            rows.append(
+                [
+                    InlineKeyboardButton(
+                        text=f"{'✅ ' if media_mode == 'cloudinary' else ''}☁️ Cloudinary",
+                        callback_data=f"admin:wizard-media-mode:{step}:cloudinary",
+                    ),
+                    InlineKeyboardButton(
+                        text=f"{'✅ ' if media_mode == 'telegram' else ''}✈️ Telegram copy",
+                        callback_data=f"admin:wizard-media-mode:{step}:telegram",
+                    ),
+                ]
+            )
+        if (
+            media_mode == "telegram"
+            and wizard.get("telegram_media_items")
+        ):
+            rows.append(
+                [
+                    InlineKeyboardButton(
+                        text=copy(language, "✅ រក្សាទុក Media", "✅ Save media"),
+                        callback_data="admin:wizard-media-save",
                     )
                 ]
             )
@@ -3076,6 +3320,304 @@ def register_handlers(
             reply_markup=keyboard(rows),
         )
 
+    async def capture_wizard_telegram_media(
+        message: Message, language: str
+    ) -> bool:
+        if not message.from_user:
+            return False
+        user_id = message.from_user.id
+        wizard = admin_wizards.get(user_id)
+        if not wizard or wizard.get("step") not in {
+            "media",
+            "delivery_image",
+            "delivery_video",
+        }:
+            return False
+        step = wizard["step"]
+        mode = wizard.get("media_modes", {}).get(step)
+        if mode == "telegram":
+            items = wizard.setdefault("telegram_media_items", [])
+            if len(items) >= 100:
+                await show_admin_wizard(
+                    message,
+                    user_id,
+                    language,
+                    edit_message=False,
+                    notice=copy(
+                        language,
+                        "មាតិកាលើសកំណត់។ សូមរក្សាទុកមួយ Message ឬមួយ Album ប៉ុណ្ណោះ។",
+                        "Content limit reached. Save one message or one album only.",
+                    ),
+                    preserve_input=True,
+                )
+                return True
+            items.append(telegram_content_item(message))
+            await show_admin_wizard(
+                message,
+                user_id,
+                language,
+                edit_message=False,
+                preserve_input=True,
+            )
+            return True
+        if mode != "cloudinary":
+            await show_admin_wizard(
+                message,
+                user_id,
+                language,
+                edit_message=False,
+                notice=copy(
+                    language,
+                    "សូមជ្រើសរើស Cloudinary ឬ Telegram copy ជាមុនសិន។",
+                    "Choose Cloudinary or Telegram copy first.",
+                ),
+                preserve_input=True,
+            )
+            return True
+
+        is_video = message.video is not None
+        has_supported_media = bool(message.video or message.photo)
+        expected_type = (
+            "image"
+            if step == "delivery_image"
+            else "video"
+            if step == "delivery_video"
+            else None
+        )
+        actual_type = "video" if is_video else "image"
+        if (
+            not has_supported_media
+            or (expected_type is not None and actual_type != expected_type)
+        ):
+            expected_text = (
+                "video"
+                if expected_type == "video"
+                else "photo"
+                if expected_type == "image"
+                else "photo or video"
+            )
+            await show_admin_wizard(
+                message,
+                user_id,
+                language,
+                edit_message=False,
+                notice=copy(
+                    language,
+                    f"Cloudinary ត្រូវការ {expected_text} នៅជំហាននេះ។",
+                    f"Cloudinary requires a {expected_text} at this step.",
+                ),
+                preserve_input=True,
+            )
+            return True
+
+        media = message.video if is_video else message.photo[-1]
+        try:
+            media_url = await upload_product_media(
+                bot, settings, media.file_id, actual_type
+            )
+        except Exception:
+            logger.exception(
+                "Could not upload wizard %s media for admin %s", step, user_id
+            )
+            await show_admin_wizard(
+                message,
+                user_id,
+                language,
+                edit_message=False,
+                notice=copy(
+                    language,
+                    "មិនអាច Upload ទៅ Cloudinary បានទេ។ សូមសាកល្បងម្ដងទៀត ឬជ្រើស Telegram copy។",
+                    "Cloudinary upload failed. Retry or choose Telegram copy.",
+                ),
+                preserve_input=True,
+            )
+            return True
+        values = wizard["values"]
+        if step == "media":
+            values["media_url"] = media_url
+            values["media_type"] = actual_type
+            values.pop("media_file_id", None)
+            values.pop("media_content_ref", None)
+        else:
+            values[f"{step}_url"] = media_url
+            values.pop(f"{step}_file_id", None)
+        steps = ADMIN_WIZARD_STEPS[wizard["kind"]]
+        step_index = steps.index(step)
+        wizard["step"] = steps[step_index + 1] if step_index + 1 < len(steps) else None
+        await show_admin_wizard(message, user_id, language, edit_message=False)
+        return True
+
+    async def show_pending_admin_media_prompt(
+        user_id: int, language: str, notice: str | None = None
+    ) -> None:
+        pending = pending_admin_media.get(user_id)
+        if not pending:
+            return
+        kind = pending["kind"]
+        mode = pending.get("mode")
+        if mode == "telegram":
+            text = copy(
+                language,
+                "ផ្ញើ Message មួយ, Album មួយ ឬ Telegram post link (t.me/channel/123)។ កុំលុប Message ដើម និងត្រូវប្រាកដថា Bot អាចចូល Source chat/channel បាន។",
+                "Send one message, one album, or a Telegram post link (t.me/channel/123). Keep the source message and make sure the bot can access its source chat/channel.",
+            )
+            if pending["items"]:
+                text += copy(
+                    language,
+                    f"\n\nបានបន្ថែម {len(pending['items'])} Message។",
+                    f"\n\nAdded {len(pending['items'])} message(s).",
+                )
+        elif mode == "cloudinary":
+            text = copy(
+                language,
+                "ផ្ញើរូបភាព ឬវីដេអូមួយ ដើម្បី Upload ទៅ Cloudinary។",
+                "Send one photo or video to upload to Cloudinary.",
+            )
+        else:
+            text = copy(
+                language,
+                "ជ្រើសរើសរបៀបរក្សាទុក Media។",
+                "Choose how to store the media.",
+            )
+        if notice:
+            text = f"⚠️ {html.escape(notice)}\n\n{text}"
+        rows: list[list[InlineKeyboardButton]] = []
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=f"{'✅ ' if mode == 'cloudinary' else ''}☁️ Cloudinary",
+                    callback_data=f"admin:media-mode:{kind}:cloudinary",
+                ),
+                InlineKeyboardButton(
+                    text=f"{'✅ ' if mode == 'telegram' else ''}✈️ Telegram copy",
+                    callback_data=f"admin:media-mode:{kind}:telegram",
+                ),
+            ]
+        )
+        if mode == "telegram" and pending["items"]:
+            rows.append(
+                [
+                    InlineKeyboardButton(
+                        text=copy(language, "✅ រក្សាទុក Media", "✅ Save media"),
+                        callback_data="admin:media-save",
+                    )
+                ]
+            )
+        rows.append([back_button("admin:media-cancel", language)])
+        await update_active_screen(
+            user_id,
+            text,
+            parse_mode="HTML",
+            reply_markup=keyboard(rows),
+        )
+
+    async def capture_pending_admin_media(
+        message: Message, language: str
+    ) -> bool:
+        if not message.from_user:
+            return False
+        user_id = message.from_user.id
+        pending = pending_admin_media.get(user_id)
+        if not pending:
+            return False
+        mode = pending.get("mode")
+        if mode == "telegram":
+            if len(pending["items"]) >= 100:
+                await show_pending_admin_media_prompt(
+                    user_id,
+                    language,
+                    copy(
+                        language,
+                        "មាតិកាលើសកំណត់សម្រាប់ setting មួយ។",
+                        "Content limit reached for one setting.",
+                    ),
+                )
+                return True
+            pending["items"].append(telegram_content_item(message))
+            await show_pending_admin_media_prompt(user_id, language)
+            return True
+        if mode != "cloudinary":
+            await show_pending_admin_media_prompt(
+                user_id,
+                language,
+                copy(
+                    language,
+                    "សូមជ្រើសរើស Cloudinary ឬ Telegram copy ជាមុនសិន។",
+                    "Choose Cloudinary or Telegram copy first.",
+                ),
+            )
+            return True
+        is_video = message.video is not None
+        has_supported_media = bool(message.video or message.photo)
+        if (
+            not has_supported_media
+            or (pending["kind"] == "tutorial" and not is_video)
+        ):
+            required = "video" if pending["kind"] == "tutorial" else "photo or video"
+            await show_pending_admin_media_prompt(
+                user_id,
+                language,
+                copy(
+                    language,
+                    f"Cloudinary ត្រូវការ {required} នៅ setting នេះ។",
+                    f"Cloudinary requires a {required} for this setting.",
+                ),
+            )
+            return True
+
+        media = message.video if is_video else message.photo[-1]
+        try:
+            media_url = await upload_product_media(
+                bot,
+                settings,
+                media.file_id,
+                "video" if is_video else "image",
+            )
+            if pending["kind"] == "tutorial":
+                await store.set_bot_setting("how_to_buy_video_url", media_url)
+            else:
+                await store.set_bot_setting(
+                    "welcome_video_url" if is_video else "welcome_photo_url",
+                    media_url,
+                )
+                await store.set_bot_setting(
+                    "welcome_photo_url" if is_video else "welcome_video_url",
+                    "",
+                )
+                global welcome_media_cache
+                welcome_media_cache = None
+        except Exception:
+            logger.exception(
+                "Could not upload %s media for admin %s",
+                pending["kind"],
+                user_id,
+            )
+            await show_pending_admin_media_prompt(
+                user_id,
+                language,
+                copy(
+                    language,
+                    "⚠️ Upload ឬរក្សាទុក media មិនបានសម្រេចទេ។ សូមព្យាយាមម្ដងទៀត។",
+                    "⚠️ Media upload or save failed. Please try again.",
+                ),
+            )
+            return True
+        kind = pending["kind"]
+        pending_admin_media.pop(user_id, None)
+        await update_active_screen(
+            user_id,
+            copy(
+                language,
+                f"✅ បានរក្សាទុក {'វីដេអូ' if is_video else 'រូបភាព'} ជោគជ័យ។",
+                f"✅ The {'video' if is_video else 'photo'} was saved successfully.",
+            ),
+            input_message=message,
+            reply_markup=keyboard(
+                [back_button("admin:settings:section:media", language)]
+            ),
+        )
+        return True
+
     async def finish_admin_wizard(user_id: int, language: str) -> str:
         wizard = admin_wizards[user_id]
         values = wizard["values"]
@@ -3106,8 +3648,9 @@ def register_handlers(
                     )
                 )
 
-            media_url = None
-            media_type = None
+            media_content_ref = values.get("media_content_ref")
+            media_url = media_content_ref or values.get("media_url")
+            media_type = "telegram" if media_content_ref else values.get("media_type")
             if values.get("media_file_id"):
                 media_type = values["media_type"]
                 media_url = await upload_product_media(
@@ -3143,7 +3686,7 @@ def register_handlers(
                     values["name"],
                     str(price),
                     values.get("description", ""),
-                    image_url=media_url if media_type == "image" else None,
+                    image_url=media_url if media_type in {"image", "telegram"} else None,
                     video_url=media_url if media_type == "video" else None,
                     reseller_price=str(reseller_price),
                     delivery_message=values.get("delivery_message", ""),
@@ -3158,7 +3701,7 @@ def register_handlers(
                 str(price),
                 str(reseller_price),
                 values.get("description", ""),
-                image_url=media_url if media_type == "image" else None,
+                image_url=media_url if media_type in {"image", "telegram"} else None,
                 video_url=media_url if media_type == "video" else None,
                 update_media=media_type is not None,
                 delivery_message=values.get("delivery_message", ""),
@@ -3563,6 +4106,25 @@ def register_handlers(
         media_url = video_url or image_url
         sent_message: Message | None = None
         if media_url:
+            if decode_telegram_content_reference(media_url):
+                copied = await copy_telegram_content_reference(
+                    bot,
+                    message.chat.id if message.chat else message.from_user.id,
+                    media_url,
+                )
+                sent_message = await message.answer(
+                    text, parse_mode="HTML", reply_markup=markup
+                )
+                if message.from_user:
+                    await switch_active_screen(
+                        message.from_user.id,
+                        sent_message,
+                        None if edit_message else message,
+                    )
+                    active_screen_auxiliary_message_ids[message.from_user.id] = [
+                        item.message_id for item in copied
+                    ]
+                return sent_message
             if edit_message and (message.photo or message.video):
                 media = (
                     InputMediaVideo(media=media_url, caption=text, parse_mode="HTML")
@@ -4597,25 +5159,134 @@ def register_handlers(
                 show_alert=True,
             )
             return
-        pending_admin_media[callback.from_user.id] = kind
+        pending_admin_media[callback.from_user.id] = {
+            "kind": kind,
+            "mode": None,
+            "items": [],
+        }
         await callback.answer()
         await replace_callback_screen(
             callback,
             copy(
                 language,
-                (
-                    "សូមផ្ញើរូបភាព ឬវីដេអូ Welcome។"
-                    if kind == "welcome"
-                    else "សូមផ្ញើវីដេអូ How to Buy។"
-                ),
-                (
-                    "Send the welcome photo or video. The bot stores its Telegram file reference without downloading or re-uploading it."
-                    if kind == "welcome"
-                    else "Send the How to Buy video. The bot stores its Telegram file reference without downloading or re-uploading it."
-                ),
+                "ជ្រើសរើស Cloudinary សម្រាប់ Photo/Video ឬ Telegram copy សម្រាប់ Message, Media, Album និង post link។",
+                "Choose Cloudinary for a photo/video upload, or Telegram copy for any message, media, album, or post link.",
             ),
-            keyboard([back_button("admin:settings:section:media", language)]),
+            keyboard(
+                [
+                    [
+                        InlineKeyboardButton(
+                            text="☁️ Cloudinary",
+                            callback_data=f"admin:media-mode:{kind}:cloudinary",
+                        ),
+                        InlineKeyboardButton(
+                            text="✈️ Telegram copy",
+                            callback_data=f"admin:media-mode:{kind}:telegram",
+                        ),
+                    ],
+                    [back_button("admin:settings:section:media", language)],
+                ]
+            ),
         )
+
+    @router.callback_query(F.data.startswith("admin:media-mode:"))
+    async def choose_admin_media_mode(callback: CallbackQuery) -> None:
+        language = await safe_user_language(store, callback.from_user.id)
+        if callback.from_user.id not in settings.admin_ids:
+            await callback.answer()
+            return
+        try:
+            kind, mode = callback.data.removeprefix("admin:media-mode:").split(":")
+        except ValueError:
+            await callback.answer(
+                copy(language, "Media mode មិនត្រឹមត្រូវទេ។", "Invalid media mode."),
+                show_alert=True,
+            )
+            return
+        pending = pending_admin_media.get(callback.from_user.id)
+        if not pending or pending["kind"] != kind or mode not in {
+            "cloudinary",
+            "telegram",
+        }:
+            await callback.answer(
+                copy(
+                    language,
+                    "ទម្រង់បានធ្វើបច្ចុប្បន្នភាពហើយ។ សូមបើក Media setting ម្តងទៀត។",
+                    "The form was updated. Reopen this media setting.",
+                ),
+                show_alert=True,
+            )
+            return
+        if mode == "cloudinary" and not cloudinary_is_configured(settings):
+            await callback.answer(
+                copy(
+                    language,
+                    "សូមកំណត់ CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY និង CLOUDINARY_API_SECRET ជាមុនសិន។",
+                    "Configure CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET first.",
+                ),
+                show_alert=True,
+            )
+            return
+        if pending.get("mode") != mode:
+            pending["items"].clear()
+        pending["mode"] = mode
+        await callback.answer()
+        await show_pending_admin_media_prompt(callback.from_user.id, language)
+
+    @router.callback_query(F.data == "admin:media-save")
+    async def save_admin_telegram_media(callback: CallbackQuery) -> None:
+        global welcome_media_cache
+        language = await safe_user_language(store, callback.from_user.id)
+        if callback.from_user.id not in settings.admin_ids:
+            await callback.answer()
+            return
+        pending = pending_admin_media.get(callback.from_user.id)
+        if not pending or pending.get("mode") != "telegram" or not pending["items"]:
+            await callback.answer(
+                copy(
+                    language,
+                    "សូមបន្ថែម Message ឬ Album មុនរក្សាទុក។",
+                    "Add a message or album before saving.",
+                ),
+                show_alert=True,
+            )
+            return
+        try:
+            reference = encode_telegram_content_reference(pending["items"])
+            if pending["kind"] == "tutorial":
+                await store.set_bot_setting("how_to_buy_video_url", reference)
+            else:
+                await store.set_bot_setting("welcome_photo_url", reference)
+                await store.set_bot_setting("welcome_video_url", "")
+                welcome_media_cache = None
+        except ValueError as exc:
+            await callback.answer(str(exc), show_alert=True)
+            return
+        except Exception:
+            logger.exception(
+                "Could not save Telegram %s media for admin %s",
+                pending["kind"],
+                callback.from_user.id,
+            )
+            await callback.answer(
+                copy(
+                    language,
+                    "រក្សាទុក Media មិនបានទេ។ សូមព្យាយាមម្ដងទៀត។",
+                    "Could not save media. Please try again.",
+                ),
+                show_alert=True,
+            )
+            return
+        pending_admin_media.pop(callback.from_user.id, None)
+        await callback.answer(copy(language, "បានរក្សាទុក Media។", "Media saved."))
+        await show_admin_settings(callback.message, language, "media")
+
+    @router.callback_query(F.data == "admin:media-cancel")
+    async def cancel_admin_media(callback: CallbackQuery) -> None:
+        pending_admin_media.pop(callback.from_user.id, None)
+        language = await safe_user_language(store, callback.from_user.id)
+        await callback.answer(copy(language, "បានបោះបង់", "Cancelled"))
+        await show_admin_settings(callback.message, language, "media")
 
     @router.callback_query(F.data == "admin:resellers")
     async def admin_resellers(callback: CallbackQuery) -> None:
@@ -4894,133 +5565,14 @@ def register_handlers(
 
     @router.message(F.photo | F.video)
     async def receive_wizard_media(message: Message) -> None:
-        global welcome_media_cache
         if not message.from_user or message.from_user.id not in settings.admin_ids:
             return
         language = await safe_user_language(store, message.from_user.id)
         if await handle_broadcast_input(message, language):
             return
-        media_request = pending_admin_media.get(message.from_user.id)
-        if media_request:
-            kind = media_request
-            is_video = message.video is not None
-            if kind == "tutorial" and not is_video:
-                await update_active_screen(
-                    message.from_user.id,
-                    copy(
-                        language,
-                        "⚠️ Tutorial ត្រូវជាវីដេអូ។",
-                        "⚠️ The tutorial must be a video.",
-                    ),
-                    input_message=message,
-                    reply_markup=keyboard(
-                        [back_button("admin:settings:section:media", language)]
-                    ),
-                )
-                return
-            media = message.video if is_video else message.photo[-1]
-            try:
-                media_reference = media.file_id
-                if kind == "tutorial":
-                    await store.set_bot_setting(
-                        "how_to_buy_video_url", media_reference
-                    )
-                else:
-                    await store.set_bot_setting(
-                        "welcome_video_url" if is_video else "welcome_photo_url",
-                        media_reference,
-                    )
-                    await store.set_bot_setting(
-                        "welcome_photo_url" if is_video else "welcome_video_url",
-                        "",
-                    )
-                    welcome_media_cache = None
-            except Exception:
-                logger.exception(
-                    "Could not upload %s media for admin %s", kind, message.from_user.id
-                )
-                await update_active_screen(
-                    message.from_user.id,
-                    copy(
-                        language,
-                        "⚠️ Upload ឬរក្សាទុក media មិនបានសម្រេចទេ។ សូមព្យាយាមម្ដងទៀត។",
-                        "⚠️ Media upload or save failed. Please try again.",
-                    ),
-                    input_message=message,
-                    reply_markup=keyboard(
-                        [back_button("admin:settings:section:media", language)]
-                    ),
-                )
-                return
-            pending_admin_media.pop(message.from_user.id, None)
-            await update_active_screen(
-                message.from_user.id,
-                copy(
-                    language,
-                    f"✅ បានរក្សាទុក {'វីដេអូ' if is_video else 'រូបភាព'} ជោគជ័យ។",
-                    f"✅ The {'video' if is_video else 'image'} was saved successfully.",
-                ),
-                input_message=message,
-                reply_markup=keyboard(
-                    [back_button("admin:settings:section:media", language)]
-                ),
-            )
+        if await capture_pending_admin_media(message, language):
             return
-        wizard = admin_wizards.get(message.from_user.id)
-        if not wizard:
-            return
-        language = await safe_user_language(store, message.from_user.id)
-        step = wizard.get("step")
-        if step in {"delivery_image", "delivery_video"}:
-            is_video = message.video is not None
-            expected_type = "video" if step == "delivery_video" else "image"
-            if is_video != (expected_type == "video"):
-                await show_admin_wizard(
-                    message,
-                    message.from_user.id,
-                    language,
-                    edit_message=False,
-                    notice=copy(
-                        language,
-                        (
-                            "ជំហាននេះត្រូវការវីដេអូ។"
-                            if expected_type == "video"
-                            else "ជំហាននេះត្រូវការរូបភាព។"
-                        ),
-                        (
-                            "This step requires a video."
-                            if expected_type == "video"
-                            else "This step requires an image."
-                        ),
-                    ),
-                )
-                return
-            media = message.video if is_video else message.photo[-1]
-            wizard["values"][f"{step}_file_id"] = media.file_id
-            wizard["values"][f"{step}_url"] = None
-            steps = ADMIN_WIZARD_STEPS[wizard["kind"]]
-            current_index = steps.index(step)
-            wizard["step"] = (
-                steps[current_index + 1] if current_index + 1 < len(steps) else None
-            )
-            await show_admin_wizard(
-                message, message.from_user.id, language, edit_message=False
-            )
-            return
-        if step != "media":
-            await show_admin_wizard(
-                message, message.from_user.id, language, edit_message=False
-            )
-            return
-        is_video = message.video is not None
-        media = message.video if is_video else message.photo[-1]
-        wizard["values"]["media_file_id"] = media.file_id
-        wizard["values"]["media_type"] = "video" if is_video else "image"
-        steps = ADMIN_WIZARD_STEPS[wizard["kind"]]
-        wizard["step"] = steps[1]
-        await show_admin_wizard(
-            message, message.from_user.id, language, edit_message=False
-        )
+        await capture_wizard_telegram_media(message, language)
 
     @router.callback_query(F.data.startswith("admin:product-add:"))
     async def add_product_prompt(callback: CallbackQuery) -> None:
@@ -5189,6 +5741,103 @@ def register_handlers(
             copy(language, "បានបិទ Package។", "Package disabled."),
             reply_markup=keyboard([back_button("admin:catalogs", language)]),
         )
+
+    @router.callback_query(F.data.startswith("admin:wizard-media-mode:"))
+    async def choose_wizard_media_mode(callback: CallbackQuery) -> None:
+        language = await safe_user_language(store, callback.from_user.id)
+        if callback.from_user.id not in settings.admin_ids:
+            await callback.answer()
+            return
+        value = callback.data.removeprefix("admin:wizard-media-mode:")
+        try:
+            step, mode = value.rsplit(":", 1)
+        except ValueError:
+            await callback.answer(
+                copy(language, "Media mode មិនត្រឹមត្រូវទេ។", "Invalid media mode."),
+                show_alert=True,
+            )
+            return
+        wizard = admin_wizards.get(callback.from_user.id)
+        if (
+            not wizard
+            or wizard.get("step") != step
+            or step not in {"media", "delivery_image", "delivery_video"}
+            or mode not in {"cloudinary", "telegram"}
+        ):
+            await callback.answer(
+                copy(
+                    language,
+                    "ទម្រង់បានធ្វើបច្ចុប្បន្នភាពហើយ។ សូមបន្តពីជំហានបច្ចុប្បន្ន។",
+                    "The form was updated. Continue from the current step.",
+                )
+            )
+            if wizard:
+                await show_admin_wizard(
+                    callback.message, callback.from_user.id, language
+                )
+            return
+        if mode == "cloudinary" and not cloudinary_is_configured(settings):
+            await callback.answer(
+                copy(
+                    language,
+                    "សូមកំណត់ CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY និង CLOUDINARY_API_SECRET ជាមុនសិន។",
+                    "Configure CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET first.",
+                ),
+                show_alert=True,
+            )
+            return
+        wizard.setdefault("media_modes", {})[step] = mode
+        wizard.pop("telegram_media_items", None)
+        await callback.answer()
+        await show_admin_wizard(callback.message, callback.from_user.id, language)
+
+    @router.callback_query(F.data == "admin:wizard-media-save")
+    async def save_wizard_telegram_media(callback: CallbackQuery) -> None:
+        language = await safe_user_language(store, callback.from_user.id)
+        if callback.from_user.id not in settings.admin_ids:
+            await callback.answer()
+            return
+        wizard = admin_wizards.get(callback.from_user.id)
+        step = wizard.get("step") if wizard else None
+        items = wizard.get("telegram_media_items", []) if wizard else []
+        if (
+            not wizard
+            or step not in {"media", "delivery_image", "delivery_video"}
+            or wizard.get("media_modes", {}).get(step) != "telegram"
+            or not items
+        ):
+            await callback.answer(
+                copy(
+                    language,
+                    "សូមបន្ថែម Message ឬ Album មុនរក្សាទុក។",
+                    "Add a message or album before saving.",
+                ),
+                show_alert=True,
+            )
+            if wizard:
+                await show_admin_wizard(
+                    callback.message, callback.from_user.id, language
+                )
+            return
+        try:
+            reference = encode_telegram_content_reference(items)
+        except ValueError as exc:
+            await callback.answer(str(exc), show_alert=True)
+            return
+        values = wizard["values"]
+        if step == "media":
+            values["media_content_ref"] = reference
+            values["media_type"] = "telegram"
+            values.pop("media_file_id", None)
+        else:
+            values[f"{step}_url"] = reference
+            values.pop(f"{step}_file_id", None)
+        wizard.pop("telegram_media_items", None)
+        steps = ADMIN_WIZARD_STEPS[wizard["kind"]]
+        step_index = steps.index(step)
+        wizard["step"] = steps[step_index + 1] if step_index + 1 < len(steps) else None
+        await callback.answer(copy(language, "បានរក្សាទុក Media។", "Media saved."))
+        await show_admin_wizard(callback.message, callback.from_user.id, language)
 
     @router.callback_query(F.data.startswith("admin:wizard-skip:"))
     async def skip_admin_wizard_step(callback: CallbackQuery) -> None:
@@ -5478,6 +6127,10 @@ def register_handlers(
             return
         language = await safe_user_language(store, message.from_user.id)
         if await handle_broadcast_input(message, language):
+            return
+        if await capture_pending_admin_media(message, language):
+            return
+        if await capture_wizard_telegram_media(message, language):
             return
         customer_buttons = {
             "👤 account",
@@ -5997,6 +6650,10 @@ def register_handlers(
         language = await safe_user_language(store, message.from_user.id)
         if await handle_broadcast_input(message, language):
             return
+        if await capture_pending_admin_media(message, language):
+            return
+        if await capture_wizard_telegram_media(message, language):
+            return
         product_id = pending_stock_upload.get(message.from_user.id)
         if not product_id:
             return
@@ -6109,14 +6766,22 @@ def register_handlers(
         if not message.from_user or message.from_user.id not in settings.admin_ids:
             return
         language = await safe_user_language(store, message.from_user.id)
-        await handle_broadcast_input(message, language)
+        if await handle_broadcast_input(message, language):
+            return
+        if await capture_pending_admin_media(message, language):
+            return
+        await capture_wizard_telegram_media(message, language)
 
     @router.message()
     async def receive_unlisted_broadcast_content(message: Message) -> None:
         if not message.from_user or message.from_user.id not in settings.admin_ids:
             return
         language = await safe_user_language(store, message.from_user.id)
-        await handle_broadcast_input(message, language)
+        if await handle_broadcast_input(message, language):
+            return
+        if await capture_pending_admin_media(message, language):
+            return
+        await capture_wizard_telegram_media(message, language)
 
     @router.callback_query(F.data == "admin:sales")
     async def sales_summary(callback: CallbackQuery) -> None:

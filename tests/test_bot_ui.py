@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, Mock
 
 from cryptography.fernet import Fernet
 import pytest
+from aiogram.exceptions import TelegramBadRequest
 
 from app.bot import (
     admin_category_actions,
@@ -13,6 +14,7 @@ from app.bot import (
     broadcast_destinations,
     broadcast_draft_keyboard,
     copy_broadcast_content,
+    copy_telegram_content_reference,
     bot_setting_section,
     copy,
     checkout_payment_rows,
@@ -21,6 +23,7 @@ from app.bot import (
     delete_replaced_message,
     deliver_order,
     description_preview,
+    decode_telegram_content_reference,
     execute_broadcast,
     edit_text_message,
     expire_payment,
@@ -35,6 +38,7 @@ from app.bot import (
     parse_broadcast_buttons,
     parse_telegram_post_link,
     parse_wallet_deposit_amount,
+    encode_telegram_content_reference,
     notify_order_success,
     notify_stock_added,
     package_id_from_start,
@@ -313,6 +317,70 @@ def test_telegram_post_link_parser_supports_public_and_private_posts():
     )
     assert parse_telegram_post_link("https://t.me/+invitecode") is None
     assert parse_telegram_post_link("https://example.com/channel/123") is None
+
+
+def test_telegram_content_reference_accepts_single_messages_and_albums():
+    album = encode_telegram_content_reference(
+        [
+            {
+                "message_id": 20,
+                "media_group_id": "album-1",
+                "source_chat_id": 123,
+            },
+            {
+                "message_id": 21,
+                "media_group_id": "album-1",
+                "source_chat_id": 123,
+            },
+        ]
+    )
+
+    assert decode_telegram_content_reference(album) == (123, [20, 21])
+    assert decode_telegram_content_reference("https://example.com/file.mp4") is None
+    with pytest.raises(ValueError, match="one Telegram message or one album"):
+        encode_telegram_content_reference(
+            [
+                {"message_id": 20, "source_chat_id": 123},
+                {"message_id": 21, "source_chat_id": 123},
+            ]
+        )
+
+
+def test_copy_telegram_content_reference_copies_album_without_downloading():
+    async def run_test():
+        bot = SimpleNamespace(
+            copy_messages=AsyncMock(
+                return_value=[
+                    SimpleNamespace(message_id=301),
+                    SimpleNamespace(message_id=302),
+                ]
+            )
+        )
+        reference = encode_telegram_content_reference(
+            [
+                {
+                    "message_id": 12,
+                    "media_group_id": "album-1",
+                    "source_chat_id": "@media_channel",
+                },
+                {
+                    "message_id": 11,
+                    "media_group_id": "album-1",
+                    "source_chat_id": "@media_channel",
+                },
+            ]
+        )
+
+        copied = await copy_telegram_content_reference(bot, 456, reference)
+
+        assert [message.message_id for message in copied] == [301, 302]
+        bot.copy_messages.assert_awaited_once_with(
+            chat_id=456,
+            from_chat_id="@media_channel",
+            message_ids=[11, 12],
+        )
+
+    asyncio.run(run_test())
 
 
 def test_copy_broadcast_content_uses_each_telegram_post_source_in_order():
@@ -2081,6 +2149,86 @@ def test_delivery_sends_configured_product_message_and_media_before_stock_codes(
         assert events[3][0] == "message"
         assert "CODE-001" in events[3][1]
         store.mark_delivered.assert_awaited_once_with("order-123")
+
+    asyncio.run(run_test())
+
+
+def test_delivery_copies_telegram_media_reference_without_downloading():
+    async def run_test():
+        key = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
+        reference = encode_telegram_content_reference(
+            [
+                {
+                    "message_id": 45,
+                    "media_group_id": "album-1",
+                    "source_chat_id": 999,
+                },
+                {
+                    "message_id": 46,
+                    "media_group_id": "album-1",
+                    "source_chat_id": 999,
+                },
+            ]
+        )
+        bot = SimpleNamespace(
+            send_message=AsyncMock(),
+            copy_messages=AsyncMock(
+                return_value=[
+                    SimpleNamespace(message_id=101),
+                    SimpleNamespace(message_id=102),
+                ]
+            ),
+        )
+        store = SimpleNamespace(
+            payment_message=AsyncMock(return_value=None),
+            order_delivery_details=AsyncMock(
+                return_value={"delivery_image_url": reference}
+            ),
+            fulfill_order=AsyncMock(return_value=[encrypt_stock("CODE-001", key)]),
+            mark_delivered=AsyncMock(),
+        )
+
+        await deliver_order(
+            bot, store, SimpleNamespace(stock_encryption_key=key), "order-123", 123
+        )
+
+        bot.copy_messages.assert_awaited_once_with(
+            chat_id=123,
+            from_chat_id=999,
+            message_ids=[45, 46],
+        )
+
+    asyncio.run(run_test())
+
+
+def test_delivery_continues_with_stock_codes_when_telegram_media_copy_fails():
+    async def run_test():
+        key = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
+        reference = encode_telegram_content_reference(
+            [{"message_id": 45, "source_chat_id": 999}]
+        )
+        bot = SimpleNamespace(
+            send_message=AsyncMock(),
+            copy_messages=AsyncMock(
+                side_effect=TelegramBadRequest(Mock(), "source message not found")
+            ),
+        )
+        store = SimpleNamespace(
+            payment_message=AsyncMock(return_value=None),
+            order_delivery_details=AsyncMock(
+                return_value={"delivery_image_url": reference}
+            ),
+            fulfill_order=AsyncMock(return_value=[encrypt_stock("CODE-001", key)]),
+            mark_delivered=AsyncMock(),
+        )
+
+        await deliver_order(
+            bot, store, SimpleNamespace(stock_encryption_key=key), "order-123", 123
+        )
+
+        assert any(
+            "CODE-001" in call.args[1] for call in bot.send_message.await_args_list
+        )
 
     asyncio.run(run_test())
 
