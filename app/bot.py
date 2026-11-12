@@ -1653,7 +1653,9 @@ async def notify_stock_added(
     )
 
 
-async def notify_order_success(bot: Bot, store: Store, order_id: str) -> None:
+async def notify_order_success(
+    bot: Bot, store: Store, settings: Settings, order_id: str
+) -> None:
     try:
         destinations_setting = (
             (await store.bot_settings(("order_notification_chat_ids",)))
@@ -1680,6 +1682,10 @@ async def notify_order_success(bot: Bot, store: Store, order_id: str) -> None:
 
     product = order.get("product") or {}
     customer = order.get("customer") or {}
+    credentials = [
+        decrypt_stock(value, settings.stock_encryption_key)
+        for value in order.get("credentials", [])
+    ]
     username = customer.get("username")
     customer_name = customer.get("first_name") or (
         f"@{username}" if username else "Unknown"
@@ -1713,12 +1719,18 @@ async def notify_order_success(bot: Bot, store: Store, order_id: str) -> None:
     )
     price_type = "Reseller Price" if reseller_order else "Regular Price"
     reference = order.get("transaction_id") or order["id"]
+    key_lines = "\n".join(
+        f"- {html.escape(value)}" for value in credentials
+    ) or "- —"
     text = (
         "🔔 <b>ការបញ្ជាទិញថ្មី (New Order)</b>\n"
         "───────────────────\n"
         f"👤 <b>អតិថិជន:</b> {customer_label}\n"
         f"🆔 <b>Telegram ID:</b> <code>{int(order['chat_id'])}</code>\n"
+        f"🛍 <b>ប្រភេទផលិតផល:</b> {html.escape(str(product.get('category_name') or 'Unknown'))}\n"
         f"📦 <b>ផលិតផល:</b> {html.escape(str(product.get('name') or 'Unknown'))} (x{quantity})\n"
+        "<b>🔑 បញ្ជីទំនិញ:</b>\n"
+        f"{key_lines}\n"
         f"💰 <b>ចំនួនទឹកប្រាក់:</b> {money(order['total'])} ({price_type})\n"
         f"🏷 <b>Ref ID:</b> <code>{html.escape(str(reference))}</code>\n"
         f"⏰ <b>កាលបរិច្ឆេទ:</b> {date_text} (Asia/Phnom_Penh)\n"
@@ -2166,7 +2178,7 @@ async def deliver_order(
         reply_markup=keyboard(delivery_rows),
     )
     await store.mark_delivered(order_id)
-    await notify_order_success(bot, store, order_id)
+    await notify_order_success(bot, store, settings, order_id)
 
 
 async def delete_payment_message(bot: Bot, store: Store, order_id: str) -> None:

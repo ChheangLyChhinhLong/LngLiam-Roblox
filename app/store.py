@@ -681,11 +681,22 @@ class Store:
             return None
         product_result = await (
             self.client.table("products")
-            .select("name,price,reseller_price")
+            .select("name,price,reseller_price,category_id")
             .eq("id", order["product_id"])
             .maybe_single()
             .execute()
         )
+        product = dict(product_result.data or {})
+        category_id = product.get("category_id")
+        if category_id:
+            category_result = await (
+                self.client.table("categories")
+                .select("name")
+                .eq("id", category_id)
+                .maybe_single()
+                .execute()
+            )
+            product["category_name"] = (category_result.data or {}).get("name")
         user_result = await (
             self.client.table("users")
             .select("username,first_name")
@@ -693,10 +704,21 @@ class Store:
             .maybe_single()
             .execute()
         )
+        stock_result = await (
+            self.client.table("stock_items")
+            .select("credential_cipher")
+            .eq("order_id", order_id)
+            .eq("status", "sold")
+            .order("created_at")
+            .execute()
+        )
         return {
             **order,
-            "product": product_result.data or {},
+            "product": product,
             "customer": user_result.data or {},
+            "credentials": [
+                item["credential_cipher"] for item in (stock_result.data or [])
+            ],
         }
 
     async def order_history_page(

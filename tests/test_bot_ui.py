@@ -1,7 +1,7 @@
 import asyncio
 from decimal import Decimal
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, call
 
 from cryptography.fernet import Fernet
 import pytest
@@ -1686,14 +1686,25 @@ def test_order_notification_details_loads_order_product_and_customer_profile():
                 "created_at": "2026-10-20T09:35:00+00:00",
                 "status": "paid",
             },
-            "products": {"name": "Key 1Day", "price": "1.50", "reseller_price": "1.00"},
+            "products": {
+                "name": "Key 1Day",
+                "price": "1.50",
+                "reseller_price": "1.00",
+                "category_id": "category-123",
+            },
+            "categories": {"name": "VPN"},
             "users": {"username": "buyer", "first_name": "Buyer"},
+            "stock_items": [
+                {"credential_cipher": "cipher-1"},
+                {"credential_cipher": "cipher-2"},
+            ],
         }
         queries = {}
         for table_name, data in results.items():
             query = Mock()
             query.select.return_value = query
             query.eq.return_value = query
+            query.order.return_value = query
             query.maybe_single.return_value = query
             query.execute = AsyncMock(return_value=SimpleNamespace(data=data))
             queries[table_name] = query
@@ -1701,11 +1712,16 @@ def test_order_notification_details_loads_order_product_and_customer_profile():
 
         details = await Store(client).order_notification_details("order-123")
 
-        assert details["product"] == results["products"]
+        assert details["product"] == {**results["products"], "category_name": "VPN"}
         assert details["customer"] == results["users"]
+        assert details["credentials"] == ["cipher-1", "cipher-2"]
         queries["orders"].eq.assert_called_once_with("id", "order-123")
         queries["products"].eq.assert_called_once_with("id", "product-123")
+        queries["categories"].eq.assert_called_once_with("id", "category-123")
         queries["users"].eq.assert_called_once_with("telegram_id", 123)
+        queries["stock_items"].eq.assert_has_calls(
+            [call("order_id", "order-123"), call("status", "sold")]
+        )
 
     asyncio.run(run_test())
 
@@ -2235,6 +2251,7 @@ def test_delivery_continues_with_stock_codes_when_telegram_media_copy_fails():
 
 def test_order_success_notification_sends_order_details_to_configured_group_and_channel():
     async def run_test():
+        key = Fernet.generate_key().decode()
         order = {
             "id": "order-123",
             "chat_id": 123456789,
@@ -2246,8 +2263,13 @@ def test_order_success_notification_sends_order_details_to_configured_group_and_
                 "name": "Key FreeFire 1Day",
                 "price": "2.00",
                 "reseller_price": "1.00",
+                "category_name": "☠️𝙑𝙋𝙉 𝙍𝙀𝙕𝙕𝙓",
             },
             "customer": {"first_name": "ChhinhLong", "username": "chhinhlong"},
+            "credentials": [
+                encrypt_stock("CODE-001", key),
+                encrypt_stock("CODE&002", key),
+            ],
         }
         bot = SimpleNamespace(send_message=AsyncMock())
         store = SimpleNamespace(
@@ -2259,7 +2281,9 @@ def test_order_success_notification_sends_order_details_to_configured_group_and_
             ),
         )
 
-        await notify_order_success(bot, store, "order-123")
+        await notify_order_success(
+            bot, store, SimpleNamespace(stock_encryption_key=key), "order-123"
+        )
 
         assert [call.args[0] for call in bot.send_message.await_args_list] == [
             -1001234567890,
@@ -2268,7 +2292,9 @@ def test_order_success_notification_sends_order_details_to_configured_group_and_
         text = bot.send_message.await_args_list[0].args[1]
         assert "ChhinhLong (@chhinhlong)" in text
         assert "<code>123456789</code>" in text
+        assert "☠️𝙑𝙋𝙉 𝙍𝙀𝙕𝙕𝙓" in text
         assert "Key FreeFire 1Day (x1)" in text
+        assert "<b>🔑 បញ្ជីទំនិញ:</b>\n- CODE-001\n- CODE&amp;002" in text
         assert "$1.00 (Reseller Price)" in text
         assert "<code>txn_abc123456</code>" in text
         assert "2026-10-20 16:35:00 (Asia/Phnom_Penh)" in text
