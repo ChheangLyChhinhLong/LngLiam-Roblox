@@ -351,6 +351,13 @@ class Store:
             {"p_deposit_id": deposit_id, "p_status": status},
         ).execute()
 
+    async def cancel_wallet_deposit(self, deposit_id: str) -> bool:
+        result = await self.client.rpc(
+            "cancel_wallet_deposit",
+            {"p_deposit_id": deposit_id},
+        ).execute()
+        return bool(result.data)
+
     async def set_wallet_deposit_message(self, deposit_id: str, message_id: int) -> None:
         await (
             self.client.table("wallet_deposits")

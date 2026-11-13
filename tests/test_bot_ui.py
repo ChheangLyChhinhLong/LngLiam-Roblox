@@ -66,6 +66,7 @@ from app.bot import (
     wallet_error_message,
     wallet_deposit_keyboard,
     wallet_payment_method_keyboard,
+    wallet_payment_keyboard,
 )
 import app.bot as bot_module
 
@@ -935,6 +936,19 @@ def test_wallet_payment_method_keyboard_keeps_amount_and_provider_in_callback():
     ]
 
 
+def test_wallet_payment_keyboard_has_cancel_instead_of_back():
+    markup = wallet_payment_keyboard(
+        "deposit-123", "https://shop.example.com/aba/deposit-123", "en"
+    )
+
+    assert [row[0].text for row in markup.inline_keyboard] == [
+        "🏦 Open in ABA Mobile",
+        "✅ I have paid · Check",
+        "❌ Cancel",
+    ]
+    assert markup.inline_keyboard[2][0].callback_data == "wallet:cancel:deposit-123"
+
+
 def test_custom_wallet_amount_is_parsed_to_the_exact_supported_amount():
     assert parse_wallet_deposit_amount("12.5") == Decimal("12.5")
     assert parse_wallet_deposit_amount("500.00") == Decimal("500.00")
@@ -1010,16 +1024,104 @@ def test_wallet_deposit_completion_credits_once_and_notifies_user():
             wallet_balance=AsyncMock(return_value="6.00"),
             clear_payment_message=AsyncMock(),
             user_language=AsyncMock(return_value="en"),
+            bot_settings=AsyncMock(
+                return_value={
+                    "order_notification_chat_ids": "-1001234567890,@adminchannel"
+                }
+            ),
         )
-        deposit = {"id": "deposit-123", "chat_id": 123, "amount": "5.00"}
+        deposit = {
+            "id": "deposit-123",
+            "chat_id": 123,
+            "amount": "5.00",
+            "transaction_id": "txn-deposit-123",
+            "payment_provider": "aba",
+        }
 
         completed = await complete_wallet_deposit(bot, store, deposit)
 
         assert completed is True
         store.complete_wallet_deposit.assert_awaited_once_with("deposit-123")
         bot.delete_message.assert_awaited_once_with(chat_id=123, message_id=456)
-        assert "$5.00 was added to your wallet!" in bot.send_message.await_args.args[1]
-        assert "New balance: $6.00" in bot.send_message.await_args.args[1]
+        assert [call.args[0] for call in bot.send_message.await_args_list] == [
+            123,
+            -1001234567890,
+            "@adminchannel",
+        ]
+        user_notification = bot.send_message.await_args_list[0].args[1]
+        assert "$5.00 was added to your wallet!" in user_notification
+        assert "New balance: $6.00" in user_notification
+        notification = bot.send_message.await_args_list[1]
+        assert "New Wallet Deposit" in notification.args[1]
+        assert "<code>123</code>" in notification.args[1]
+        assert "$5.00" in notification.args[1]
+        assert "<code>txn-deposit-123</code>" in notification.args[1]
+        assert notification.kwargs["parse_mode"] == "HTML"
+
+    asyncio.run(run_test())
+
+
+def test_wallet_deposit_cancel_closes_pending_deposit_and_removes_qr():
+    async def run_test():
+        bot = SimpleNamespace(
+            delete_message=AsyncMock(),
+            send_message=AsyncMock(),
+        )
+        message = SimpleNamespace(answer=AsyncMock())
+        callback = SimpleNamespace(
+            data="wallet:cancel:deposit-123",
+            from_user=SimpleNamespace(id=123),
+            message=message,
+            answer=AsyncMock(),
+        )
+        deposit = {
+            "id": "deposit-123",
+            "chat_id": 123,
+            "amount": "5.00",
+            "status": "pending",
+            "transaction_id": "txn-deposit-123",
+            "payment_provider": "aba",
+        }
+        store = SimpleNamespace(
+            user_language=AsyncMock(return_value="en"),
+            wallet_deposit_for_user=AsyncMock(return_value=deposit),
+            cancel_wallet_deposit=AsyncMock(return_value=True),
+            wallet_deposit_message=AsyncMock(
+                return_value={"chat_id": 123, "message_id": 456}
+            ),
+        )
+        payments = SimpleNamespace(
+            check_payment=AsyncMock(return_value={"status": "pending"})
+        )
+        original_callback_handlers = list(bot_module.router.callback_query.handlers)
+        original_message_handlers = list(bot_module.router.message.handlers)
+        try:
+            register_handlers(
+                SimpleNamespace(include_router=Mock()),
+                bot,
+                store,
+                payments,
+                SimpleNamespace(admin_ids=set()),
+            )
+            handler = [
+                handler.callback
+                for handler in bot_module.router.callback_query.handlers
+                if handler.callback.__name__ == "cancel_wallet_deposit_callback"
+            ][-1]
+
+            await handler(callback)
+
+            payments.check_payment.assert_awaited_once_with(
+                "txn-deposit-123", "aba"
+            )
+            store.cancel_wallet_deposit.assert_awaited_once_with("deposit-123")
+            bot.delete_message.assert_awaited_once_with(chat_id=123, message_id=456)
+            assert callback.answer.await_args.args == ("Deposit cancelled.",)
+            assert message.answer.await_args.args[0] == "Deposit cancelled."
+        finally:
+            bot_module.router.callback_query.handlers[:] = original_callback_handlers
+            bot_module.router.message.handlers[:] = original_message_handlers
+            bot_module.user_language_cache.pop(123, None)
 
     asyncio.run(run_test())
 

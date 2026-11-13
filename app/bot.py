@@ -1772,7 +1772,13 @@ def wallet_payment_keyboard(
                     style="success",
                 )
             ],
-            back_button("home", language),
+            [
+                InlineKeyboardButton(
+                    text=copy(language, "❌ បោះបង់", "❌ Cancel"),
+                    callback_data=f"wallet:cancel:{deposit_id}",
+                    style="danger",
+                )
+            ],
         ]
     )
     return keyboard(rows)
@@ -1830,7 +1836,57 @@ async def complete_wallet_deposit(
             "Wallet deposit %s was credited but the user notification could not be sent",
             deposit["id"],
         )
+    await notify_wallet_deposit_success(bot, store, deposit)
     return True
+
+
+async def notify_wallet_deposit_success(
+    bot: Bot, store: Store, deposit: dict[str, Any]
+) -> None:
+    try:
+        destinations_setting = (
+            (await store.bot_settings(("order_notification_chat_ids",)))
+            .get("order_notification_chat_ids", "")
+            .strip()
+        )
+    except Exception:
+        logger.exception("Could not load wallet deposit notification settings")
+        return
+    if not destinations_setting:
+        return
+
+    reference = deposit.get("transaction_id") or deposit["id"]
+    text = (
+        "🔔 <b>ការបញ្ចូលប្រាក់ថ្មី (New Wallet Deposit)</b>\n"
+        "───────────────────\n"
+        f"🆔 <b>Telegram ID:</b> <code>{int(deposit['chat_id'])}</code>\n"
+        f"💰 <b>ចំនួនទឹកប្រាក់:</b> {money(deposit['amount'])}\n"
+        f"🏦 <b>វិធីទូទាត់:</b> "
+        f"{html.escape(str(deposit.get('payment_provider') or 'Unknown'))}\n"
+        f"🏷 <b>Ref ID:</b> <code>{html.escape(str(reference))}</code>\n"
+        "───────────────────\n"
+        "✅ <b>ស្ថានភាព:</b> បញ្ចូលប្រាក់ទៅ Wallet រួចរាល់"
+    )
+    for value in destinations_setting.split(","):
+        destination = value.strip()
+        if not destination:
+            continue
+        try:
+            chat_id: int | str = int(destination)
+        except ValueError:
+            if not destination.startswith("@"):
+                logger.warning(
+                    "Ignoring invalid wallet deposit notification destination %r",
+                    destination,
+                )
+                continue
+            chat_id = destination
+        try:
+            await bot.send_message(chat_id, text, parse_mode="HTML")
+        except Exception:
+            logger.exception(
+                "Could not send wallet deposit notification to %s", chat_id
+            )
 
 
 async def expire_wallet_deposit(
@@ -4081,6 +4137,117 @@ def register_handlers(
                 ),
                 show_alert=True,
             )
+
+    @router.callback_query(F.data.startswith("wallet:cancel:"))
+    async def cancel_wallet_deposit_callback(callback: CallbackQuery) -> None:
+        deposit_id = callback.data.removeprefix("wallet:cancel:")
+        language = await safe_user_language(store, callback.from_user.id)
+        deposit = await store.wallet_deposit_for_user(
+            deposit_id, callback.from_user.id
+        )
+        if not deposit:
+            await callback.answer(
+                copy(language, "រកមិនឃើញការបញ្ចូលប្រាក់នេះទេ។", "Deposit not found."),
+                show_alert=True,
+            )
+            return
+        if deposit["status"] != "pending":
+            await callback.answer(
+                copy(
+                    language,
+                    "ការបញ្ចូលប្រាក់នេះមិនអាចបោះបង់បានទេ។",
+                    "This deposit can no longer be cancelled.",
+                ),
+                show_alert=True,
+            )
+            return
+        if deposit.get("transaction_id"):
+            try:
+                payment = await payments.check_payment(
+                    str(deposit["transaction_id"]), deposit.get("payment_provider")
+                )
+            except Exception:
+                logger.exception(
+                    "Could not verify payment before cancelling wallet deposit %s",
+                    deposit_id,
+                )
+                await callback.answer(
+                    copy(
+                        language,
+                        "មិនអាចផ្ទៀងផ្ទាត់ការទូទាត់បានទេ។ សូមសាកល្បងម្ដងទៀត។",
+                        "Could not verify payment. Please try again.",
+                    ),
+                    show_alert=True,
+                )
+                return
+            status = payment.get("status")
+            if status == "paid":
+                if Decimal(str(payment.get("amount"))) != Decimal(
+                    str(deposit["amount"])
+                ):
+                    await callback.answer(
+                        copy(
+                            language,
+                            "ចំនួនទឹកប្រាក់មិនត្រូវគ្នា។",
+                            "Payment amount mismatch.",
+                        ),
+                        show_alert=True,
+                    )
+                    return
+                completed = await complete_wallet_deposit(
+                    bot, store, deposit, language
+                )
+                await callback.answer(
+                    copy(
+                        language,
+                        "បានបញ្ចូលប្រាក់ជោគជ័យ។"
+                        if completed
+                        else "ការបញ្ចូលប្រាក់នេះបានដំណើរការរួចហើយ។",
+                        "Wallet credited successfully."
+                        if completed
+                        else "This deposit was already processed.",
+                    ),
+                    show_alert=True,
+                )
+                return
+            if status in {"expired", "failed"}:
+                await expire_wallet_deposit(bot, store, deposit, status)
+                await callback.answer(
+                    copy(
+                        language,
+                        "ការទូទាត់មិនបានបញ្ចប់។",
+                        "Payment was not completed.",
+                    ),
+                    show_alert=True,
+                )
+                return
+        cancelled = await store.cancel_wallet_deposit(deposit_id)
+        if not cancelled:
+            current_deposit = await store.wallet_deposit_for_user(
+                deposit_id, callback.from_user.id
+            )
+            if current_deposit and current_deposit["status"] == "paid":
+                message = copy(
+                    language,
+                    "ការបញ្ចូលប្រាក់នេះបានដំណើរការរួចហើយ។",
+                    "This deposit was already processed.",
+                )
+            else:
+                message = copy(
+                    language,
+                    "ការបញ្ចូលប្រាក់នេះមិនអាចបោះបង់បានទេ។",
+                    "This deposit can no longer be cancelled.",
+                )
+            await callback.answer(message, show_alert=True)
+            return
+        await close_wallet_deposit_message(bot, store, deposit_id)
+        await callback.answer(
+            copy(language, "បានបោះបង់ការបញ្ចូលប្រាក់។", "Deposit cancelled.")
+        )
+        await callback.message.answer(
+            copy(language, "បានបោះបង់ការបញ្ចូលប្រាក់។", "Deposit cancelled."),
+            reply_markup=welcome_keyboard(callback.from_user.id, settings),
+        )
 
     @router.callback_query(F.data == "shop")
     async def shop(callback: CallbackQuery) -> None:

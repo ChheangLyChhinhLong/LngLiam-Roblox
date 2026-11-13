@@ -319,7 +319,7 @@ Admin panel អាចបន្ថែម/កែ Catalog និង Package, បិ
 - កុំបិទ Supabase RLS និងកុំបង្កើត public access policies សម្រាប់ orders/stock។ Backend ប្រើ service-role key ដោយផ្ទាល់។
 - ក្នុង **Admin → Settings → Notifications** កំណត់ Stock និង Order notification destinations។ វាគាំទ្រ Telegram user ID, private group/channel chat ID (ឧ. `-1001234567890`) ឬ public `@username`; អាចបញ្ចូលច្រើនដោយបំបែកជាមួយ comma។ បន្ថែម bot ទៅ group ហើយអនុញ្ញាតឲ្យផ្ញើសារ; សម្រាប់ channel ត្រូវបន្ថែម bot ជា admin ដែលអាច post បាន។
 - Stock notification ក៏ផ្ញើទៅ users ដែលបានប្រើ bot រួច។ ប៊ូតុង **View product / មើល Package** បើក private chat ជាមួយ Bot ហើយបង្ហាញ Package ដែលមានស្តុកថ្មី។
-- Order notification ផ្ញើ Order Log បន្ទាប់ពីទទួល payment និងប្រគល់ Key ជោគជ័យ។ Log មានអតិថិជន, Telegram ID, Package, ចំនួនទឹកប្រាក់/ប្រភេទតម្លៃ, transaction reference និងម៉ោង Asia/Phnom_Penh។
+- Order notification ផ្ញើ Order Log បន្ទាប់ពីទទួល payment និងប្រគល់ Key ជោគជ័យ ហើយក៏ជូនដំណឹងអំពី Wallet deposit ដែលបានបញ្ចូលសមតុល្យរួចរាល់ផងដែរ។ Log មាន Telegram ID, ចំនួនទឹកប្រាក់ និង transaction reference។
 - Digital Key/Code ក្នុង database ត្រូវបាន encrypt។ ឯកសារ `.txt` មុន import និងសារ stock ក្នុង Telegram នៅតែជា plaintext ដូច្នេះកុំទុក/បញ្ជូនវាក្នុងកន្លែងមិនមានសុវត្ថិភាព។
 - កុំ run bot local និង Render instance ច្រើនក្នុងពេលតែមួយដោយប្រើ bot token ដូចគ្នា ពេល long polling កំពុងដំណើរការ។
 - ការបង្កើត payment មាន idempotency key ដោយប្រើ order ID។ ការបញ្ជូន order កើតឡើងតែបន្ទាប់ពី KHQRPay API បញ្ជាក់ការទូទាត់ប៉ុណ្ណោះ។

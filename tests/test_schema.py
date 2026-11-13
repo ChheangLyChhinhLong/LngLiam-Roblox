@@ -46,3 +46,29 @@ def test_set_order_payment_permissions_match_function_signature():
         == expected_types
         for signature in permissions
     )
+
+
+def test_wallet_deposits_allow_cancellation_and_restrict_cancel_rpc():
+    schema = (Path(__file__).parents[1] / "schema.sql").read_text(
+        encoding="utf-8"
+    )
+
+    assert (
+        "check (status in ('pending', 'paid', 'expired', 'failed', 'cancelled'))"
+        in schema
+    )
+    assert (
+        "create or replace function public.cancel_wallet_deposit(p_deposit_id uuid)"
+        in schema
+    )
+    assert (
+        "where id = p_deposit_id and status = 'pending';\n    return found;" in schema
+    )
+    assert (
+        "revoke all on function public.cancel_wallet_deposit(uuid) "
+        "from public, anon, authenticated;"
+    ) in schema
+    assert (
+        "grant execute on function public.cancel_wallet_deposit(uuid) to service_role;"
+        in schema
+    )

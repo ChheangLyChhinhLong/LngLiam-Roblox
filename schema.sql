@@ -23,7 +23,8 @@ create table if not exists public.wallet_deposits (
     id uuid primary key default gen_random_uuid(),
     chat_id bigint not null,
     amount numeric(10, 2) not null check (amount >= 1 and amount <= 500),
-    status text not null default 'pending' check (status in ('pending', 'paid', 'expired', 'failed')),
+    status text not null default 'pending'
+        check (status in ('pending', 'paid', 'expired', 'failed', 'cancelled')),
     transaction_id text unique,
     payment_provider text check (payment_provider in ('aba', 'bakong')),
     payment_url text,
@@ -31,6 +32,12 @@ create table if not exists public.wallet_deposits (
     created_at timestamptz not null default now(),
     credited_at timestamptz
 );
+alter table public.wallet_deposits drop constraint if exists wallet_deposits_status_check;
+alter table public.wallet_deposits
+    add constraint wallet_deposits_status_check
+    check (
+        status in ('pending', 'paid', 'expired', 'failed', 'cancelled')
+    );
 alter table public.wallet_deposits add column if not exists payment_provider text;
 
 create table if not exists public.broadcast_jobs (
@@ -397,6 +404,16 @@ begin
 end;
 $$;
 
+create or replace function public.cancel_wallet_deposit(p_deposit_id uuid)
+returns boolean language plpgsql security definer set search_path = public as $$
+begin
+    update wallet_deposits
+    set status = 'cancelled'
+    where id = p_deposit_id and status = 'pending';
+    return found;
+end;
+$$;
+
 revoke all on function public.reserve_order(bigint, uuid, integer) from public, anon, authenticated;
 revoke all on function public.reserve_wallet_order(bigint, uuid, integer) from public, anon, authenticated;
 revoke all on function public.set_order_payment(uuid, text, text, text) from public, anon, authenticated;
@@ -410,6 +427,7 @@ revoke all on function public.create_wallet_deposit(bigint, numeric) from public
 revoke all on function public.set_wallet_deposit_payment(uuid, text, text, text) from public, anon, authenticated;
 revoke all on function public.complete_wallet_deposit(uuid) from public, anon, authenticated;
 revoke all on function public.close_wallet_deposit(uuid, text) from public, anon, authenticated;
+revoke all on function public.cancel_wallet_deposit(uuid) from public, anon, authenticated;
 grant execute on function public.reserve_order(bigint, uuid, integer) to service_role;
 grant execute on function public.reserve_wallet_order(bigint, uuid, integer) to service_role;
 grant execute on function public.set_order_payment(uuid, text, text, text) to service_role;
@@ -423,5 +441,6 @@ grant execute on function public.create_wallet_deposit(bigint, numeric) to servi
 grant execute on function public.set_wallet_deposit_payment(uuid, text, text, text) to service_role;
 grant execute on function public.complete_wallet_deposit(uuid) to service_role;
 grant execute on function public.close_wallet_deposit(uuid, text) to service_role;
+grant execute on function public.cancel_wallet_deposit(uuid) to service_role;
 
 notify pgrst, 'reload schema';
