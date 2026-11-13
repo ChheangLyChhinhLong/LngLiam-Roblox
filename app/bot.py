@@ -6634,22 +6634,58 @@ def register_handlers(
         if callback.from_user.id not in settings.admin_ids:
             return
         result = (
-            await store.client.table("products")
+            await store.client.table("categories")
             .select("id,name")
             .eq("active", True)
             .order("sort_order")
             .execute()
         )
+        categories = result.data or []
         rows = [
-            [InlineKeyboardButton(text=item["name"], callback_data=f"au:{item['id']}")]
-            for item in result.data
+            [
+                InlineKeyboardButton(
+                    text=f"🗂 {item['name']}",
+                    callback_data=f"admin:upload:catalog:{item['id']}",
+                )
+            ]
+            for item in categories
         ]
         rows.append(back_button("admin", language))
         await callback.message.edit_text(
             copy(
                 language,
-                "ជ្រើសរើសផលិតផលសម្រាប់បញ្ចូលស្តុក៖",
-                "Choose a product for the stock import:",
+                "ជ្រើសរើស Catalog សម្រាប់បញ្ចូលស្តុក៖",
+                "Choose a catalog for the stock import:",
+            ),
+            reply_markup=keyboard(rows),
+        )
+
+    @router.callback_query(F.data.startswith("admin:upload:catalog:"))
+    async def choose_stock_package(callback: CallbackQuery) -> None:
+        await callback.answer()
+        language = await safe_user_language(store, callback.from_user.id)
+        if callback.from_user.id not in settings.admin_ids:
+            return
+        category_id = callback.data.removeprefix("admin:upload:catalog:")
+        result = (
+            await store.client.table("products")
+            .select("id,name")
+            .eq("category_id", category_id)
+            .eq("active", True)
+            .order("sort_order")
+            .execute()
+        )
+        products = result.data or []
+        rows = [
+            [InlineKeyboardButton(text=item["name"], callback_data=f"au:{item['id']}")]
+            for item in products
+        ]
+        rows.append(back_button("admin:upload", language))
+        await callback.message.edit_text(
+            copy(
+                language,
+                "ជ្រើសរើស Package សម្រាប់បញ្ចូលស្តុក៖",
+                "Choose a package for the stock import:",
             ),
             reply_markup=keyboard(rows),
         )

@@ -1262,6 +1262,95 @@ def test_admin_package_actions_group_editing_and_stock_controls():
     ]
 
 
+def test_stock_import_selects_catalog_before_package():
+    async def run_test():
+        user_id = 7654324
+
+        def query_with_data(data):
+            query = Mock()
+            query.select.return_value = query
+            query.eq.return_value = query
+            query.order.return_value = query
+            query.execute = AsyncMock(return_value=SimpleNamespace(data=data))
+            return query
+
+        categories_query = query_with_data(
+            [{"id": "catalog-123", "name": "Catalog 1"}]
+        )
+        products_query = query_with_data(
+            [{"id": "package-456", "name": "Package 1"}]
+        )
+        client = SimpleNamespace(
+            table=Mock(side_effect=[categories_query, products_query])
+        )
+        store = SimpleNamespace(
+            user_language=AsyncMock(return_value="en"),
+            client=client,
+        )
+        settings = SimpleNamespace(admin_ids={user_id})
+        callback_handlers = list(bot_module.router.callback_query.handlers)
+        message_handlers = list(bot_module.router.message.handlers)
+        register_handlers(
+            SimpleNamespace(include_router=Mock()),
+            SimpleNamespace(),
+            store,
+            SimpleNamespace(),
+            settings,
+        )
+        handlers = {
+            handler.callback.__name__: handler.callback
+            for handler in bot_module.router.callback_query.handlers
+        }
+
+        catalog_prompt = SimpleNamespace(edit_text=AsyncMock())
+        catalog_callback = SimpleNamespace(
+            data="admin:upload",
+            from_user=SimpleNamespace(id=user_id),
+            message=catalog_prompt,
+            answer=AsyncMock(),
+        )
+        await handlers["choose_stock_product"](catalog_callback)
+
+        catalog_markup = catalog_prompt.edit_text.await_args.kwargs["reply_markup"]
+        catalog_buttons = [
+            button
+            for row in catalog_markup.inline_keyboard
+            for button in row
+        ]
+        assert catalog_prompt.edit_text.await_args.args[0] == (
+            "Choose a catalog for the stock import:"
+        )
+        assert catalog_buttons[0].callback_data == "admin:upload:catalog:catalog-123"
+        assert catalog_buttons[-1].callback_data == "admin"
+
+        package_prompt = SimpleNamespace(edit_text=AsyncMock())
+        package_callback = SimpleNamespace(
+            data="admin:upload:catalog:catalog-123",
+            from_user=SimpleNamespace(id=user_id),
+            message=package_prompt,
+            answer=AsyncMock(),
+        )
+        await handlers["choose_stock_package"](package_callback)
+
+        products_query.eq.assert_has_calls(
+            [call("category_id", "catalog-123"), call("active", True)]
+        )
+        package_markup = package_prompt.edit_text.await_args.kwargs["reply_markup"]
+        package_buttons = [
+            button for row in package_markup.inline_keyboard for button in row
+        ]
+        assert package_prompt.edit_text.await_args.args[0] == (
+            "Choose a package for the stock import:"
+        )
+        assert package_buttons[0].callback_data == "au:package-456"
+        assert package_buttons[-1].callback_data == "admin:upload"
+
+        bot_module.router.callback_query.handlers[:] = callback_handlers
+        bot_module.router.message.handlers[:] = message_handlers
+
+    asyncio.run(run_test())
+
+
 def test_admin_actions_are_translated_for_english_users():
     category_rows = admin_category_actions("category-123", "en")
     product_rows = admin_product_actions("product-123", "category-123", "en")

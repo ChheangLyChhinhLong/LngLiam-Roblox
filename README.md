@@ -164,7 +164,7 @@ addstock PRODUCT_UUID | key1, key2
 
 ### បញ្ចូល stock ជា `.txt`
 
-ក្នុង Admin panel ជ្រើស **Import stock (.txt)**, ជ្រើស package ហើយផ្ញើឯកសារ `.txt`។ ឯកសារមិនអាចធំជាង 1 MB; ដាក់ Digital Key ឬ Code មួយក្នុងមួយបន្ទាត់។
+ក្នុង Admin panel ជ្រើស **Import stock (.txt)**, ជ្រើស Catalog រួចជ្រើស Package ហើយផ្ញើឯកសារ `.txt`។ ឯកសារមិនអាចធំជាង 1 MB; ដាក់ Digital Key ឬ Code មួយក្នុងមួយបន្ទាត់។
 
 ### Broadcast
 
