@@ -16,7 +16,13 @@ import cloudinary.uploader
 from cloudinary.exceptions import Error as CloudinaryError
 from httpx import RequestError as HttpRequestError
 from aiogram import Bot, Dispatcher, F, Router
-from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramRetryAfter
+from aiogram.exceptions import (
+    TelegramAPIError,
+    TelegramBadRequest,
+    TelegramNetworkError,
+    TelegramRetryAfter,
+    TelegramServerError,
+)
 from aiogram.types import (
     BufferedInputFile,
     CallbackQuery,
@@ -860,11 +866,20 @@ def broadcast_draft_keyboard(
 
 
 async def telegram_call_with_retry(request: Callable[[], Awaitable[Any]]) -> Any:
-    try:
-        return await request()
-    except TelegramRetryAfter as exc:
-        await asyncio.sleep(float(exc.retry_after))
-        return await request()
+    attempt = 0
+    while True:
+        try:
+            return await request()
+        except TelegramRetryAfter as exc:
+            if attempt >= 2:
+                raise
+            attempt += 1
+            await asyncio.sleep(float(exc.retry_after))
+        except (TelegramNetworkError, TelegramServerError):
+            if attempt >= 2:
+                raise
+            await asyncio.sleep(min(2**attempt, 5))
+            attempt += 1
 
 
 def parse_broadcast_buttons(text: str) -> list[dict[str, str]]:
@@ -1946,7 +1961,7 @@ async def notify_stock_added(
             return
         category = await store.category(product["category_id"])
         users = await store.stock_notification_users()
-        bot_username = (await bot.get_me()).username
+        bot_username = (await telegram_call_with_retry(bot.get_me)).username
     except Exception:
         logger.exception(
             "Could not prepare stock notification for product %s", product_id
@@ -2020,16 +2035,18 @@ async def notify_stock_added(
             ]
         )
         try:
-            await bot.send_message(
-                chat_id,
-                text,
-                parse_mode="HTML",
-                reply_markup=keyboard_markup,
+            await telegram_call_with_retry(
+                lambda: bot.send_message(
+                    chat_id,
+                    text,
+                    parse_mode="HTML",
+                    reply_markup=keyboard_markup,
+                )
             )
             sent += 1
         except Exception:
             failed += 1
-            logger.debug(
+            logger.warning(
                 "Could not send stock notification to %s", chat_id, exc_info=True
             )
         if index % 20 == 0:
@@ -2141,7 +2158,9 @@ async def notify_order_success(
                 )
     for destination in destinations:
         try:
-            await bot.send_message(destination, text, parse_mode="HTML")
+            await telegram_call_with_retry(
+                lambda: bot.send_message(destination, text, parse_mode="HTML")
+            )
         except Exception:
             logger.exception(
                 "Could not send completed order %s notification to %s",

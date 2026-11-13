@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, Mock, call
 
 from cryptography.fernet import Fernet
 import pytest
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramBadRequest, TelegramServerError
 
 from app.bot import (
     admin_category_actions,
@@ -3465,6 +3465,90 @@ def test_stock_notification_reaches_users_and_configured_chats_once():
             == "🛍 ទិញឥឡូវនេះ"
         )
 
+    asyncio.run(run_test())
+
+
+def test_stock_notification_retries_temporary_telegram_failure(monkeypatch):
+    async def run_test():
+        bot = SimpleNamespace(
+            get_me=AsyncMock(
+                side_effect=[
+                    TelegramServerError(Mock(), "temporary failure"),
+                    SimpleNamespace(username="JingRobloxBot"),
+                ]
+            ),
+            send_message=AsyncMock(
+                side_effect=[
+                    TelegramServerError(Mock(), "temporary failure"),
+                    Mock(),
+                ]
+            ),
+        )
+        store = SimpleNamespace(
+            product=AsyncMock(
+                return_value={
+                    "id": "product-123",
+                    "category_id": "category-123",
+                    "name": "Robux",
+                }
+            ),
+            category=AsyncMock(return_value={"name": "VPN"}),
+            stock_notification_users=AsyncMock(return_value=[]),
+            bot_settings=AsyncMock(
+                return_value={"stock_notification_chat_ids": "-100987"}
+            ),
+        )
+        await notify_stock_added(bot, store, "product-123", 4)
+
+        assert bot.get_me.await_count == 2
+        assert bot.send_message.await_count == 2
+        assert bot.send_message.await_args_list[0].args[0] == -100987
+        assert bot.send_message.await_args_list[1].args[0] == -100987
+
+    monkeypatch.setattr(bot_module.asyncio, "sleep", AsyncMock())
+    asyncio.run(run_test())
+
+
+def test_order_notification_retries_temporary_telegram_failure(monkeypatch):
+    async def run_test():
+        order = {
+            "id": "order-123",
+            "chat_id": 123456789,
+            "quantity": 1,
+            "total": "1.00",
+            "transaction_id": "txn_abc123456",
+            "created_at": "2026-10-20T09:35:00+00:00",
+            "product": {"name": "Robux", "price": "1.00", "reseller_price": "1.00"},
+            "customer": {"first_name": "Buyer"},
+            "credentials": [],
+        }
+        bot = SimpleNamespace(
+            send_message=AsyncMock(
+                side_effect=[
+                    TelegramServerError(Mock(), "temporary failure"),
+                    Mock(),
+                ]
+            )
+        )
+        store = SimpleNamespace(
+            order_notification_details=AsyncMock(return_value=order),
+            bot_settings=AsyncMock(
+                return_value={"order_notification_chat_ids": "-100987"}
+            ),
+        )
+
+        await notify_order_success(
+            bot,
+            store,
+            SimpleNamespace(stock_encryption_key=Fernet.generate_key().decode()),
+            "order-123",
+        )
+
+        assert bot.send_message.await_count == 2
+        assert bot.send_message.await_args_list[0].args[0] == -100987
+        assert bot.send_message.await_args_list[1].args[0] == -100987
+
+    monkeypatch.setattr(bot_module.asyncio, "sleep", AsyncMock())
     asyncio.run(run_test())
 
 
