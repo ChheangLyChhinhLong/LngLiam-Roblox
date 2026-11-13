@@ -1177,6 +1177,10 @@ def stock_button_style(stock: int) -> str:
     return "success" if stock > 0 else "danger"
 
 
+def catalog_button_style(package_stock_counts: list[int]) -> str:
+    return stock_button_style(max(package_stock_counts, default=0))
+
+
 def checkout_payment_rows(
     product_id: str,
     quantity: int,
@@ -2874,13 +2878,26 @@ def register_handlers(
             )
             return
         visible_categories, page, page_count = paginate(categories, page)
+        products_by_catalog = await asyncio.gather(
+            *(store.products(item["id"]) for item in visible_categories)
+        )
+        stock_counts_by_catalog = await asyncio.gather(
+            *(
+                asyncio.gather(
+                    *(store.available_stock(product["id"]) for product in products)
+                )
+                for products in products_by_catalog
+            )
+        )
         rows = [
             [
                 InlineKeyboardButton(
-                    text=f"🛍 {item['name']}", callback_data=f"c:{item['id']}"
+                    text=f"🛍 {item['name']}",
+                    callback_data=f"c:{item['id']}",
+                    style=catalog_button_style(stock_counts),
                 )
             ]
-            for item in visible_categories
+            for item, stock_counts in zip(visible_categories, stock_counts_by_catalog)
         ]
         navigation = pagination_row(page, page_count, "shop:catalogs", language)
         if navigation:

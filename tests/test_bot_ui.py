@@ -19,6 +19,7 @@ from app.bot import (
     bot_setting_section,
     copy,
     checkout_payment_rows,
+    catalog_button_style,
     complete_wallet_deposit,
     delete_broadcast_source,
     delete_replaced_message,
@@ -753,6 +754,72 @@ def test_stock_buttons_are_green_when_available_and_red_when_empty():
     assert stock_button_style(1) == "success"
     assert stock_button_style(150) == "success"
     assert stock_button_style(0) == "danger"
+
+
+def test_catalog_button_is_green_if_any_package_has_stock():
+    assert catalog_button_style([0, 3, 0]) == "success"
+    assert catalog_button_style([0, 0]) == "danger"
+    assert catalog_button_style([]) == "danger"
+
+
+def test_shop_catalog_buttons_reflect_stock_across_all_packages():
+    async def run_test():
+        user_id = 7654399
+        categories = [
+            {"id": "available", "name": "Available", "description": ""},
+            {"id": "empty", "name": "Empty", "description": ""},
+            {"id": "no-packages", "name": "No packages", "description": ""},
+        ]
+        products_by_catalog = {
+            "available": [{"id": "p1"}, {"id": "p2"}],
+            "empty": [{"id": "p3"}],
+            "no-packages": [],
+        }
+        stock_by_product = {"p1": 0, "p2": 2, "p3": 0}
+        store = SimpleNamespace(
+            categories=AsyncMock(return_value=categories),
+            products=AsyncMock(side_effect=products_by_catalog.__getitem__),
+            available_stock=AsyncMock(side_effect=stock_by_product.__getitem__),
+            user_language=AsyncMock(return_value="en"),
+        )
+        message = SimpleNamespace(
+            text="Shop",
+            edit_text=AsyncMock(),
+        )
+        callback = SimpleNamespace(
+            from_user=SimpleNamespace(id=user_id),
+            message=message,
+            answer=AsyncMock(),
+        )
+        original_callback_handlers = list(bot_module.router.callback_query.handlers)
+        original_message_handlers = list(bot_module.router.message.handlers)
+        try:
+            register_handlers(
+                SimpleNamespace(include_router=Mock()),
+                SimpleNamespace(),
+                store,
+                SimpleNamespace(),
+                SimpleNamespace(admin_ids=set()),
+            )
+            handler = [
+                handler.callback
+                for handler in bot_module.router.callback_query.handlers
+                if handler.callback.__name__ == "shop"
+            ][-1]
+
+            await handler(callback)
+
+            markup = message.edit_text.await_args.kwargs["reply_markup"]
+            assert [
+                row[0].style for row in markup.inline_keyboard[:3]
+            ] == ["success", "danger", "danger"]
+            assert store.available_stock.await_count == 3
+        finally:
+            bot_module.router.callback_query.handlers[:] = original_callback_handlers
+            bot_module.router.message.handlers[:] = original_message_handlers
+            bot_module.user_language_cache.pop(user_id, None)
+
+    asyncio.run(run_test())
 
 
 def test_product_description_is_limited_to_three_lines():
