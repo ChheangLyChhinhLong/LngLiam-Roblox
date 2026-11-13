@@ -1602,17 +1602,25 @@ def admin_category_actions(
     return [
         [
             InlineKeyboardButton(
-                text=copy(language, "➕ បន្ថែម Package", "➕ Add package"),
+                text=copy(
+                    language,
+                    "➕ បន្ថែមកញ្ចប់ទំនិញ",
+                    "➕ Add product package",
+                ),
                 callback_data=f"admin:product-add:{category_id}",
             )
         ],
         [
             InlineKeyboardButton(
-                text=copy(language, "✏️ កែ Catalog", "✏️ Edit catalog"),
+                text=copy(language, "✏️ កែបញ្ជីមុខទំនិញ", "✏️ Edit product list"),
                 callback_data=f"admin:category-edit:{category_id}",
             ),
             InlineKeyboardButton(
-                text=copy(language, "🗑 បិទ Catalog", "🗑 Disable catalog"),
+                text=copy(
+                    language,
+                    "🗑 បិទបញ្ជីមុខទំនិញ",
+                    "🗑 Disable product list",
+                ),
                 callback_data=f"admin:category-disable:{category_id}",
                 style="danger",
             ),
@@ -1627,11 +1635,15 @@ def admin_product_actions(
     return [
         [
             InlineKeyboardButton(
-                text=copy(language, "✏️ កែ Package", "✏️ Edit package"),
+                text=copy(language, "✏️ កែកញ្ចប់ទំនិញ", "✏️ Edit product package"),
                 callback_data=f"admin:product-edit:{product_id}",
             ),
             InlineKeyboardButton(
-                text=copy(language, "🗑 បិទ Package", "🗑 Disable package"),
+                text=copy(
+                    language,
+                    "🗑 បិទកញ្ចប់ទំនិញ",
+                    "🗑 Disable product package",
+                ),
                 callback_data=f"admin:product-disable:{product_id}",
                 style="danger",
             ),
@@ -2001,8 +2013,8 @@ async def notify_stock_added(
         if language == "en":
             text = (
                 "📢 <b>New stock has arrived!</b>\n\n"
-                f"📦 • Product: <b>{category_name}</b>\n"
-                f"📦 • Package: <b>{product_name}</b>\n"
+                f"📦 • Product list: <b>{category_name}</b>\n"
+                f"📦 • Product package: <b>{product_name}</b>\n"
                 f"📦 • Newly added: <b>{added}</b>\n\n"
                 "✅ <b>Stock is ready to purchase!</b>\n"
                 "👉 Tap the button below to buy:"
@@ -2011,8 +2023,8 @@ async def notify_stock_added(
         elif language == "km":
             text = (
                 "📢 <b>ស្តុកថ្មីបានមកដល់ហើយ!</b>\n\n"
-                f"📦 • ទំនិញ៖ <b>{category_name}</b>\n"
-                f"📦 • កញ្ចប់៖ <b>{product_name}</b>\n"
+                f"📦 • បញ្ជីមុខទំនិញ៖ <b>{category_name}</b>\n"
+                f"📦 • កញ្ចប់ទំនិញ៖ <b>{product_name}</b>\n"
                 f"📦 • ចំនួនបន្ថែមថ្មី៖ <b>{added}</b>\n\n"
                 "✅ <b>ស្តុកបានបន្ថែមរួចរាល់ អាចធ្វើការទិញបាន!</b>\n"
                 "👉 ចុចប៊ូតុងខាងក្រោមដើម្បីទិញ៖"
@@ -2021,8 +2033,8 @@ async def notify_stock_added(
         else:
             text = (
                 "📢 <b>ស្តុកថ្មីបានមកដល់ហើយ / New stock has arrived!</b>\n\n"
-                f"📦 • ទំនិញ / Product: <b>{category_name}</b>\n"
-                f"📦 • កញ្ចប់ / Package: <b>{product_name}</b>\n"
+                f"📦 • បញ្ជីមុខទំនិញ / Product list: <b>{category_name}</b>\n"
+                f"📦 • កញ្ចប់ទំនិញ / Product package: <b>{product_name}</b>\n"
                 f"📦 • ចំនួនបន្ថែមថ្មី / Newly added: <b>{added}</b>\n\n"
                 "✅ <b>អាចធ្វើការទិញបាន / Ready to purchase!</b>\n"
                 "👉 ចុចប៊ូតុងខាងក្រោម / Tap the button below:"
@@ -2135,8 +2147,8 @@ async def notify_order_success(
         "───────────────────\n"
         f"👤 <b>អតិថិជន:</b> {customer_label}\n"
         f"🆔 <b>Telegram ID:</b> <code>{int(order['chat_id'])}</code>\n"
-        f"🛍 <b>ប្រភេទផលិតផល:</b> {html.escape(str(product.get('category_name') or 'Unknown'))}\n"
-        f"📦 <b>ផលិតផល:</b> {html.escape(str(product.get('name') or 'Unknown'))} (x{quantity})\n"
+        f"🛍 <b>បញ្ជីមុខទំនិញ:</b> {html.escape(str(product.get('category_name') or 'Unknown'))}\n"
+        f"📦 <b>កញ្ចប់ទំនិញ:</b> {html.escape(str(product.get('name') or 'Unknown'))} (x{quantity})\n"
         "<b>🔑 បញ្ជីទំនិញ:</b>\n"
         f"{key_lines}\n"
         f"💰 <b>ចំនួនទឹកប្រាក់:</b> {money(order['total'])} ({price_type})\n"
@@ -2871,8 +2883,8 @@ def register_handlers(
             await render(
                 copy(
                     language,
-                    "បច្ចុប្បន្នមិនមានប្រភេទទំនិញទេ។ សូមពិនិត្យម្ដងទៀតពេលក្រោយ។",
-                    "There are no product categories yet. Please check back later.",
+                    "បច្ចុប្បន្នមិនមានបញ្ជីមុខទំនិញទេ។ សូមពិនិត្យម្ដងទៀតពេលក្រោយ។",
+                    "There are no product lists yet. Please check back later.",
                 ),
                 reply_markup=keyboard([back_button(language=language)]),
             )
@@ -2905,12 +2917,12 @@ def register_handlers(
         rows.append(back_button(language=language))
         text = copy(
             language,
-            "🛍 <b>សូមជ្រើសរើសប្រភេទផលិតផល</b>\n"
+            "🛍 <b>សូមជ្រើសរើសបញ្ជីមុខទំនិញ</b>\n"
             "───────────────────\n"
-            "សូមជ្រើសរើស Catalog ណាមួយខាងក្រោមដើម្បីមើល Package ទំនិញ៖",
-            "🛍 <b>Choose a product category</b>\n"
+            "ជ្រើសរើសបញ្ជីខាងក្រោម ដើម្បីមើលកញ្ចប់ទំនិញ៖",
+            "🛍 <b>Choose a product list</b>\n"
             "───────────────────\n"
-            "Choose a catalog below to browse its packages:",
+            "Choose a product list below to browse its product packages:",
         )
         await render(
             text,
@@ -2931,8 +2943,8 @@ def register_handlers(
                 message,
                 copy(
                     language,
-                    "ប្រភេទផលិតផលនេះមិនមានទៀតទេ។",
-                    "This category is no longer available.",
+                    "បញ្ជីមុខទំនិញនេះលែងមានទៀតហើយ។",
+                    "This product list is no longer available.",
                 ),
                 reply_markup=keyboard([back_button("shop", language)]),
             )
@@ -2945,8 +2957,8 @@ def register_handlers(
                 "───────────────────\n"
                 + copy(
                     language,
-                    "ប្រភេទនេះមិនទាន់មាន Package ទេ។",
-                    "There are no packages in this category yet.",
+                    "បញ្ជីមុខទំនិញនេះមិនទាន់មានកញ្ចប់ទំនិញទេ។",
+                    "This product list has no product packages yet.",
                 ),
                 parse_mode="HTML",
                 reply_markup=keyboard([back_button("shop", language)]),
@@ -2981,10 +2993,10 @@ def register_handlers(
             language,
             f"🛍 <b>{html.escape(category_data['name'])}</b>\n"
             "───────────────────\n"
-            f"{intro + chr(10) if intro else ''}សូមជ្រើសរើស Package ខាងក្រោម៖",
+            f"{intro + chr(10) if intro else ''}សូមជ្រើសរើសកញ្ចប់ទំនិញខាងក្រោម៖",
             f"🛍 <b>{html.escape(category_data['name'])}</b>\n"
             "───────────────────\n"
-            f"{intro + chr(10) if intro else ''}Choose a package below:",
+            f"{intro + chr(10) if intro else ''}Choose a product package below:",
         )
         await edit_text_message(
             message, text, parse_mode="HTML", reply_markup=keyboard(rows)
@@ -3564,7 +3576,9 @@ def register_handlers(
 
         step_number = steps.index(step) + 1
         step_labels = {
-            "media": copy(language, "Media Package", "Package media"),
+            "media": copy(
+                language, "មេឌៀកញ្ចប់ទំនិញ", "Product package media"
+            ),
             "name": copy(language, "ឈ្មោះ", "Name"),
             "description": copy(language, "ព័ត៌មានលម្អិត", "Details"),
             "price": copy(language, "តម្លៃទូទៅ", "Customer price"),
@@ -3579,8 +3593,8 @@ def register_handlers(
         prompts = {
             "media": copy(
                 language,
-                "សូមផ្ញើរូបភាព ឬវីដេអូ Package។",
-                "Send a package photo or video.",
+                "សូមផ្ញើរូបភាព ឬវីដេអូសម្រាប់កញ្ចប់ទំនិញ។",
+                "Send a photo or video for the product package.",
             ),
             "name": copy(language, "សូមបញ្ចូលឈ្មោះផលិតផល។", "Enter the product name."),
             "description": copy(
@@ -3598,13 +3612,13 @@ def register_handlers(
             ),
             "delivery_message": copy(
                 language,
-                "ផ្ញើសារ ឬរបៀបប្រើដែលអតិថិជនទាំងអស់ក្នុង Catalog នេះនឹងទទួលក្រោយ Order។ ផ្ញើ - ដើម្បីលុប។",
-                "Send the message or usage instructions all customers in this catalog should receive after ordering. Send - to clear.",
+                "ផ្ញើសារ ឬរបៀបប្រើដែលអតិថិជនទាំងអស់ក្នុងបញ្ជីមុខទំនិញនេះនឹងទទួលក្រោយបញ្ជាទិញ។ ផ្ញើ - ដើម្បីលុប។",
+                "Send the message or instructions all customers in this product list should receive after ordering. Send - to clear.",
             ),
             "delivery_media": copy(
                 language,
-                "ផ្ញើ Media មួយ ឬ Album ដែលអតិថិជនទាំងអស់ក្នុង Catalog នេះនឹងទទួលក្រោយ Order។",
-                "Send one media item or album all customers in this catalog should receive after ordering.",
+                "ផ្ញើមេឌៀមួយ ឬអាល់ប៊ុមដែលអតិថិជនទាំងអស់ក្នុងបញ្ជីមុខទំនិញនេះនឹងទទួលក្រោយបញ្ជាទិញ។",
+                "Send one media item or album all customers in this product list should receive after ordering.",
             ),
         }
         telegram_media_steps = {"media", "delivery_media"}
@@ -3849,8 +3863,8 @@ def register_handlers(
                     raise InputValidationError(
                         copy(
                             language,
-                            "សូមជ្រើសរើស Catalog ជាមុនសិន។",
-                            "Choose a catalog first.",
+                            "សូមជ្រើសរើសបញ្ជីមុខទំនិញជាមុនសិន។",
+                            "Choose a product list first.",
                         )
                     )
                 await store.create_product(
@@ -3880,8 +3894,8 @@ def register_handlers(
             raise InputValidationError(
                 copy(
                     language,
-                    "ឈ្មោះ Catalog ត្រូវតែបញ្ចូល។",
-                    "Catalog name is required.",
+                    "សូមបញ្ចូលឈ្មោះបញ្ជីមុខទំនិញ។",
+                    "A product list name is required.",
                 )
             )
         category_values = {
@@ -4839,8 +4853,8 @@ def register_handlers(
                 InlineKeyboardButton(
                     text=copy(
                         language,
-                        "🗂 គ្រប់គ្រង Catalog និង Package",
-                        "🗂 Manage catalogs and packages",
+                        "🗂 គ្រប់គ្រងបញ្ជីមុខទំនិញ និងកញ្ចប់ទំនិញ",
+                        "🗂 Manage product lists and product packages",
                     ),
                     callback_data="admin:catalogs",
                 )
@@ -4892,7 +4906,11 @@ def register_handlers(
             f"📦 <b>{copy(language, 'ស្តុកដែលអាចលក់បាន៖', 'Available stock:')} {total_stock}</b>\n"
             + (
                 "\n".join(lines)
-                or copy(language, "មិនមាន Package សកម្មទេ។", "No active packages.")
+                or copy(
+                    language,
+                    "មិនមានកញ្ចប់ទំនិញសកម្មទេ។",
+                    "No active product packages.",
+                )
             ),
             parse_mode="HTML",
             reply_markup=keyboard(rows),
@@ -5601,7 +5619,11 @@ def register_handlers(
             [
                 [
                     InlineKeyboardButton(
-                        text=copy(language, "➕ បន្ថែម Catalog", "➕ Add catalog"),
+                        text=copy(
+                            language,
+                            "➕ បន្ថែមបញ្ជីមុខទំនិញ",
+                            "➕ Add product list",
+                        ),
                         callback_data="admin:category-add",
                     )
                 ],
@@ -5609,18 +5631,18 @@ def register_handlers(
             ]
         )
         await callback.message.edit_text(
-            f"🗂 <b>{copy(language, 'គ្រប់គ្រង Catalog', 'Manage catalogs')} ({len(categories)})</b>\n"
+            f"🗂 <b>{copy(language, 'គ្រប់គ្រងបញ្ជីមុខទំនិញ', 'Manage product lists')} ({len(categories)})</b>\n"
             + (
                 copy(
                     language,
-                    "ជ្រើសរើស Catalog ដើម្បីមើល Package និងសកម្មភាព៖",
-                    "Choose a catalog to view its packages and actions:",
+                    "ជ្រើសរើសបញ្ជីមុខទំនិញ ដើម្បីមើលកញ្ចប់ទំនិញ និងសកម្មភាព៖",
+                    "Choose a product list to view its product packages and actions:",
                 )
                 if categories
                 else copy(
                     language,
-                    "មិនទាន់មាន Catalog ទេ។ ចុចបន្ថែម Catalog ដើម្បីចាប់ផ្តើម។",
-                    "No catalogs yet. Add a catalog to get started.",
+                    "មិនទាន់មានបញ្ជីមុខទំនិញទេ។ ចុចបន្ថែមបញ្ជីមុខទំនិញ ដើម្បីចាប់ផ្តើម។",
+                    "No product lists yet. Add a product list to get started.",
                 )
             ),
             parse_mode="HTML",
@@ -5654,7 +5676,11 @@ def register_handlers(
         category_data = await store.category(category_id)
         if not category_data:
             await callback.message.edit_text(
-                copy(language, "រកមិនឃើញ Catalog ទេ។", "Catalog not found."),
+                copy(
+                    language,
+                    "រកមិនឃើញបញ្ជីមុខទំនិញទេ។",
+                    "Product list not found.",
+                ),
                 reply_markup=keyboard([back_button("admin:catalogs", language)]),
             )
             return
@@ -5682,12 +5708,12 @@ def register_handlers(
         ]
         rows.extend(admin_category_actions(category_id, language))
         product_summary = (
-            f"📦 {copy(language, 'Package សកម្ម៖', 'Active packages:')} {len(products)}"
+            f"📦 {copy(language, 'កញ្ចប់ទំនិញសកម្ម៖', 'Active product packages:')} {len(products)}"
             if products
             else copy(
                 language,
-                "មិនទាន់មាន Package ទេ។ ចុចបន្ថែម Package ដើម្បីចាប់ផ្តើម។",
-                "No packages yet. Add a package to get started.",
+                "មិនទាន់មានកញ្ចប់ទំនិញទេ។ ចុចបន្ថែមកញ្ចប់ទំនិញ ដើម្បីចាប់ផ្តើម។",
+                "No product packages yet. Add a product package to get started.",
             )
         )
         await callback.message.edit_text(
@@ -5711,7 +5737,11 @@ def register_handlers(
         product_data = await store.product(callback.data[3:])
         if not product_data:
             await callback.message.edit_text(
-                copy(language, "រកមិនឃើញ Package ទេ។", "Package not found."),
+                copy(
+                    language,
+                    "រកមិនឃើញកញ្ចប់ទំនិញទេ។",
+                    "Product package not found.",
+                ),
                 reply_markup=keyboard([back_button("admin:catalogs", language)]),
             )
             return
@@ -5726,7 +5756,7 @@ def register_handlers(
             f"{copy(language, 'តម្លៃ Reseller៖', 'Reseller price:')} {money(product_data['reseller_price'])}\n"
             f"{copy(language, 'ស្តុកនៅសល់៖', 'Stock remaining:')} {stock}\n\n"
             f"{html.escape(product_data.get('description') or '')}\n\n"
-            f"{copy(language, 'Catalog កំណត់សារ និង Media ក្រោយ Order សម្រាប់ Package ទាំងអស់។', 'After-order message and media are configured once for the whole catalog.')}",
+            f"{copy(language, 'បញ្ជីមុខទំនិញនេះកំណត់សារ និងមេឌៀក្រោយបញ្ជាទិញសម្រាប់កញ្ចប់ទំនិញទាំងអស់។', 'This product list sets the after-order message and media for all its product packages.')}",
             parse_mode="HTML",
             reply_markup=keyboard(rows),
         )
@@ -5790,8 +5820,8 @@ def register_handlers(
                 message.from_user.id,
                 copy(
                     language,
-                    "មិនអាចធ្វើបច្ចុប្បន្នភាពរូបភាព/វីដេអូ Package បានទេ។",
-                    "Could not update the package image/video.",
+                    "មិនអាចប្តូររូបភាព/វីដេអូកញ្ចប់ទំនិញបានទេ។",
+                    "Could not update the product package image/video.",
                 ),
             )
             return
@@ -5801,8 +5831,8 @@ def register_handlers(
                 message.from_user.id,
                 copy(
                     language,
-                    f"រកមិនឃើញ Package ID {html.escape(product_id)} ទេ។",
-                    f"Package ID {html.escape(product_id)} not found.",
+                    f"រកមិនឃើញកញ្ចប់ទំនិញ ID {html.escape(product_id)} ទេ។",
+                    f"Product package ID {html.escape(product_id)} not found.",
                 ),
             )
             return
@@ -5857,7 +5887,11 @@ def register_handlers(
         category = await store.category(category_id)
         if not category:
             await callback.message.edit_text(
-                copy(language, "រកមិនឃើញ Catalog ទេ។", "Catalog not found."),
+                copy(
+                    language,
+                    "រកមិនឃើញបញ្ជីមុខទំនិញទេ។",
+                    "Product list not found.",
+                ),
                 reply_markup=keyboard([back_button("admin:catalogs", language)]),
             )
             return
@@ -5887,7 +5921,11 @@ def register_handlers(
         product = await store.product(product_id)
         if not product:
             await callback.message.edit_text(
-                copy(language, "រកមិនឃើញ Package ទេ។", "Package not found."),
+                copy(
+                    language,
+                    "រកមិនឃើញកញ្ចប់ទំនិញទេ។",
+                    "Product package not found.",
+                ),
                 reply_markup=keyboard([back_button("admin:catalogs", language)]),
             )
             return
@@ -5922,7 +5960,11 @@ def register_handlers(
         rows = [
             [
                 InlineKeyboardButton(
-                    text=copy(language, "✅ បិទ Catalog", "✅ Disable catalog"),
+                    text=copy(
+                        language,
+                        "✅ បិទបញ្ជីមុខទំនិញ",
+                        "✅ Disable product list",
+                    ),
                     callback_data=f"adc:{category_id}",
                 )
             ],
@@ -5931,8 +5973,8 @@ def register_handlers(
         await callback.message.edit_text(
             copy(
                 language,
-                "បិទ Catalog នេះ និងផលិតផលសកម្មរបស់វា?",
-                "Disable this catalog and all its active packages?",
+                "បិទបញ្ជីមុខទំនិញនេះ និងកញ្ចប់ទំនិញសកម្មទាំងអស់របស់វា?",
+                "Disable this product list and all its active product packages?",
             ),
             reply_markup=keyboard(rows),
         )
@@ -5953,8 +5995,8 @@ def register_handlers(
         await callback.message.edit_text(
             copy(
                 language,
-                "បានបិទ Catalog និងផលិតផលរបស់វា។",
-                "Catalog and its packages disabled.",
+                "បានបិទបញ្ជីមុខទំនិញ និងកញ្ចប់ទំនិញទាំងអស់របស់វា។",
+                "Product list and all its product packages disabled.",
             ),
             reply_markup=keyboard([back_button("admin:catalogs", language)]),
         )
@@ -5969,14 +6011,22 @@ def register_handlers(
         rows = [
             [
                 InlineKeyboardButton(
-                    text=copy(language, "✅ បិទ Package", "✅ Disable package"),
+                    text=copy(
+                        language,
+                        "✅ បិទកញ្ចប់ទំនិញ",
+                        "✅ Disable product package",
+                    ),
                     callback_data=f"adp:{product_id}",
                 )
             ],
             back_button(f"ap:{product_id}", language),
         ]
         await callback.message.edit_text(
-            copy(language, "បិទ Package នេះ?", "Disable this package?"),
+            copy(
+                language,
+                "បិទកញ្ចប់ទំនិញនេះ?",
+                "Disable this product package?",
+            ),
             reply_markup=keyboard(rows),
         )
 
@@ -5991,7 +6041,11 @@ def register_handlers(
             "id", product_id
         ).execute()
         await callback.message.edit_text(
-            copy(language, "បានបិទ Package។", "Package disabled."),
+            copy(
+                language,
+                "បានបិទកញ្ចប់ទំនិញ។",
+                "Product package disabled.",
+            ),
             reply_markup=keyboard([back_button("admin:catalogs", language)]),
         )
 
@@ -6211,8 +6265,8 @@ def register_handlers(
         await callback.message.edit_text(
             copy(
                 language,
-                "✅ បានរក្សាទុក Package/Catalog ដោយជោគជ័យ។",
-                "✅ Package/catalog saved successfully.",
+                "✅ បានរក្សាទុកកញ្ចប់ទំនិញ/បញ្ជីមុខទំនិញដោយជោគជ័យ។",
+                "✅ Product package/product list saved successfully.",
             ),
             reply_markup=keyboard([back_button(target, language)]),
         )
@@ -6813,8 +6867,8 @@ def register_handlers(
         await callback.message.edit_text(
             copy(
                 language,
-                "ជ្រើសរើស Catalog សម្រាប់បញ្ចូលស្តុក៖",
-                "Choose a catalog for the stock import:",
+                "ជ្រើសរើសបញ្ជីមុខទំនិញសម្រាប់បញ្ចូលស្តុក៖",
+                "Choose a product list for the stock import:",
             ),
             reply_markup=keyboard(rows),
         )
@@ -6843,8 +6897,8 @@ def register_handlers(
         await callback.message.edit_text(
             copy(
                 language,
-                "ជ្រើសរើស Package សម្រាប់បញ្ចូលស្តុក៖",
-                "Choose a package for the stock import:",
+                "ជ្រើសរើសកញ្ចប់ទំនិញសម្រាប់បញ្ចូលស្តុក៖",
+                "Choose a product package for the stock import:",
             ),
             reply_markup=keyboard(rows),
         )

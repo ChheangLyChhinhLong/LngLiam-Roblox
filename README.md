@@ -1,6 +1,6 @@
 # PU_MMO169_Sale_Mod — Telegram Digital Key Shop
 
-Project នេះជា Telegram shop សម្រាប់លក់ Digital Key, Code និងផលិតផល Digital ផ្សេងៗដែល Admin បង្កើតតាម Catalog និង Package ដោយសេរី។ វាមាន wallet, order history និង How to Buy។ អ្នកប្រើអាចបញ្ចូលសមតុល្យតាម KHQRPay ហើយបង់ទំនិញដោយ wallet ឬ ABA KHQR checkout។ Bot ផ្ញើ digital goods បន្ទាប់ពីការទូទាត់ត្រូវបានផ្ទៀងផ្ទាត់ជាមួយ KHQRPay។ Database ប្រើ Supabase; ឯកសារ media ដែល Admin upload ត្រូវបាន upload ទៅ Cloudinary ហើយ Supabase រក្សាទុក URL។ Telegram post links ដែលបាន paste នៅតែអាចប្រើជាតំណដើម។ Backend ដំណើរការលើ Render និងមាន health endpoint `/health`។
+Project នេះជា Telegram shop សម្រាប់លក់ Digital Key, Code និងផលិតផល Digital ផ្សេងៗដែល Admin បង្កើតតាមបញ្ជីមុខទំនិញ និងកញ្ចប់ទំនិញ។ វាមាន wallet, order history និង How to Buy។ អ្នកប្រើអាចបញ្ចូលសមតុល្យតាម KHQRPay ហើយបង់ទំនិញដោយ wallet ឬ ABA KHQR checkout។ Bot ផ្ញើ digital goods បន្ទាប់ពីការទូទាត់ត្រូវបានផ្ទៀងផ្ទាត់ជាមួយ KHQRPay។ Database ប្រើ Supabase; ឯកសារ media ដែល Admin upload ត្រូវបាន upload ទៅ Cloudinary ហើយ Supabase រក្សាទុក URL។ Telegram post links ដែលបាន paste នៅតែអាចប្រើជាតំណដើម។ Backend ដំណើរការលើ Render និងមាន health endpoint `/health`។
 
 ## មាតិកា
 
@@ -12,15 +12,15 @@ Project នេះជា Telegram shop សម្រាប់លក់ Digital Key
   - [3. កំណត់ Environment Variables](#3-កំណត់-environment-variables)
   - [4. ដំណើរការលើម៉ាស៊ីនផ្ទាល់ខ្លួន](#4-ដំណើរការលើម៉ាស៊ីនផ្ទាល់ខ្លួន)
     - [រត់ Tests](#រត់-tests)
-  - [5. បង្កើត Catalog, Package និង Stock](#5-បង្កើត-catalog-package-និង-stock)
+  - [5. បង្កើតបញ្ជីមុខទំនិញ, កញ្ចប់ទំនិញ និងស្តុក](#5-បង្កើតបញ្ជីមុខទំនិញ-កញ្ចប់ទំនិញ-និងស្តុក)
     - [តាម Admin panel ក្នុង Telegram](#តាម-admin-panel-ក្នុង-telegram)
     - [បញ្ចូល stock ជា `.txt`](#បញ្ចូល-stock-ជា-txt)
     - [Broadcast](#broadcast)
-    - [កែប្រែ និងបិទ Catalog/Package](#កែប្រែ-និងបិទ-catalogpackage)
+    - [កែប្រែ និងបិទបញ្ជីមុខទំនិញ/កញ្ចប់ទំនិញ](#កែប្រែ-និងបិទបញ្ជីមុខទំនិញកញ្ចប់ទំនិញ)
   - [6. កំណត់វីដេអូណែនាំ និងរូបភាព](#6-កំណត់វីដេអូណែនាំ-និងរូបភាព)
     - [វីដេអូ “How to buy”](#វីដេអូ-how-to-buy)
     - [Wallet និងម៉ឺនុយ](#wallet-និងម៉ឺនុយ)
-    - [រូបភាព និងវីដេអូ Package](#រូបភាព-និងវីដេអូ-package)
+    - [រូបភាព និងវីដេអូកញ្ចប់ទំនិញ](#រូបភាព-និងវីដេអូកញ្ចប់ទំនិញ)
   - [7. ដាក់ពី GitHub ទៅ Render](#7-ដាក់ពី-github-ទៅ-render)
     - [7.1 Push code ទៅ GitHub](#71-push-code-ទៅ-github)
     - [7.2 បង្កើត Render service ពី Blueprint](#72-បង្កើត-render-service-ពី-blueprint)
@@ -50,7 +50,7 @@ Project នេះជា Telegram shop សម្រាប់លក់ Digital Key
 
 1. បង្កើត project ថ្មីនៅ [Supabase](https://supabase.com/) ហើយរង់ចាំ database រួចរាល់។
 2. បើក **SQL Editor → New query**។ បើក [schema.sql](schema.sql), ចម្លង SQL ទាំងមូលទៅក្នុង editor ហើយចុច **Run**។ Script នេះបង្កើត tables, indexes និង database functions ដែល bot ត្រូវការ។
-3. បើមាន database ចាស់ អាច run `schema.sql` ម្តងទៀត ដើម្បីអនុវត្តការបន្ថែម schema ដែល idempotent។ វាបន្ថែម `products.video_url`, តម្លៃ Reseller, តារាង `resellers`, wallet/deposit tables, scheduled broadcast jobs, payment provider fields និង functions សម្រាប់បញ្ចូល/ប្រើសមតុល្យ។ វាបន្ថែមសារ និង Media ក្រោយ Order ទៅ `categories`; ការកំណត់ចាស់ក្នុង packages នឹងផ្ទេរដោយស្វ័យប្រវត្តិតែពេលគ្រប់ package ក្នុង catalog មាន settings ដូចគ្នា។ បើ settings ខុសគ្នា សូមកំណត់ឡើងវិញតាម **Edit catalog**។ `schema.sql` មិនបង្កើតទិន្នន័យ Catalog ឬ Package ទេ។ Package ចាស់នឹងមានតម្លៃ Reseller ស្មើតម្លៃអតិថិជន រហូតដល់អ្នកកែវា។ ត្រូវ run schema ចុងក្រោយមុនប្រើមុខងារទាំងនេះ។
+3. បើមាន database ចាស់ អាច run `schema.sql` ម្តងទៀត ដើម្បីអនុវត្តការបន្ថែម schema ដែល idempotent។ វាបន្ថែម `products.video_url`, តម្លៃ Reseller, តារាង `resellers`, wallet/deposit tables, scheduled broadcast jobs, payment provider fields និង functions សម្រាប់បញ្ចូល/ប្រើសមតុល្យ។ វាបន្ថែមសារ និង Media ក្រោយ Order ទៅ `categories`; ការកំណត់ចាស់ក្នុង `products` នៃបញ្ជីមុខទំនិញតែមួយ នឹងផ្ទេរដោយស្វ័យប្រវត្តិតែពេលគ្រប់កញ្ចប់ទំនិញមានការកំណត់ដូចគ្នា។ បើការកំណត់ខុសគ្នា សូមកំណត់ឡើងវិញតាម **កែបញ្ជីមុខទំនិញ**។ `schema.sql` មិនបង្កើតទិន្នន័យបញ្ជីមុខទំនិញ ឬកញ្ចប់ទំនិញទេ។ កញ្ចប់ទំនិញចាស់នឹងមានតម្លៃ Reseller ស្មើតម្លៃអតិថិជន រហូតដល់អ្នកកែវា។ ត្រូវ run schema ចុងក្រោយមុនប្រើមុខងារទាំងនេះ។
 4. បើក **Project Settings → API** រួចចម្លង Project URL និង `service_role` key ទៅ environment variables។ ប្រើ `service_role` key តែក្នុង backend/Render ប៉ុណ្ណោះ។
 5. ទុក Row Level Security (RLS) ឲ្យបើក។ កុំបង្កើត public policies សម្រាប់ stock ឬ orders។
 
@@ -135,25 +135,25 @@ Webhook និង ABA deep link ត្រូវការអាសយដ្ឋា
 .\.venv313\Scripts\python.exe -m pytest -q
 ```
 
-## 5. បង្កើត Catalog, Package និង Stock
+## 5. បង្កើតបញ្ជីមុខទំនិញ, កញ្ចប់ទំនិញ និងស្តុក
 
 ### តាម Admin panel ក្នុង Telegram
 
 1. បន្ថែម Telegram ID របស់អ្នកក្នុង `TELEGRAM_ADMIN_IDS` ហើយចាប់ផ្តើម bot ឡើងវិញ។
-2. បើក bot ដោយ admin account ហើយចុច **Store admin → Catalogs and packages → Add Catalog**។
-3. ចុច **Add catalog** ហើយបញ្ចូលឈ្មោះ, ព័ត៌មានលម្អិត និងសារ/Media ក្រោយ Order ដែលចង់ប្រើរួមសម្រាប់ Package ទាំងអស់ក្នុង Catalog នោះ។ ការកំណត់សារ និង Media អាចរំលងបាន។
+2. បើក bot ដោយ admin account ហើយចុច **Store admin → Manage product lists and product packages → Add product list**។
+3. ចុច **Add product list** ហើយបញ្ចូលឈ្មោះ, ព័ត៌មានលម្អិត និងសារ/Media ក្រោយ Order ដែលចង់ប្រើរួមសម្រាប់កញ្ចប់ទំនិញទាំងអស់ក្នុងបញ្ជីនោះ។ ការកំណត់សារ និង Media អាចរំលងបាន។
 
-4. បើក Catalog ដែលទើបបង្កើត ហើយចុច **Add Package**។ Wizard នឹងសួរតាមលំដាប់៖ រូបភាព/វីដេអូ Package, ឈ្មោះ, ព័ត៌មានលម្អិត, តម្លៃអតិថិជន និងតម្លៃ Reseller។ ចុច **Skip** លើជំហានស្រេចចិត្តដើម្បីរំលង។ ឈ្មោះ និងតម្លៃអតិថិជនត្រូវបញ្ចូល។ ពិនិត្យព័ត៌មាន រួចចុច **Confirm save**។ ចុច **Cancel** បានគ្រប់ជំហាន។
+4. បើកបញ្ជីមុខទំនិញដែលទើបបង្កើត ហើយចុច **Add product package**។ Wizard នឹងសួរតាមលំដាប់៖ រូបភាព/វីដេអូកញ្ចប់ទំនិញ, ឈ្មោះ, ព័ត៌មានលម្អិត, តម្លៃអតិថិជន និងតម្លៃ Reseller។ ចុច **Skip** លើជំហានស្រេចចិត្តដើម្បីរំលង។ ឈ្មោះ និងតម្លៃអតិថិជនត្រូវបញ្ចូល។ ពិនិត្យព័ត៌មាន រួចចុច **Confirm save**។ ចុច **Cancel** បានគ្រប់ជំហាន។
 
-តម្លៃទាំងពីរត្រូវធំជាងសូន្យ។ តម្លៃ Reseller អាចស្មើ ឬខ្ពស់ជាងតម្លៃអតិថិជនបាន។ Media ជាជម្រើស។ ផ្ញើរូបភាព, វីដេអូ, GIF ឬឯកសារក្នុងជំហាន media; Bot upload file ទៅ Cloudinary ហើយ Supabase រក្សាទុក HTTPS URL។ Telegram post link ដែល paste នឹងរក្សាទុកជាតំណដើម ហើយត្រូវប្រាកដថា Bot អាចចូល source chat/channel បាន។ Package នឹងបង្ហាញ media នោះក្នុងទំព័រព័ត៌មានរបស់វា។
+តម្លៃទាំងពីរត្រូវធំជាងសូន្យ។ តម្លៃ Reseller អាចស្មើ ឬខ្ពស់ជាងតម្លៃអតិថិជនបាន។ Media ជាជម្រើស។ ផ្ញើរូបភាព, វីដេអូ, GIF ឬឯកសារក្នុងជំហាន media; Bot upload file ទៅ Cloudinary ហើយ Supabase រក្សាទុក HTTPS URL។ Telegram post link ដែល paste នឹងរក្សាទុកជាតំណដើម ហើយត្រូវប្រាកដថា Bot អាចចូល source chat/channel បាន។ កញ្ចប់ទំនិញនឹងបង្ហាញ media នោះក្នុងទំព័រព័ត៌មានរបស់វា។
 
-សារ និង Media ក្រោយ Order កំណត់តែម្តងតាម **Edit catalog** ហើយប្រើដូចគ្នាសម្រាប់គ្រប់ Package ក្នុង Catalog។ ផ្ញើរូបភាព, វីដេអូ, GIF ឬឯកសារនៅជំហាន Media ក្រោយ Order; Bot upload ទៅ Cloudinary ហើយផ្ញើបន្ទាប់ពីទូទាត់ជោគជ័យ មុនពេលផ្ញើ Digital Key/Code។ Digital Key ឬ Code បញ្ចូលតាម **Add stock/Import stock (.txt)** សម្រាប់ Package នីមួយៗ; Bot រក្សាទុកជាទម្រង់ encrypted និងផ្ញើតាមចំនួនដែលបានទិញ។
+សារ និង Media ក្រោយ Order កំណត់តែម្តងតាម **Edit product list** ហើយប្រើដូចគ្នាសម្រាប់កញ្ចប់ទំនិញទាំងអស់ក្នុងបញ្ជីនោះ។ ផ្ញើរូបភាព, វីដេអូ, GIF ឬឯកសារនៅជំហាន Media ក្រោយ Order; Bot upload ទៅ Cloudinary ហើយផ្ញើបន្ទាប់ពីទូទាត់ជោគជ័យ មុនពេលផ្ញើ Digital Key/Code។ Digital Key ឬ Code បញ្ចូលតាម **Add stock/Import stock (.txt)** សម្រាប់កញ្ចប់ទំនិញនីមួយៗ; Bot រក្សាទុកជាទម្រង់ encrypted និងផ្ញើតាមចំនួនដែលបានទិញ។
 
 មុនប្រើមុខងារនេះ សូម run `schema.sql` ចុងក្រោយក្នុង Supabase SQL Editor ដើម្បីបន្ថែម delivery fields លើ categories។ ត្រូវកំណត់ Cloudinary credentials ក្នុង environment ដើម្បីឲ្យ Bot upload ឯកសារ។
 
-Admin អាចបើក **Store admin → Manage resellers → Add reseller** រួចផ្ញើ Telegram user ID ជាលេខ។ ចុចលើ ID ក្នុងបញ្ជីដើម្បីដកសិទ្ធិ។ Reseller ប្រើ bot ដូចអតិថិជនធម្មតា ប៉ុន្តែ catalog, ព័ត៌មាន package និងការកក់ទិញនឹងប្រើតម្លៃ Reseller។ តម្លៃ checkout ត្រូវបានគណនាដោយ Supabase តាម Telegram ID មិនមែនតាមតម្លៃដែលបានផ្ញើពី UI ទេ។
+Admin អាចបើក **Store admin → Manage resellers → Add reseller** រួចផ្ញើ Telegram user ID ជាលេខ។ ចុចលើ ID ក្នុងបញ្ជីដើម្បីដកសិទ្ធិ។ Reseller ប្រើ bot ដូចអតិថិជនធម្មតា ប៉ុន្តែបញ្ជីមុខទំនិញ, ព័ត៌មានកញ្ចប់ទំនិញ និងការកក់ទិញនឹងប្រើតម្លៃ Reseller។ តម្លៃ checkout ត្រូវបានគណនាដោយ Supabase តាម Telegram ID មិនមែនតាមតម្លៃដែលបានផ្ញើពី UI ទេ។
 
-5. ចូល package ហើយប្រើ **Add stock** ដើម្បីបញ្ចូល Digital Key ឬ Code មួយក្នុងមួយបន្ទាត់។ Bot encrypt ទិន្នន័យមុនរក្សាទុក។
+5. ចូលកញ្ចប់ទំនិញ ហើយប្រើ **Add stock** ដើម្បីបញ្ចូល Digital Key ឬ Code មួយក្នុងមួយបន្ទាត់។ Bot encrypt ទិន្នន័យមុនរក្សាទុក។
 6. ឬប្រើទម្រង់សារនេះពី admin account ដោយផ្ទាល់:
 
 ```text
@@ -164,7 +164,7 @@ addstock PRODUCT_UUID | key1, key2
 
 ### បញ្ចូល stock ជា `.txt`
 
-ក្នុង Admin panel ជ្រើស **Import stock (.txt)**, ជ្រើស Catalog រួចជ្រើស Package ហើយផ្ញើឯកសារ `.txt`។ ឯកសារមិនអាចធំជាង 1 MB; ដាក់ Digital Key ឬ Code មួយក្នុងមួយបន្ទាត់។
+ក្នុង Admin panel ជ្រើស **Import stock (.txt)**, ជ្រើសបញ្ជីមុខទំនិញ រួចជ្រើសកញ្ចប់ទំនិញ ហើយផ្ញើឯកសារ `.txt`។ ឯកសារមិនអាចធំជាង 1 MB; ដាក់ Digital Key ឬ Code មួយក្នុងមួយបន្ទាត់។
 
 ### Broadcast
 
@@ -189,12 +189,12 @@ FF-1D-KEY-002
 
 Script អាន `.env` ពី project root។ វាត្រូវការ `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` និង `STOCK_ENCRYPTION_KEY`។ Key ដែលមានស្រាប់ជា `available` ឬ `reserved` នឹងត្រូវរំលង; Key ដែលបានលក់រួចអាច import វិញជាស្តុកថ្មី។ បន្ទាប់ពី import សូមលុប/ផ្លាស់ទីឯកសារ stock ឲ្យមានសុវត្ថិភាព ព្រោះក្នុងនោះមាន Digital Key/Code ជាអក្សរធម្មតា។
 
-### កែប្រែ និងបិទ Catalog/Package
+### កែប្រែ និងបិទបញ្ជីមុខទំនិញ/កញ្ចប់ទំនិញ
 
-- **Edit Catalog**: `ឈ្មោះ | ព័ត៌មានលម្អិត`
-- **Edit Package**: `ឈ្មោះ | តម្លៃ | ព័ត៌មានលម្អិត`
+- **Edit product list**: `ឈ្មោះ | ព័ត៌មានលម្អិត`
+- **Edit product package**: `ឈ្មោះ | តម្លៃ | ព័ត៌មានលម្អិត`
 - **Remove stock**: បញ្ចូល Digital Key ឬ Code ដើមមួយក្នុងមួយបន្ទាត់។ លុបបានតែ stock ដែលមានស្ថានភាព `available`; stock កំពុង reserve ឬលក់រួចមិនត្រូវបានលុបទេ។
-- **Deactivate**: បិទ Catalog នឹងបិទ packages របស់វាទាំងអស់; បិទ Package បិទតែ package នោះ។ វាមិនមែនជា delete ទេ។
+- **Deactivate**: បិទបញ្ជីមុខទំនិញ នឹងបិទកញ្ចប់ទំនិញសកម្មទាំងអស់របស់វា; បិទកញ្ចប់ទំនិញ នឹងបិទតែកញ្ចប់នោះ។ វាមិនមែនជា delete ទេ។
 - **Sales**: មើលចំនួន paid orders និង revenue។
 
 ## 6. កំណត់វីដេអូណែនាំ និងរូបភាព
@@ -229,9 +229,9 @@ on conflict (key) do update set value = excluded.value;
 
 ទំព័រ `/start` បង្ហាញ Welcome media ហើយប៊ូតុងប្រើជា reply keyboard នៅខាងក្រោមប្រអប់សរសេរសារ៖ **Account**, **Add funds**, **Digital Products**, **My Orders** និង **How to Buy**។ ជ្រើសផលិតផលតាម **Digital Products**។ Add funds គាំទ្រចំនួន $1, $5, $10, $15, $20, $50 ឬចំនួនផ្ទាល់ខ្លួនពី $1 ដល់ $500; សមតុល្យត្រូវបានបន្ថែមតែបន្ទាប់ពី KHQRPay បញ្ជាក់ transaction និងចំនួនទឹកប្រាក់។ បើសមតុល្យគ្រប់គ្រាន់ ទំព័រផលិតផលផ្តល់ជម្រើសបង់ដោយ Wallet ផងដែរ។ ដើម្បីប្រើ wallet សូម run `schema.sql` ចុងក្រោយ។
 
-### រូបភាព និងវីដេអូ Package
+### រូបភាព និងវីដេអូកញ្ចប់ទំនិញ
 
-នៅពេលបង្កើត ឬកែ Package ផ្ញើរូបភាព, វីដេអូ, GIF ឬឯកសារក្នុងជំហាន media/after-order រួចចុច **Save media**។ Bot upload ឯកសារទៅ Cloudinary ហើយ Supabase រក្សាទុក URL; Telegram post link ដែល paste រក្សាទុកជាតំណដើម។ ដើម្បីដាក់/ប្តូរ media package ដែលមានស្រាប់តាម command ផ្ញើរូបភាព/វីដេអូជាមួយ caption:
+នៅពេលបង្កើត ឬកែកញ្ចប់ទំនិញ ផ្ញើរូបភាព, វីដេអូ, GIF ឬឯកសារក្នុងជំហាន media/after-order រួចចុច **Save media**។ Bot upload ឯកសារទៅ Cloudinary ហើយ Supabase រក្សាទុក URL; Telegram post link ដែល paste រក្សាទុកជាតំណដើម។ ដើម្បីដាក់/ប្តូរ media កញ្ចប់ទំនិញដែលមានស្រាប់តាម command ផ្ញើរូបភាព/វីដេអូជាមួយ caption:
 
 ```text
 setmedia PRODUCT_UUID
@@ -304,13 +304,13 @@ Monitor នេះពិនិត្យតែ web health route។ វាមិន
 
 ## របៀបប្រើក្នុង Telegram
 
-1. អ្នកទិញចុច **Digital Products**, ជ្រើស Catalog និង Package ដែល Admin បានបង្កើត រួចកំណត់ចំនួនទិញ។ ចំនួនមួយ order មានអតិបរមា 3 ហើយមិនអាចលើសស្តុកនៅសល់។
+1. អ្នកទិញចុច **Digital Products**, ជ្រើសបញ្ជីមុខទំនិញ និងកញ្ចប់ទំនិញដែល Admin បានបង្កើត រួចកំណត់ចំនួនទិញ។ ចំនួនមួយ order មានអតិបរមា 3 ហើយមិនអាចលើសស្តុកនៅសល់។
 2. ពេលបង្កើត order, Supabase កក់ stock ជាអាតូមិក ដើម្បីកុំឲ្យអតិថិជនពីរនាក់បាន Digital Key/Code ដូចគ្នា។
 3. អ្នកទិញបង់តាម KHQR ឬបើក ABA Mobile។ អាចចុចប៊ូតុងពិនិត្យ payment ដោយខ្លួនឯងបាន។
 4. បន្ទាប់ពី KHQRPay បញ្ជាក់ `Paid` bot ផ្ញើ Digital Key/Code ជា code block (ចុចលើ Key ដើម្បី copy) និងមានប៊ូតុង **📋 Copy Key** សម្រាប់ធាតុនីមួយៗ រួចលុបសារដែលមាន QR។ ករណី expired/failed stock ដែលបាន reserve នឹងត្រឡប់ទៅ available។
 5. អ្នកប្រើអាចមើល Account/Balance, បញ្ចូលប្រាក់, មើល order history និងចាក់វីដេអូ How to Buy។
 
-Admin panel អាចបន្ថែម/កែ Catalog និង Package, បិទធាតុ, បញ្ចូល/ដក stock, upload `.txt`, Broadcast និងមើល sales summary។ អ្នកប្រើដែលមិនមាន ID ក្នុង `TELEGRAM_ADMIN_IDS` មិនអាចគ្រប់គ្រងហាងបានទេ។
+Admin panel អាចបន្ថែម/កែបញ្ជីមុខទំនិញ និងកញ្ចប់ទំនិញ, បិទធាតុ, បញ្ចូល/ដក stock, upload `.txt`, Broadcast និងមើល sales summary។ អ្នកប្រើដែលមិនមាន ID ក្នុង `TELEGRAM_ADMIN_IDS` មិនអាចគ្រប់គ្រងហាងបានទេ។
 
 ## សុវត្ថិភាព និងថែទាំ
 
@@ -318,7 +318,7 @@ Admin panel អាចបន្ថែម/កែ Catalog និង Package, បិ
 - Backup `STOCK_ENCRYPTION_KEY` នៅកន្លែងសុវត្ថិភាពដាច់ពី database។ បើបាត់ key នេះ Digital Key/Code ដែលបាន encrypt រួចមិនអាចយកមកប្រើបានទេ។
 - កុំបិទ Supabase RLS និងកុំបង្កើត public access policies សម្រាប់ orders/stock។ Backend ប្រើ service-role key ដោយផ្ទាល់។
 - ក្នុង **Admin → Settings → Notifications** កំណត់ Stock និង Order notification destinations។ វាគាំទ្រ Telegram user ID, private group/channel chat ID (ឧ. `-1001234567890`) ឬ public `@username`; អាចបញ្ចូលច្រើនដោយបំបែកជាមួយ comma។ បន្ថែម bot ទៅ group ហើយអនុញ្ញាតឲ្យផ្ញើសារ; សម្រាប់ channel ត្រូវបន្ថែម bot ជា admin ដែលអាច post បាន។
-- Stock notification ក៏ផ្ញើទៅ users ដែលបានប្រើ bot រួច។ ប៊ូតុង **View product / មើល Package** បើក private chat ជាមួយ Bot ហើយបង្ហាញ Package ដែលមានស្តុកថ្មី។
+- Stock notification ក៏ផ្ញើទៅ users ដែលបានប្រើ bot រួច។ ប៊ូតុង **View product / មើលកញ្ចប់ទំនិញ** បើក private chat ជាមួយ Bot ហើយបង្ហាញកញ្ចប់ទំនិញដែលមានស្តុកថ្មី។
 - Order notification ផ្ញើ Order Log បន្ទាប់ពីទទួល payment និងប្រគល់ Key ជោគជ័យ ហើយក៏ជូនដំណឹងអំពី Wallet deposit ដែលបានបញ្ចូលសមតុល្យរួចរាល់ផងដែរ។ Log មាន Telegram ID, ចំនួនទឹកប្រាក់ និង transaction reference។
 - Digital Key/Code ក្នុង database ត្រូវបាន encrypt។ ឯកសារ `.txt` មុន import និងសារ stock ក្នុង Telegram នៅតែជា plaintext ដូច្នេះកុំទុក/បញ្ជូនវាក្នុងកន្លែងមិនមានសុវត្ថិភាព។
 - កុំ run bot local និង Render instance ច្រើនក្នុងពេលតែមួយដោយប្រើ bot token ដូចគ្នា ពេល long polling កំពុងដំណើរការ។
@@ -329,8 +329,8 @@ Admin panel អាចបន្ថែម/កែ Catalog និង Package, បិ
 | រោគសញ្ញា | អ្វីដែលត្រូវពិនិត្យ |
 | --- | --- |
 | Bot មិនឆ្លើយតប | ពិនិត្យ `BOT_TOKEN`, Render Logs និងថាមាន polling process តែមួយប៉ុណ្ណោះ។ |
-| Digital Products មិនបង្ហាញ Catalog | ពិនិត្យថា bot កំពុងដំណើរការ និងមាន Catalog ដែល `active = true`។ បើមាន error សូមមើល logs សម្រាប់ Supabase schema/table error។ |
-| Bot បង្ហាញថាមិនមាន Catalog | ពិនិត្យថាមាន `categories` ដែល `active = true` ក្នុង Supabase។ |
+| Digital Products មិនបង្ហាញបញ្ជីមុខទំនិញ | ពិនិត្យថា bot កំពុងដំណើរការ និងមាន `categories` ដែល `active = true`។ បើមាន error សូមមើល logs សម្រាប់ Supabase schema/table error។ |
+| Bot បង្ហាញថាមិនមានបញ្ជីមុខទំនិញ | ពិនិត្យថាមាន `categories` ដែល `active = true` ក្នុង Supabase។ |
 | Admin panel មិនបង្ហាញ | ពិនិត្យ Telegram numeric ID ក្នុង `TELEGRAM_ADMIN_IDS` ហើយ restart/redeploy។ |
 | Supabase request បរាជ័យ | ពិនិត្យ `SUPABASE_URL`, service-role key និងថា `schema.sql` បាន run ជោគជ័យ។ កុំបិទ RLS ដើម្បីជៀសបញ្ហា។ |
 | Supabase បង្ហាញ `column categories.delivery_media_url does not exist` ឬ PostgreSQL error `42703` | បើក Supabase SQL Editor របស់ project ដែល URL ត្រូវគ្នានឹង `SUPABASE_URL` ក្នុង Render ហើយ run [`scripts/fix_catalog_delivery_columns.sql`](scripts/fix_catalog_delivery_columns.sql)។ វាបន្ថែម delivery fields លើ categories ហើយ reload PostgREST schema cache។ បន្ទាប់មករង់ចាំបន្តិច ហើយសាកល្បងម្តងទៀត។ |
@@ -344,4 +344,4 @@ Admin panel អាចបន្ថែម/កែ Catalog និង Package, បិ
 
 ## សាកល្បងមុនបើកលក់
 
-បង្កើត Catalog និង Package សាកល្បងដែលមានតម្លៃទាប, បញ្ចូល Digital Key/Code សាកល្បងមួយ, ទិញពី Telegram account ផ្សេង, បញ្ជាក់ថា payment status ត្រឹមត្រូវ និង Key ត្រូវបានផ្ញើតែម្តង។ បន្ទាប់មកសាកល្បង expired/failed payment, order history, admin stock notification និង webhook logs មុនដាក់លក់ពិត។
+បង្កើតបញ្ជីមុខទំនិញ និងកញ្ចប់ទំនិញសាកល្បងដែលមានតម្លៃទាប, បញ្ចូល Digital Key/Code សាកល្បងមួយ, ទិញពី Telegram account ផ្សេង, បញ្ជាក់ថា payment status ត្រឹមត្រូវ និង Key ត្រូវបានផ្ញើតែម្តង។ បន្ទាប់មកសាកល្បង expired/failed payment, order history, admin stock notification និង webhook logs មុនដាក់លក់ពិត។

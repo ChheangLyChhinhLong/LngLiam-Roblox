@@ -810,6 +810,9 @@ def test_shop_catalog_buttons_reflect_stock_across_all_packages():
             await handler(callback)
 
             markup = message.edit_text.await_args.kwargs["reply_markup"]
+            screen_text = message.edit_text.await_args.args[0]
+            assert "Choose a product list" in screen_text
+            assert "product packages" in screen_text
             assert [
                 row[0].style for row in markup.inline_keyboard[:3]
             ] == ["success", "danger", "danger"]
@@ -1487,7 +1490,7 @@ def test_stock_import_selects_catalog_before_package():
             for button in row
         ]
         assert catalog_prompt.edit_text.await_args.args[0] == (
-            "Choose a catalog for the stock import:"
+            "Choose a product list for the stock import:"
         )
         assert catalog_buttons[0].callback_data == "admin:upload:catalog:catalog-123"
         assert catalog_buttons[-1].callback_data == "admin"
@@ -1509,7 +1512,7 @@ def test_stock_import_selects_catalog_before_package():
             button for row in package_markup.inline_keyboard for button in row
         ]
         assert package_prompt.edit_text.await_args.args[0] == (
-            "Choose a package for the stock import:"
+            "Choose a product package for the stock import:"
         )
         assert package_buttons[0].callback_data == "au:package-456"
         assert package_buttons[-1].callback_data == "admin:upload"
@@ -1525,18 +1528,29 @@ def test_admin_actions_are_translated_for_english_users():
     product_rows = admin_product_actions("product-123", "category-123", "en")
 
     assert [button.text for row in category_rows for button in row] == [
-        "➕ Add package",
-        "✏️ Edit catalog",
-        "🗑 Disable catalog",
+        "➕ Add product package",
+        "✏️ Edit product list",
+        "🗑 Disable product list",
         "⬅️ Back",
     ]
     assert [button.text for row in product_rows for button in row] == [
-        "✏️ Edit package",
-        "🗑 Disable package",
+        "✏️ Edit product package",
+        "🗑 Disable product package",
         "➕ Add stock",
         "➖ Remove stock",
         "📥 Import stock (.txt)",
         "⬅️ Back",
+    ]
+    category_rows_km = admin_category_actions("category-123", "km")
+    product_rows_km = admin_product_actions("product-123", "category-123", "km")
+    assert [button.text for row in category_rows_km for button in row][:3] == [
+        "➕ បន្ថែមកញ្ចប់ទំនិញ",
+        "✏️ កែបញ្ជីមុខទំនិញ",
+        "🗑 បិទបញ្ជីមុខទំនិញ",
+    ]
+    assert [button.text for row in product_rows_km for button in row][:2] == [
+        "✏️ កែកញ្ចប់ទំនិញ",
+        "🗑 បិទកញ្ចប់ទំនិញ",
     ]
 
 
@@ -3443,6 +3457,8 @@ def test_order_success_notification_sends_order_details_to_configured_group_and_
         text = bot.send_message.await_args_list[0].args[1]
         assert "ChhinhLong (@chhinhlong)" in text
         assert "<code>123456789</code>" in text
+        assert "<b>បញ្ជីមុខទំនិញ:</b>" in text
+        assert "<b>កញ្ចប់ទំនិញ:</b>" in text
         assert "☠️𝙑𝙋𝙉 𝙍𝙀𝙕𝙕𝙓" in text
         assert "Key FreeFire 1Day (x1)" in text
         assert "<b>🔑 បញ្ជីទំនិញ:</b>\n- CODE-001\n- CODE&amp;002" in text
@@ -3500,11 +3516,11 @@ def test_stock_notification_reaches_users_and_configured_chats_once():
             -100987,
             "@shopnews",
         ]
-        assert "Product: <b>VPN</b>" in bot.send_message.await_args_list[0].args[1]
-        assert "Package: <b>Robux</b>" in bot.send_message.await_args_list[0].args[1]
+        assert "Product list: <b>VPN</b>" in bot.send_message.await_args_list[0].args[1]
+        assert "Product package: <b>Robux</b>" in bot.send_message.await_args_list[0].args[1]
         assert "Newly added: <b>4</b>" in bot.send_message.await_args_list[0].args[1]
-        assert "ទំនិញ៖ <b>VPN</b>" in bot.send_message.await_args_list[1].args[1]
-        assert "កញ្ចប់៖ <b>Robux</b>" in bot.send_message.await_args_list[1].args[1]
+        assert "បញ្ជីមុខទំនិញ៖ <b>VPN</b>" in bot.send_message.await_args_list[1].args[1]
+        assert "កញ្ចប់ទំនិញ៖ <b>Robux</b>" in bot.send_message.await_args_list[1].args[1]
         assert (
             "ចំនួនបន្ថែមថ្មី៖ <b>4</b>" in bot.send_message.await_args_list[1].args[1]
         )
