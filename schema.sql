@@ -65,6 +65,8 @@ create table if not exists public.categories (
     id uuid primary key default gen_random_uuid(),
     name text not null,
     description text not null default '',
+    delivery_message text not null default '',
+    delivery_media_url text,
     active boolean not null default true,
     sort_order integer not null default 0
 );
@@ -93,6 +95,71 @@ alter table public.products add column if not exists delivery_media_url text;
 alter table public.products add column if not exists delivery_image_url text;
 alter table public.products add column if not exists delivery_video_url text;
 alter table public.products add column if not exists reseller_price numeric(10, 2);
+
+do $$
+declare
+    v_delivery_message_missing boolean;
+    v_delivery_media_missing boolean;
+    v_catalog_delivery_columns_missing boolean;
+begin
+    select not exists (
+        select 1 from information_schema.columns
+        where table_schema = 'public'
+          and table_name = 'categories'
+          and column_name = 'delivery_message'
+    ) into v_delivery_message_missing;
+    select not exists (
+        select 1 from information_schema.columns
+        where table_schema = 'public'
+          and table_name = 'categories'
+          and column_name = 'delivery_media_url'
+    ) into v_delivery_media_missing;
+    v_catalog_delivery_columns_missing :=
+        v_delivery_message_missing or v_delivery_media_missing;
+
+    alter table public.categories
+        add column if not exists delivery_message text not null default '';
+    alter table public.categories
+        add column if not exists delivery_media_url text;
+
+    if v_catalog_delivery_columns_missing then
+        with package_delivery as (
+            select
+                category_id,
+                coalesce(delivery_message, '') as delivery_message,
+                coalesce(delivery_media_url, delivery_image_url, delivery_video_url) as delivery_media_url
+            from public.products
+        ),
+        consistent_catalog_delivery as (
+            select
+                category_id,
+                min(delivery_message) as delivery_message,
+                min(delivery_media_url) as delivery_media_url
+            from package_delivery
+            group by category_id
+            having count(distinct (delivery_message, delivery_media_url)) = 1
+        )
+        update public.categories as category
+        set delivery_message = case
+                when v_delivery_message_missing
+                    then consistent_catalog_delivery.delivery_message
+                else category.delivery_message
+            end,
+            delivery_media_url = case
+                when v_delivery_media_missing
+                    then consistent_catalog_delivery.delivery_media_url
+                else category.delivery_media_url
+            end
+        from consistent_catalog_delivery
+        where category.id = consistent_catalog_delivery.category_id
+          and (
+              consistent_catalog_delivery.delivery_message <> ''
+              or consistent_catalog_delivery.delivery_media_url is not null
+          );
+    end if;
+end;
+$$;
+
 update public.products set reseller_price = price where reseller_price is null;
 alter table public.products alter column reseller_price set not null;
 

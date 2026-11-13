@@ -12,12 +12,17 @@ def test_reseller_price_is_positive_without_being_capped_by_customer_price():
     assert "reseller_price <= price" not in schema
 
 
-def test_schema_has_a_single_general_after_order_media_field():
+def test_schema_stores_after_order_content_on_catalogs_and_migrates_consistent_values():
     schema = (Path(__file__).parents[1] / "schema.sql").read_text(
         encoding="utf-8"
     )
 
-    assert "delivery_media_url text" in schema
+    assert "delivery_message text not null default ''" in schema
+    assert re.search(
+        r"alter table public\.categories\s+add column if not exists delivery_media_url text",
+        schema,
+    )
+    assert "count(distinct (delivery_message, delivery_media_url)) = 1" in schema
 
 
 def test_set_order_payment_permissions_match_function_signature():

@@ -50,7 +50,7 @@ Project នេះជា Telegram shop សម្រាប់លក់ Digital Key
 
 1. បង្កើត project ថ្មីនៅ [Supabase](https://supabase.com/) ហើយរង់ចាំ database រួចរាល់។
 2. បើក **SQL Editor → New query**។ បើក [schema.sql](schema.sql), ចម្លង SQL ទាំងមូលទៅក្នុង editor ហើយចុច **Run**។ Script នេះបង្កើត tables, indexes និង database functions ដែល bot ត្រូវការ។
-3. បើមាន database ចាស់ អាច run `schema.sql` ម្តងទៀត ដើម្បីអនុវត្តការបន្ថែម schema ដែល idempotent។ វាបន្ថែម `products.video_url`, តម្លៃ Reseller, តារាង `resellers`, wallet/deposit tables, scheduled broadcast jobs, payment provider fields និង functions សម្រាប់បញ្ចូល/ប្រើសមតុល្យ។ `schema.sql` បង្កើតតែ tables, indexes និង functions ប៉ុណ្ណោះ មិនបញ្ចូលទិន្នន័យ Catalog ឬ Package ណាមួយទេ។ បន្ទាប់ពី run schema រួច បង្កើត Catalog និង Package តាម Telegram Admin → Catalogs។ Package ចាស់នឹងមានតម្លៃ Reseller ស្មើតម្លៃអតិថិជន រហូតដល់អ្នកកែវា។ ត្រូវ run schema ចុងក្រោយមុនប្រើមុខងារទាំងនេះ។
+3. បើមាន database ចាស់ អាច run `schema.sql` ម្តងទៀត ដើម្បីអនុវត្តការបន្ថែម schema ដែល idempotent។ វាបន្ថែម `products.video_url`, តម្លៃ Reseller, តារាង `resellers`, wallet/deposit tables, scheduled broadcast jobs, payment provider fields និង functions សម្រាប់បញ្ចូល/ប្រើសមតុល្យ។ វាបន្ថែមសារ និង Media ក្រោយ Order ទៅ `categories`; ការកំណត់ចាស់ក្នុង packages នឹងផ្ទេរដោយស្វ័យប្រវត្តិតែពេលគ្រប់ package ក្នុង catalog មាន settings ដូចគ្នា។ បើ settings ខុសគ្នា សូមកំណត់ឡើងវិញតាម **Edit catalog**។ `schema.sql` មិនបង្កើតទិន្នន័យ Catalog ឬ Package ទេ។ Package ចាស់នឹងមានតម្លៃ Reseller ស្មើតម្លៃអតិថិជន រហូតដល់អ្នកកែវា។ ត្រូវ run schema ចុងក្រោយមុនប្រើមុខងារទាំងនេះ។
 4. បើក **Project Settings → API** រួចចម្លង Project URL និង `service_role` key ទៅ environment variables។ ប្រើ `service_role` key តែក្នុង backend/Render ប៉ុណ្ណោះ។
 5. ទុក Row Level Security (RLS) ឲ្យបើក។ កុំបង្កើត public policies សម្រាប់ stock ឬ orders។
 
@@ -141,15 +141,15 @@ Webhook និង ABA deep link ត្រូវការអាសយដ្ឋា
 
 1. បន្ថែម Telegram ID របស់អ្នកក្នុង `TELEGRAM_ADMIN_IDS` ហើយចាប់ផ្តើម bot ឡើងវិញ។
 2. បើក bot ដោយ admin account ហើយចុច **Store admin → Catalogs and packages → Add Catalog**។
-3. ចុច **Add catalog** ហើយបញ្ចូលឈ្មោះ និងព័ត៌មានលម្អិតតាមសំណួរដែល bot បង្ហាញម្តងមួយៗ។ ព័ត៌មានលម្អិតអាចរំលងបាន។
+3. ចុច **Add catalog** ហើយបញ្ចូលឈ្មោះ, ព័ត៌មានលម្អិត និងសារ/Media ក្រោយ Order ដែលចង់ប្រើរួមសម្រាប់ Package ទាំងអស់ក្នុង Catalog នោះ។ ការកំណត់សារ និង Media អាចរំលងបាន។
 
-4. បើក Catalog ដែលទើបបង្កើត ហើយចុច **Add Package**។ Wizard នឹងសួរតាមលំដាប់៖ រូបភាព/វីដេអូ Package, ឈ្មោះ, ព័ត៌មានលម្អិត, តម្លៃអតិថិជន, តម្លៃ Reseller, សារ/របៀបប្រើក្រោយ Order និង Media ក្រោយ Order តែមួយ។ ចុច **Skip** លើជំហានស្រេចចិត្តដើម្បីរំលង។ ឈ្មោះ និងតម្លៃអតិថិជនត្រូវបញ្ចូល។ ពិនិត្យព័ត៌មាន រួចចុច **Confirm save**។ ពេលកែ Package អាច Skip ដើម្បីទុកតម្លៃដដែល ឬ Clear Media ក្រោយ Order។ ចុច **Cancel** បានគ្រប់ជំហាន។
+4. បើក Catalog ដែលទើបបង្កើត ហើយចុច **Add Package**។ Wizard នឹងសួរតាមលំដាប់៖ រូបភាព/វីដេអូ Package, ឈ្មោះ, ព័ត៌មានលម្អិត, តម្លៃអតិថិជន និងតម្លៃ Reseller។ ចុច **Skip** លើជំហានស្រេចចិត្តដើម្បីរំលង។ ឈ្មោះ និងតម្លៃអតិថិជនត្រូវបញ្ចូល។ ពិនិត្យព័ត៌មាន រួចចុច **Confirm save**។ ចុច **Cancel** បានគ្រប់ជំហាន។
 
-តម្លៃទាំងពីរត្រូវធំជាងសូន្យ។ តម្លៃ Reseller អាចស្មើ ឬខ្ពស់ជាងតម្លៃអតិថិជនបាន។ Media ជាជម្រើស។ ផ្ញើរូបភាព, វីដេអូ, GIF ឬឯកសារក្នុងជំហាន media/after-order; Bot upload file ទៅ Cloudinary ហើយ Supabase រក្សាទុក HTTPS URL។ Telegram post link ដែល paste នឹងរក្សាទុកជាតំណដើម ហើយត្រូវប្រាកដថា Bot អាចចូល source chat/channel បាន។ Package នឹងបង្ហាញ media នោះក្នុងទំព័រព័ត៌មានរបស់វា។
+តម្លៃទាំងពីរត្រូវធំជាងសូន្យ។ តម្លៃ Reseller អាចស្មើ ឬខ្ពស់ជាងតម្លៃអតិថិជនបាន។ Media ជាជម្រើស។ ផ្ញើរូបភាព, វីដេអូ, GIF ឬឯកសារក្នុងជំហាន media; Bot upload file ទៅ Cloudinary ហើយ Supabase រក្សាទុក HTTPS URL។ Telegram post link ដែល paste នឹងរក្សាទុកជាតំណដើម ហើយត្រូវប្រាកដថា Bot អាចចូល source chat/channel បាន។ Package នឹងបង្ហាញ media នោះក្នុងទំព័រព័ត៌មានរបស់វា។
 
-សារ និង Media ក្រោយ Order ត្រូវបានកំណត់តាម **Edit Package** ហើយ Bot ផ្ញើ URL ពី Cloudinary បន្ទាប់ពីទូទាត់ជោគជ័យ មុនពេលផ្ញើ Digital Key/Code។ Digital Key ឬ Code បញ្ចូលតាម **Add stock/Import stock (.txt)** សម្រាប់ Package នីមួយៗ; Bot រក្សាទុកជាទម្រង់ encrypted និងផ្ញើតាមចំនួនដែលបានទិញ។
+សារ និង Media ក្រោយ Order កំណត់តែម្តងតាម **Edit catalog** ហើយប្រើដូចគ្នាសម្រាប់គ្រប់ Package ក្នុង Catalog។ ផ្ញើរូបភាព, វីដេអូ, GIF ឬឯកសារនៅជំហាន Media ក្រោយ Order; Bot upload ទៅ Cloudinary ហើយផ្ញើបន្ទាប់ពីទូទាត់ជោគជ័យ មុនពេលផ្ញើ Digital Key/Code។ Digital Key ឬ Code បញ្ចូលតាម **Add stock/Import stock (.txt)** សម្រាប់ Package នីមួយៗ; Bot រក្សាទុកជាទម្រង់ encrypted និងផ្ញើតាមចំនួនដែលបានទិញ។
 
-មុនប្រើមុខងារនេះ សូម run `schema.sql` ចុងក្រោយក្នុង Supabase SQL Editor ដើម្បីបន្ថែម delivery fields លើ products។ ត្រូវកំណត់ Cloudinary credentials ក្នុង environment ដើម្បីឲ្យ Bot upload ឯកសារ។
+មុនប្រើមុខងារនេះ សូម run `schema.sql` ចុងក្រោយក្នុង Supabase SQL Editor ដើម្បីបន្ថែម delivery fields លើ categories។ ត្រូវកំណត់ Cloudinary credentials ក្នុង environment ដើម្បីឲ្យ Bot upload ឯកសារ។
 
 Admin អាចបើក **Store admin → Manage resellers → Add reseller** រួចផ្ញើ Telegram user ID ជាលេខ។ ចុចលើ ID ក្នុងបញ្ជីដើម្បីដកសិទ្ធិ។ Reseller ប្រើ bot ដូចអតិថិជនធម្មតា ប៉ុន្តែ catalog, ព័ត៌មាន package និងការកក់ទិញនឹងប្រើតម្លៃ Reseller។ តម្លៃ checkout ត្រូវបានគណនាដោយ Supabase តាម Telegram ID មិនមែនតាមតម្លៃដែលបានផ្ញើពី UI ទេ។
 
@@ -333,7 +333,7 @@ Admin panel អាចបន្ថែម/កែ Catalog និង Package, បិ
 | Bot បង្ហាញថាមិនមាន Catalog | ពិនិត្យថាមាន `categories` ដែល `active = true` ក្នុង Supabase។ |
 | Admin panel មិនបង្ហាញ | ពិនិត្យ Telegram numeric ID ក្នុង `TELEGRAM_ADMIN_IDS` ហើយ restart/redeploy។ |
 | Supabase request បរាជ័យ | ពិនិត្យ `SUPABASE_URL`, service-role key និងថា `schema.sql` បាន run ជោគជ័យ។ កុំបិទ RLS ដើម្បីជៀសបញ្ហា។ |
-| Supabase បង្ហាញ `column products.delivery_media_url does not exist` ឬ PostgreSQL error `42703` | បើក Supabase SQL Editor របស់ project ដែល URL ត្រូវគ្នានឹង `SUPABASE_URL` ក្នុង Render ហើយ run [`scripts/fix_product_delivery_columns.sql`](scripts/fix_product_delivery_columns.sql)។ វាបន្ថែម delivery columns ដែលខ្វះដោយមិនប៉ះទិន្នន័យផលិតផល ហើយ reload PostgREST schema cache។ បន្ទាប់មករង់ចាំបន្តិច ហើយសាកល្បងម្តងទៀត។ |
+| Supabase បង្ហាញ `column categories.delivery_media_url does not exist` ឬ PostgreSQL error `42703` | បើក Supabase SQL Editor របស់ project ដែល URL ត្រូវគ្នានឹង `SUPABASE_URL` ក្នុង Render ហើយ run [`scripts/fix_catalog_delivery_columns.sql`](scripts/fix_catalog_delivery_columns.sql)។ វាបន្ថែម delivery fields លើ categories ហើយ reload PostgREST schema cache។ បន្ទាប់មករង់ចាំបន្តិច ហើយសាកល្បងម្តងទៀត។ |
 | `PGRST205` រកមិនឃើញ table ដូចជា `categories`, `users`, `orders`, `user_wallets` ឬ `broadcast_jobs` | បើក Supabase SQL Editor របស់ project ដែល URL ត្រូវគ្នានឹង `SUPABASE_URL` ក្នុង Render ហើយ run `schema.sql` ចុងក្រោយទាំងមូល ដោយពិនិត្យឲ្យប្រាកដថា query បញ្ចប់ដោយគ្មាន SQL error។ Script នឹង reload PostgREST schema cache នៅចុងក្រោយ។ បន្ទាប់មករង់ចាំបន្តិច ហើយសាកល្បងម្តងទៀត។ |
 | Import stock មិនជោគជ័យ | ពិនិត្យ Product UUID, file UTF-8, format មួយ Digital Key/Code ក្នុងមួយបន្ទាត់ និង encryption key។ |
 | Media មិនបង្ហាញ | ពិនិត្យ URL ដែលបានរក្សាទុកក្នុង Supabase និងសិទ្ធិ/ការកំណត់ delivery របស់ Cloudinary។ សម្រាប់ Telegram post links ឬ Telegram references ចាស់ សូមប្រាកដថា Bot អាចចូល source chat/channel និងសារដើមនៅមាន។ ពិនិត្យ schema ចុងក្រោយដែលមាន `products.video_url` ផងដែរ។ |

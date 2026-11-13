@@ -87,10 +87,13 @@ ADMIN_WIZARD_STEPS = {
         "description",
         "price",
         "reseller_price",
+    ),
+    "category": (
+        "name",
+        "description",
         "delivery_message",
         "delivery_media",
     ),
-    "category": ("name", "description"),
 }
 BOT_SETTING_LABELS = {
     "how_to_buy_caption": ("Default tutorial caption", "ចំណងជើងវីដេអូណែនាំលំនាំដើម"),
@@ -2467,33 +2470,6 @@ async def deliver_order(
                     "Could not send after-order Cloudinary media for order %s",
                     order_id,
                 )
-    else:
-        if delivery and delivery.get("delivery_image_url"):
-            image_reference = delivery["delivery_image_url"]
-            if decode_telegram_content_reference(image_reference):
-                try:
-                    await copy_telegram_content_reference(
-                        bot, chat_id, image_reference
-                    )
-                except TelegramBadRequest:
-                    logger.exception(
-                        "Could not copy after-order image for order %s", order_id
-                    )
-            else:
-                await bot.send_photo(chat_id, photo=image_reference)
-        if delivery and delivery.get("delivery_video_url"):
-            video_reference = delivery["delivery_video_url"]
-            if decode_telegram_content_reference(video_reference):
-                try:
-                    await copy_telegram_content_reference(
-                        bot, chat_id, video_reference
-                    )
-                except TelegramBadRequest:
-                    logger.exception(
-                        "Could not copy after-order video for order %s", order_id
-                    )
-            else:
-                await bot.send_video(chat_id, video=video_reference)
     key_lines = "\n".join(f"- <code>{html.escape(value)}</code>" for value in keys)
     text = (
         "✅ ទំនិញបានជោគជ័យ\n\n"
@@ -3532,16 +3508,16 @@ def register_handlers(
                     f"{copy(language, 'តម្លៃអតិថិជន៖', 'Customer price:')} {money(values['price'])}\n"
                     f"{copy(language, 'តម្លៃ Reseller៖', 'Reseller price:')} {money(values['reseller_price'])}\n"
                     f"{copy(language, 'Media៖', 'Media:')} "
-                    f"{'✅' if values.get('image_url') or values.get('video_url') or values.get('media_url') or values.get('media_content_ref') else '—'}\n"
-                    f"{copy(language, 'សារក្រោយ Order៖', 'After-order message:')} "
-                    f"{'✅' if values.get('delivery_message') else '—'}\n"
-                    f"{copy(language, 'Media ក្រោយ Order៖', 'After-order media:')} "
-                    f"{'✅' if values.get('delivery_media_url') or values.get('delivery_image_url') or values.get('delivery_video_url') else '—'}"
+                    f"{'✅' if values.get('image_url') or values.get('video_url') or values.get('media_url') or values.get('media_content_ref') else '—'}"
                 )
             else:
                 summary = (
                     f"🗂 <b>{html.escape(values['name'])}</b>\n"
-                    f"{copy(language, 'ព័ត៌មានលម្អិត៖', 'Details:')} {html.escape(values.get('description') or '-')}"
+                    f"{copy(language, 'ព័ត៌មានលម្អិត៖', 'Details:')} {html.escape(values.get('description') or '-')}\n"
+                    f"{copy(language, 'សារក្រោយ Order៖', 'After-order message:')} "
+                    f"{'✅' if values.get('delivery_message') else '—'}\n"
+                    f"{copy(language, 'Media ក្រោយ Order៖', 'After-order media:')} "
+                    f"{'✅' if values.get('delivery_media_url') else '—'}"
                 )
             await render(
                 notice_text + f"{title}\n───────────────────\n{summary}",
@@ -3586,13 +3562,13 @@ def register_handlers(
             ),
             "delivery_message": copy(
                 language,
-                "ផ្ញើសារ ឬរបៀបប្រើដែលចង់ឲ្យអតិថិជនទទួលក្រោយ Order។ ផ្ញើ - ដើម្បីលុប។",
-                "Send the message or usage instructions customers should receive after ordering. Send - to clear.",
+                "ផ្ញើសារ ឬរបៀបប្រើដែលអតិថិជនទាំងអស់ក្នុង Catalog នេះនឹងទទួលក្រោយ Order។ ផ្ញើ - ដើម្បីលុប។",
+                "Send the message or usage instructions all customers in this catalog should receive after ordering. Send - to clear.",
             ),
             "delivery_media": copy(
                 language,
-                "ផ្ញើ Media មួយ ឬ Album សម្រាប់ផ្ញើក្រោយ Order។",
-                "Send one media item or album for customers to receive after ordering.",
+                "ផ្ញើ Media មួយ ឬ Album ដែលអតិថិជនទាំងអស់ក្នុង Catalog នេះនឹងទទួលក្រោយ Order។",
+                "Send one media item or album all customers in this catalog should receive after ordering.",
             ),
         }
         telegram_media_steps = {"media", "delivery_media"}
@@ -3634,8 +3610,6 @@ def register_handlers(
             )
         has_delivery_media = bool(
             values.get("delivery_media_url")
-            or values.get("delivery_image_url")
-            or values.get("delivery_video_url")
         )
         if (
             wizard["edit"]
@@ -3834,9 +3808,6 @@ def register_handlers(
             media_content_ref = values.get("media_content_ref")
             media_url = media_content_ref or values.get("media_url")
             media_type = "telegram" if media_content_ref else values.get("media_type")
-            delivery_media_url = values.get("delivery_media_url")
-            delivery_image_url = values.get("delivery_image_url")
-            delivery_video_url = values.get("delivery_video_url")
             if wizard["action"] == "product_add":
                 if wizard.get("category_id") is None:
                     raise InputValidationError(
@@ -3854,10 +3825,6 @@ def register_handlers(
                     image_url=media_url if media_type != "video" else None,
                     video_url=media_url if media_type == "video" else None,
                     reseller_price=str(reseller_price),
-                    delivery_message=values.get("delivery_message", ""),
-                    delivery_media_url=delivery_media_url,
-                    delivery_image_url=delivery_image_url,
-                    delivery_video_url=delivery_video_url,
                 )
                 return f"ac:{wizard['category_id']}"
 
@@ -3870,11 +3837,6 @@ def register_handlers(
                 image_url=media_url if media_type != "video" else None,
                 video_url=media_url if media_type == "video" else None,
                 update_media=media_type is not None,
-                delivery_message=values.get("delivery_message", ""),
-                delivery_media_url=delivery_media_url,
-                delivery_image_url=delivery_image_url,
-                delivery_video_url=delivery_video_url,
-                update_delivery=True,
             )
             return f"ap:{wizard['target_id']}"
 
@@ -3889,13 +3851,13 @@ def register_handlers(
         category_values = {
             "name": values["name"],
             "description": values.get("description", ""),
+            "delivery_message": values.get("delivery_message", ""),
+            "delivery_media_url": values.get("delivery_media_url"),
         }
         if wizard["action"] == "category_add":
-            await store.client.table("categories").insert(category_values).execute()
+            await store.create_category(**category_values)
             return "admin:catalogs"
-        await store.client.table("categories").update(category_values).eq(
-            "id", wizard["target_id"]
-        ).execute()
+        await store.update_category(wizard["target_id"], **category_values)
         return f"ac:{wizard['target_id']}"
 
     @router.callback_query(F.data == "home")
@@ -5694,7 +5656,12 @@ def register_handlers(
         )
         await callback.message.edit_text(
             f"🗂 <b>{html.escape(category_data['name'])}</b>\n"
-            f"{html.escape(category_data.get('description') or '')}\n\n{product_summary}",
+            f"{html.escape(category_data.get('description') or '')}\n\n"
+            f"{copy(language, 'សារក្រោយ Order៖', 'After-order message:')} "
+            f"{'✅' if category_data.get('delivery_message') else '—'} · "
+            f"{copy(language, 'Media ក្រោយ Order៖', 'After-order media:')} "
+            f"{'✅' if category_data.get('delivery_media_url') else '—'}\n\n"
+            f"{product_summary}",
             parse_mode="HTML",
             reply_markup=keyboard(rows),
         )
@@ -5716,12 +5683,6 @@ def register_handlers(
         rows = admin_product_actions(
             product_data["id"], product_data["category_id"], language
         )
-        delivery_status = (
-            f"{copy(language, 'សារក្រោយ Order៖', 'After-order message:')} "
-            f"{'✅' if product_data.get('delivery_message') else '—'} · "
-            f"{copy(language, 'Media៖', 'Media:')} "
-            f"{'✅' if product_data.get('delivery_media_url') or product_data.get('delivery_image_url') or product_data.get('delivery_video_url') else '—'}"
-        )
         await callback.message.edit_text(
             f"📦 <b>{html.escape(product_data['name'])}</b>\n"
             f"ID: <code>{html.escape(product_data['id'])}</code>\n"
@@ -5729,7 +5690,7 @@ def register_handlers(
             f"{copy(language, 'តម្លៃ Reseller៖', 'Reseller price:')} {money(product_data['reseller_price'])}\n"
             f"{copy(language, 'ស្តុកនៅសល់៖', 'Stock remaining:')} {stock}\n\n"
             f"{html.escape(product_data.get('description') or '')}\n\n"
-            f"{delivery_status}",
+            f"{copy(language, 'Catalog កំណត់សារ និង Media ក្រោយ Order សម្រាប់ Package ទាំងអស់។', 'After-order message and media are configured once for the whole catalog.')}",
             parse_mode="HTML",
             reply_markup=keyboard(rows),
         )
@@ -5874,6 +5835,8 @@ def register_handlers(
             "values": {
                 "name": category["name"],
                 "description": category.get("description") or "",
+                "delivery_message": category.get("delivery_message") or "",
+                "delivery_media_url": category.get("delivery_media_url"),
             },
         }
         await show_admin_wizard(callback.message, callback.from_user.id, language)
@@ -5909,10 +5872,6 @@ def register_handlers(
                 ),
                 "image_url": product.get("image_url"),
                 "video_url": product.get("video_url"),
-                "delivery_message": product.get("delivery_message") or "",
-                "delivery_media_url": product.get("delivery_media_url"),
-                "delivery_image_url": product.get("delivery_image_url"),
-                "delivery_video_url": product.get("delivery_video_url"),
             },
         }
         await show_admin_wizard(callback.message, callback.from_user.id, language)
@@ -6028,12 +5987,13 @@ def register_handlers(
                 )
             return
         try:
+            folder = "categories" if step == "delivery_media" else "products"
             media_urls = await upload_telegram_media_items(
-                bot, settings, items, "products"
+                bot, settings, items, folder
             )
         except MEDIA_UPLOAD_ERRORS:
             logger.exception(
-                "Could not upload package media for admin %s",
+                "Could not upload wizard media for admin %s",
                 callback.from_user.id,
             )
             await callback.answer(
@@ -6055,9 +6015,6 @@ def register_handlers(
         else:
             values[f"{step}_url"] = media_urls
         wizard.pop("telegram_media_items", None)
-        if step == "delivery_media":
-            values["delivery_image_url"] = None
-            values["delivery_video_url"] = None
         steps = ADMIN_WIZARD_STEPS[wizard["kind"]]
         step_index = steps.index(step)
         wizard["step"] = steps[step_index + 1] if step_index + 1 < len(steps) else None
@@ -6125,6 +6082,7 @@ def register_handlers(
         fields = {"delivery_media": "delivery_media_url"}
         if (
             not wizard
+            or wizard["kind"] != "category"
             or not wizard["edit"]
             or step not in fields
         ):
@@ -6145,8 +6103,6 @@ def register_handlers(
             return
         url_field = fields[step]
         wizard["values"][url_field] = None
-        wizard["values"]["delivery_image_url"] = None
-        wizard["values"]["delivery_video_url"] = None
         steps = ADMIN_WIZARD_STEPS[wizard["kind"]]
         current_index = steps.index(step)
         wizard["step"] = (

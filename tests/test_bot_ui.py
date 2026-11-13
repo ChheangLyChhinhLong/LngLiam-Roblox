@@ -1488,10 +1488,9 @@ def test_stale_edit_wizard_skip_refreshes_the_current_step():
             answer=AsyncMock(),
         )
         bot_module.admin_wizards[user_id] = {
-            "kind": "product",
-            "action": "product_edit",
-            "target_id": "product-123",
-            "category_id": "category-123",
+            "kind": "category",
+            "action": "category_edit",
+            "target_id": "category-123",
             "edit": True,
             "step": "delivery_media",
             "values": {},
@@ -1517,7 +1516,7 @@ def test_stale_edit_wizard_skip_refreshes_the_current_step():
             "The form was updated. Continue from the current step."
         )
         prompt.edit_text.assert_awaited_once()
-        assert "Step 7/7" in prompt.edit_text.await_args.args[0]
+        assert "Step 4/4" in prompt.edit_text.await_args.args[0]
         assert bot_module.admin_wizards[user_id]["step"] == "delivery_media"
 
         bot_module.admin_wizards.pop(user_id, None)
@@ -1586,7 +1585,7 @@ def test_edit_reseller_price_can_be_kept_unchanged_and_saved_above_customer_pric
 
         callback.data = "admin:wizard-skip:reseller_price"
         await handler(callback)
-        assert bot_module.admin_wizards[user_id]["step"] == "delivery_message"
+        assert bot_module.admin_wizards[user_id]["step"] is None
 
         bot_module.admin_wizards[user_id]["step"] = None
         callback.data = "admin:wizard-save"
@@ -1979,6 +1978,29 @@ def test_package_wizard_uploads_package_media_to_cloudinary(monkeypatch):
         )
         assert bot_module.admin_wizards[user_id]["values"]["media_type"] == "image"
         assert "telegram_media_items" not in bot_module.admin_wizards[user_id]
+
+        bot_module.admin_wizards[user_id] = {
+            "kind": "category",
+            "action": "category_edit",
+            "target_id": "category-123",
+            "edit": True,
+            "step": "delivery_media",
+            "values": {"name": "Catalog", "description": ""},
+            "telegram_media_items": [
+                {
+                    "file_id": "catalog-video-id",
+                    "media_type": "video",
+                    "file_name": "video-202",
+                }
+            ],
+        }
+        await save_handler(save_callback)
+
+        assert upload.await_args_list[1].args[3] == "categories"
+        assert (
+            bot_module.admin_wizards[user_id]["values"]["delivery_media_url"]
+            == cloudinary_url
+        )
 
         bot_module.admin_wizards.pop(user_id, None)
         bot_module.active_screen_messages.pop(user_id, None)
@@ -2479,32 +2501,28 @@ def test_product_creation_persists_a_reseller_price():
     asyncio.run(run_test())
 
 
-def test_product_creation_saves_optional_after_order_message_and_media():
+def test_category_creation_saves_catalog_wide_after_order_content():
     async def run_test():
         query = Mock()
         query.insert.return_value = query
-        query.select.return_value = query
-        query.execute = AsyncMock(
-            return_value=SimpleNamespace(data=[{"id": "product-123"}])
-        )
+        query.execute = AsyncMock(return_value=SimpleNamespace(data=[]))
         client = SimpleNamespace(table=Mock(return_value=query))
 
-        await Store(client).create_product(
-            "category-123",
-            "Game code",
-            "1.00",
-            "",
-            delivery_message="Redeem at example.com",
-            delivery_media_url="telegram:media-reference",
-            delivery_image_url="https://res.cloudinary.com/example/image/upload/delivery.png",
-            delivery_video_url="https://res.cloudinary.com/example/video/upload/guide.mp4",
+        await Store(client).create_category(
+            "Catalog",
+            "Description",
+            "Redeem at example.com",
+            "telegram:media-reference",
         )
 
-        values = query.insert.call_args.args[0]
-        assert values["delivery_message"] == "Redeem at example.com"
-        assert values["delivery_media_url"] == "telegram:media-reference"
-        assert values["delivery_image_url"].endswith("delivery.png")
-        assert values["delivery_video_url"].endswith("guide.mp4")
+        query.insert.assert_called_once_with(
+            {
+                "name": "Catalog",
+                "description": "Description",
+                "delivery_message": "Redeem at example.com",
+                "delivery_media_url": "telegram:media-reference",
+            }
+        )
 
     asyncio.run(run_test())
 
@@ -2542,7 +2560,7 @@ def test_product_update_changes_fields_and_replaces_media_only_when_requested():
     asyncio.run(run_test())
 
 
-def test_product_update_can_replace_and_clear_after_order_content():
+def test_category_update_can_replace_and_clear_after_order_content():
     async def run_test():
         query = Mock()
         query.update.return_value = query
@@ -2550,29 +2568,28 @@ def test_product_update_can_replace_and_clear_after_order_content():
         query.execute = AsyncMock(return_value=SimpleNamespace(data=[]))
         client = SimpleNamespace(table=Mock(return_value=query))
 
-        await Store(client).update_product(
-            "product-123",
-            "Updated key",
-            "0.50",
-            "0.35",
+        await Store(client).update_category(
+            "category-123",
+            "Catalog",
             "Updated details",
-            delivery_message="",
-            delivery_media_url="telegram:media-reference",
-            delivery_image_url=None,
-            delivery_video_url="https://res.cloudinary.com/example/video/upload/guide.mp4",
-            update_delivery=True,
+            "",
+            None,
         )
 
-        values = query.update.call_args.args[0]
-        assert values["delivery_message"] == ""
-        assert values["delivery_media_url"] == "telegram:media-reference"
-        assert values["delivery_image_url"] is None
-        assert values["delivery_video_url"].endswith("guide.mp4")
+        query.update.assert_called_once_with(
+            {
+                "name": "Catalog",
+                "description": "Updated details",
+                "delivery_message": "",
+                "delivery_media_url": None,
+            }
+        )
+        query.eq.assert_called_once_with("id", "category-123")
 
     asyncio.run(run_test())
 
 
-def test_order_delivery_details_loads_product_delivery_content():
+def test_order_delivery_details_loads_catalog_delivery_content():
     async def run_test():
         order_query = Mock()
         order_query.select.return_value = order_query
@@ -2585,18 +2602,27 @@ def test_order_delivery_details_loads_product_delivery_content():
         product_query.select.return_value = product_query
         product_query.eq.return_value = product_query
         product_query.maybe_single.return_value = product_query
+        product_query.execute = AsyncMock(
+            return_value=SimpleNamespace(data={"category_id": "category-123"})
+        )
+        category_query = Mock()
+        category_query.select.return_value = category_query
+        category_query.eq.return_value = category_query
+        category_query.maybe_single.return_value = category_query
         delivery = {
             "delivery_message": "Redeem now",
-            "delivery_image_url": "https://example.com/image.png",
-            "delivery_video_url": None,
+            "delivery_media_url": "https://example.com/instructions.mp4",
         }
-        product_query.execute = AsyncMock(return_value=SimpleNamespace(data=delivery))
-        client = SimpleNamespace(table=Mock(side_effect=[order_query, product_query]))
+        category_query.execute = AsyncMock(return_value=SimpleNamespace(data=delivery))
+        client = SimpleNamespace(
+            table=Mock(side_effect=[order_query, product_query, category_query])
+        )
 
         result = await Store(client).order_delivery_details("order-123")
 
         assert result == delivery
         product_query.eq.assert_called_once_with("id", "product-123")
+        category_query.eq.assert_called_once_with("id", "category-123")
 
     asyncio.run(run_test())
 
@@ -3115,7 +3141,7 @@ def test_delivery_deletes_payment_qr_before_fulfilling_and_sending_credentials()
     asyncio.run(run_test())
 
 
-def test_delivery_sends_configured_product_message_and_media_before_stock_codes():
+def test_delivery_sends_catalog_message_and_media_before_stock_codes():
     async def run_test():
         events = []
         key = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
@@ -3139,8 +3165,7 @@ def test_delivery_sends_configured_product_message_and_media_before_stock_codes(
             order_delivery_details=AsyncMock(
                 return_value={
                     "delivery_message": "Redeem <now>",
-                    "delivery_image_url": "https://example.com/instructions.png",
-                    "delivery_video_url": "https://example.com/guide.mp4",
+                    "delivery_media_url": "https://res.cloudinary.com/example/video/upload/guide.mp4",
                 }
             ),
             fulfill_order=AsyncMock(return_value=[encrypt_stock("CODE-001", key)]),
@@ -3151,10 +3176,12 @@ def test_delivery_sends_configured_product_message_and_media_before_stock_codes(
         await deliver_order(bot, store, settings, "order-123", 123)
 
         assert events[0] == ("message", "Redeem &lt;now&gt;")
-        assert events[1] == ("photo", "https://example.com/instructions.png")
-        assert events[2] == ("video", "https://example.com/guide.mp4")
-        assert events[3][0] == "message"
-        assert "CODE-001" in events[3][1]
+        assert events[1] == (
+            "video",
+            "https://res.cloudinary.com/example/video/upload/guide.mp4",
+        )
+        assert events[2][0] == "message"
+        assert "CODE-001" in events[2][1]
         store.mark_delivered.assert_awaited_once_with("order-123")
 
     asyncio.run(run_test())
@@ -3189,7 +3216,7 @@ def test_delivery_copies_telegram_media_reference_without_downloading():
         store = SimpleNamespace(
             payment_message=AsyncMock(return_value=None),
             order_delivery_details=AsyncMock(
-                return_value={"delivery_image_url": reference}
+                return_value={"delivery_media_url": reference}
             ),
             fulfill_order=AsyncMock(return_value=[encrypt_stock("CODE-001", key)]),
             mark_delivered=AsyncMock(),
@@ -3289,7 +3316,7 @@ def test_delivery_continues_with_stock_codes_when_telegram_media_copy_fails():
         store = SimpleNamespace(
             payment_message=AsyncMock(return_value=None),
             order_delivery_details=AsyncMock(
-                return_value={"delivery_image_url": reference}
+                return_value={"delivery_media_url": reference}
             ),
             fulfill_order=AsyncMock(return_value=[encrypt_stock("CODE-001", key)]),
             mark_delivered=AsyncMock(),

@@ -400,13 +400,46 @@ class Store:
     async def category(self, category_id: str) -> dict[str, Any] | None:
         result = await (
             self.client.table("categories")
-            .select("id,name,description")
+            .select("id,name,description,delivery_message,delivery_media_url")
             .eq("id", category_id)
             .eq("active", True)
             .maybe_single()
             .execute()
         )
         return result.data
+
+    async def create_category(
+        self,
+        name: str,
+        description: str,
+        delivery_message: str,
+        delivery_media_url: str | None,
+    ) -> None:
+        await self.client.table("categories").insert(
+            {
+                "name": name,
+                "description": description,
+                "delivery_message": delivery_message,
+                "delivery_media_url": delivery_media_url,
+            }
+        ).execute()
+
+    async def update_category(
+        self,
+        category_id: str,
+        name: str,
+        description: str,
+        delivery_message: str,
+        delivery_media_url: str | None,
+    ) -> None:
+        await self.client.table("categories").update(
+            {
+                "name": name,
+                "description": description,
+                "delivery_message": delivery_message,
+                "delivery_media_url": delivery_media_url,
+            }
+        ).eq("id", category_id).execute()
 
     async def products(self, category_id: str) -> list[dict[str, Any]]:
         result = await (
@@ -423,8 +456,7 @@ class Store:
         result = await (
             self.client.table("products")
             .select(
-                "id,category_id,name,description,price,reseller_price,image_url,video_url,"
-                "delivery_message,delivery_media_url,delivery_image_url,delivery_video_url"
+                "id,category_id,name,description,price,reseller_price,image_url,video_url"
             )
             .eq("id", product_id)
             .eq("active", True)
@@ -442,10 +474,6 @@ class Store:
         image_url: str | None = None,
         video_url: str | None = None,
         reseller_price: str | None = None,
-        delivery_message: str | None = None,
-        delivery_image_url: str | None = None,
-        delivery_video_url: str | None = None,
-        delivery_media_url: str | None = None,
     ) -> str:
         if image_url and video_url:
             raise ValueError("A product cannot have both an image and a video")
@@ -460,23 +488,6 @@ class Store:
             product_data["image_url"] = image_url
         if video_url:
             product_data["video_url"] = video_url
-        if any(
-            value is not None
-            for value in (
-                delivery_message,
-                delivery_media_url,
-                delivery_image_url,
-                delivery_video_url,
-            )
-        ):
-            product_data.update(
-                {
-                    "delivery_message": delivery_message or "",
-                    "delivery_media_url": delivery_media_url,
-                    "delivery_image_url": delivery_image_url,
-                    "delivery_video_url": delivery_video_url,
-                }
-            )
         result = await (
             self.client.table("products")
             .insert(product_data)
@@ -499,11 +510,6 @@ class Store:
         image_url: str | None = None,
         video_url: str | None = None,
         update_media: bool = False,
-        delivery_message: str | None = None,
-        delivery_image_url: str | None = None,
-        delivery_video_url: str | None = None,
-        update_delivery: bool = False,
-        delivery_media_url: str | None = None,
     ) -> None:
         values: dict[str, Any] = {
             "name": name,
@@ -514,15 +520,6 @@ class Store:
         if update_media:
             values["image_url"] = image_url
             values["video_url"] = video_url
-        if update_delivery:
-            values.update(
-                {
-                    "delivery_message": delivery_message or "",
-                    "delivery_media_url": delivery_media_url,
-                    "delivery_image_url": delivery_image_url,
-                    "delivery_video_url": delivery_video_url,
-                }
-            )
         await self.client.table("products").update(values).eq("id", product_id).execute()
 
     async def update_product_image(self, product_id: str, image_url: str) -> bool:
@@ -674,14 +671,22 @@ class Store:
             return None
         product_result = await (
             self.client.table("products")
-            .select(
-                "delivery_message,delivery_media_url,delivery_image_url,delivery_video_url"
-            )
+            .select("category_id")
             .eq("id", order["product_id"])
             .maybe_single()
             .execute()
         )
-        return product_result.data
+        product = product_result.data
+        if not product:
+            return None
+        category_result = await (
+            self.client.table("categories")
+            .select("delivery_message,delivery_media_url")
+            .eq("id", product["category_id"])
+            .maybe_single()
+            .execute()
+        )
+        return category_result.data
 
     async def mark_delivered(self, order_id: str) -> None:
         await self.client.rpc("mark_order_delivered", {"p_order_id": order_id}).execute()
