@@ -400,7 +400,9 @@ class Store:
     async def category(self, category_id: str) -> dict[str, Any] | None:
         result = await (
             self.client.table("categories")
-            .select("id,name,description,delivery_message,delivery_media_url")
+            .select(
+                "id,name,description,media_url,delivery_message,delivery_media_url"
+            )
             .eq("id", category_id)
             .eq("active", True)
             .maybe_single()
@@ -414,11 +416,13 @@ class Store:
         description: str,
         delivery_message: str,
         delivery_media_url: str | None,
+        media_url: str | None = None,
     ) -> None:
         await self.client.table("categories").insert(
             {
                 "name": name,
                 "description": description,
+                "media_url": media_url,
                 "delivery_message": delivery_message,
                 "delivery_media_url": delivery_media_url,
             }
@@ -431,15 +435,29 @@ class Store:
         description: str,
         delivery_message: str,
         delivery_media_url: str | None,
+        media_url: str | None = None,
     ) -> None:
         await self.client.table("categories").update(
             {
                 "name": name,
                 "description": description,
+                "media_url": media_url,
                 "delivery_message": delivery_message,
                 "delivery_media_url": delivery_media_url,
             }
         ).eq("id", category_id).execute()
+
+    async def update_category_media(
+        self, category_id: str, media_url: str
+    ) -> bool:
+        result = await (
+            self.client.table("categories")
+            .update({"media_url": media_url})
+            .eq("id", category_id)
+            .select("id")
+            .execute()
+        )
+        return bool(result.data)
 
     async def products(self, category_id: str) -> list[dict[str, Any]]:
         result = await (

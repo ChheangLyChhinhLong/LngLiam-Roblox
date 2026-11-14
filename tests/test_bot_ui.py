@@ -676,6 +676,7 @@ def test_immediate_welcome_replies_before_database_work():
         store.bot_settings.assert_awaited_once_with(
             ("welcome_video_url", "welcome_photo_url")
         )
+        assert sent_message.edit_text.await_args.kwargs["reply_markup"] is None
         assert bot_module.user_language_cache[12345] == "km"
 
     asyncio.run(run_test())
@@ -820,6 +821,156 @@ def test_shop_catalog_buttons_reflect_stock_across_all_packages():
         finally:
             bot_module.router.callback_query.handlers[:] = original_callback_handlers
             bot_module.router.message.handlers[:] = original_message_handlers
+            bot_module.user_language_cache.pop(user_id, None)
+
+    asyncio.run(run_test())
+
+
+def test_catalog_media_is_shown_before_the_package_list(monkeypatch):
+    async def run_test():
+        user_id = 7654380
+        screen_message = SimpleNamespace(
+            message_id=1200,
+            chat=SimpleNamespace(id=user_id),
+            from_user=SimpleNamespace(id=user_id),
+            answer=AsyncMock(return_value=SimpleNamespace(message_id=1202)),
+            edit_text=AsyncMock(),
+        )
+        sent_media = [SimpleNamespace(message_id=1201)]
+        send_media = AsyncMock(return_value=sent_media)
+        monkeypatch.setattr(bot_module, "send_cloudinary_media", send_media)
+        store = SimpleNamespace(
+            user_language=AsyncMock(return_value="en"),
+            is_reseller=AsyncMock(return_value=False),
+            category=AsyncMock(
+                return_value={
+                    "name": "Catalog",
+                    "description": "Catalog details",
+                    "media_url": "https://res.cloudinary.com/example/image/upload/catalog.png",
+                }
+            ),
+            products=AsyncMock(
+                return_value=[
+                    {
+                        "id": "package-1",
+                        "name": "Package",
+                        "price": "1.00",
+                        "reseller_price": "0.80",
+                    }
+                ]
+            ),
+            available_stock=AsyncMock(return_value=3),
+        )
+        callback = SimpleNamespace(
+            data="c:catalog-1",
+            from_user=SimpleNamespace(id=user_id),
+            message=screen_message,
+            answer=AsyncMock(),
+        )
+        callback_handlers = list(bot_module.router.callback_query.handlers)
+        message_handlers = list(bot_module.router.message.handlers)
+        bot_module.active_screen_messages.pop(user_id, None)
+        bot_module.active_screen_auxiliary_message_ids.pop(user_id, None)
+        try:
+            register_handlers(
+                SimpleNamespace(include_router=Mock()),
+                SimpleNamespace(),
+                store,
+                SimpleNamespace(),
+                SimpleNamespace(admin_ids=set()),
+            )
+            handler = [
+                item.callback
+                for item in bot_module.router.callback_query.handlers
+                if item.callback.__name__ == "category"
+            ][-1]
+
+            await handler(callback)
+
+            send_media.assert_awaited_once_with(
+                screen_message,
+                "https://res.cloudinary.com/example/image/upload/catalog.png",
+                fallback="photo",
+            )
+            screen_message.answer.assert_awaited_once()
+            screen_message.edit_text.assert_not_awaited()
+            markup = screen_message.answer.await_args.kwargs["reply_markup"]
+            assert markup.inline_keyboard[0][0].callback_data == "p:package-1"
+            assert bot_module.active_screen_auxiliary_message_ids[user_id] == [1201]
+        finally:
+            bot_module.router.callback_query.handlers[:] = callback_handlers
+            bot_module.router.message.handlers[:] = message_handlers
+            bot_module.active_screen_messages.pop(user_id, None)
+            bot_module.active_screen_auxiliary_message_ids.pop(user_id, None)
+            bot_module.user_language_cache.pop(user_id, None)
+
+    asyncio.run(run_test())
+
+
+def test_product_details_use_shared_catalog_media(monkeypatch):
+    async def run_test():
+        user_id = 7654381
+        catalog_media = "https://res.cloudinary.com/example/video/upload/catalog.mp4"
+        message = SimpleNamespace(
+            message_id=1204,
+            chat=SimpleNamespace(id=user_id),
+            from_user=SimpleNamespace(id=user_id),
+            photo=None,
+            video=None,
+            delete=AsyncMock(),
+        )
+        send_media = AsyncMock(return_value=[SimpleNamespace(message_id=1205)])
+        monkeypatch.setattr(bot_module, "send_cloudinary_media", send_media)
+        store = SimpleNamespace(
+            user_language=AsyncMock(return_value="en"),
+            product=AsyncMock(
+                return_value={
+                    "id": "package-1",
+                    "category_id": "catalog-1",
+                    "name": "Package",
+                    "description": "Details",
+                    "price": "1.00",
+                    "reseller_price": "1.00",
+                    "image_url": "https://example.com/legacy-package-image.png",
+                    "video_url": None,
+                }
+            ),
+            is_reseller=AsyncMock(return_value=False),
+            available_stock=AsyncMock(return_value=0),
+            category=AsyncMock(
+                return_value={"name": "Catalog", "media_url": catalog_media}
+            ),
+        )
+        callback = SimpleNamespace(
+            data="p:package-1",
+            from_user=SimpleNamespace(id=user_id),
+            message=message,
+            answer=AsyncMock(),
+        )
+        callback_handlers = list(bot_module.router.callback_query.handlers)
+        message_handlers = list(bot_module.router.message.handlers)
+        try:
+            register_handlers(
+                SimpleNamespace(include_router=Mock()),
+                SimpleNamespace(),
+                store,
+                SimpleNamespace(),
+                SimpleNamespace(admin_ids=set()),
+            )
+            handler = [
+                item.callback
+                for item in bot_module.router.callback_query.handlers
+                if item.callback.__name__ == "product"
+            ][-1]
+
+            await handler(callback)
+
+            assert send_media.await_args.args[:2] == (message, catalog_media)
+            assert send_media.await_args.kwargs["fallback"] == "photo"
+            assert "Package" in send_media.await_args.kwargs["caption"]
+        finally:
+            bot_module.router.callback_query.handlers[:] = callback_handlers
+            bot_module.router.message.handlers[:] = message_handlers
             bot_module.user_language_cache.pop(user_id, None)
 
     asyncio.run(run_test())
@@ -1573,7 +1724,7 @@ def test_stale_edit_wizard_skip_refreshes_the_current_step():
             "action": "category_edit",
             "target_id": "category-123",
             "edit": True,
-            "step": "delivery_media",
+            "step": "delivery_content",
             "values": {},
         }
         bot_module.active_screen_messages.pop(user_id, None)
@@ -1598,7 +1749,7 @@ def test_stale_edit_wizard_skip_refreshes_the_current_step():
         )
         prompt.edit_text.assert_awaited_once()
         assert "Step 4/4" in prompt.edit_text.await_args.args[0]
-        assert bot_module.admin_wizards[user_id]["step"] == "delivery_media"
+        assert bot_module.admin_wizards[user_id]["step"] == "delivery_content"
 
         bot_module.admin_wizards.pop(user_id, None)
         bot_module.active_screen_messages.pop(user_id, None)
@@ -1967,20 +2118,9 @@ def test_tutorial_file_upload_saves_cloudinary_url(monkeypatch):
     asyncio.run(run_test())
 
 
-def test_package_wizard_uploads_package_media_to_cloudinary(monkeypatch):
+def test_catalog_wizard_uploads_catalog_and_after_order_media(monkeypatch):
     async def run_test():
         user_id = 7654325
-        screen = SimpleNamespace(message_id=990)
-        bot_module.active_screen_messages[user_id] = screen
-        bot_module.admin_wizards[user_id] = {
-            "kind": "product",
-            "action": "product_add",
-            "target_id": None,
-            "category_id": "category-1",
-            "edit": False,
-            "step": "media",
-            "values": {"description": ""},
-        }
         bot = SimpleNamespace()
         cloudinary_url = "https://res.cloudinary.com/cloud/image/upload/item.png"
         settings = SimpleNamespace(
@@ -1999,36 +2139,6 @@ def test_package_wizard_uploads_package_media_to_cloudinary(monkeypatch):
             SimpleNamespace(),
             settings,
         )
-        handler = [
-            handler.callback
-            for handler in bot_module.router.message.handlers
-            if handler.callback.__name__ == "receive_wizard_media"
-        ][-1]
-        sent_screen = SimpleNamespace(message_id=991)
-        message = SimpleNamespace(
-            from_user=SimpleNamespace(id=user_id),
-            chat=SimpleNamespace(id=user_id),
-            message_id=201,
-            answer=AsyncMock(return_value=sent_screen),
-            delete=AsyncMock(),
-            text=None,
-            caption="A caption retained in Telegram",
-            photo=[SimpleNamespace(file_id="photo-file-id")],
-            video=None,
-            media_group_id=None,
-        )
-
-        await handler(message)
-
-        assert bot_module.admin_wizards[user_id]["telegram_media_items"] == [
-            {
-                "file_id": "photo-file-id",
-                "media_type": "image",
-                "file_name": "image-201",
-            }
-        ]
-        assert "Cloudinary" in message.answer.await_args.args[0]
-
         wizard_screen = SimpleNamespace(
             message_id=990,
             edit_text=AsyncMock(return_value=SimpleNamespace(message_id=993)),
@@ -2044,29 +2154,44 @@ def test_package_wizard_uploads_package_media_to_cloudinary(monkeypatch):
             for handler in bot_module.router.callback_query.handlers
             if handler.callback.__name__ == "save_wizard_telegram_media"
         ][-1]
-        await save_handler(save_callback)
-
-        upload.assert_awaited_once_with(
-            bot,
-            settings,
-            "photo-file-id",
-            "products",
-            resource_type="auto",
-            file_name="image-201",
-        )
-        assert (
-            bot_module.admin_wizards[user_id]["values"]["media_url"] == cloudinary_url
-        )
-        assert bot_module.admin_wizards[user_id]["values"]["media_type"] == "image"
-        assert "telegram_media_items" not in bot_module.admin_wizards[user_id]
 
         bot_module.admin_wizards[user_id] = {
             "kind": "category",
             "action": "category_edit",
             "target_id": "category-123",
             "edit": True,
-            "step": "delivery_media",
+            "step": "media",
             "values": {"name": "Catalog", "description": ""},
+            "telegram_media_items": [
+                {
+                    "file_id": "catalog-gif-id",
+                    "media_type": "animation",
+                    "file_name": "catalog.gif",
+                }
+            ],
+        }
+        await save_handler(save_callback)
+
+        assert upload.await_args_list[0].args[2:4] == (
+            "catalog-gif-id",
+            "categories",
+        )
+        assert (
+            bot_module.admin_wizards[user_id]["values"]["media_url"] == cloudinary_url
+        )
+        assert bot_module.admin_wizards[user_id]["step"] == "name"
+
+        bot_module.admin_wizards[user_id] = {
+            "kind": "category",
+            "action": "category_edit",
+            "target_id": "category-123",
+            "edit": True,
+            "step": "delivery_content",
+            "values": {
+                "name": "Catalog",
+                "description": "",
+                "delivery_message": "Redeem code",
+            },
             "telegram_media_items": [
                 {
                     "file_id": "catalog-video-id",
@@ -2082,6 +2207,10 @@ def test_package_wizard_uploads_package_media_to_cloudinary(monkeypatch):
             bot_module.admin_wizards[user_id]["values"]["delivery_media_url"]
             == cloudinary_url
         )
+        assert (
+            bot_module.admin_wizards[user_id]["values"]["delivery_message"]
+            == "Redeem code"
+        )
 
         bot_module.admin_wizards.pop(user_id, None)
         bot_module.active_screen_messages.pop(user_id, None)
@@ -2090,12 +2219,284 @@ def test_package_wizard_uploads_package_media_to_cloudinary(monkeypatch):
     asyncio.run(run_test())
 
 
-def test_set_product_media_uploads_to_cloudinary_and_stores_url(monkeypatch):
+def test_add_package_wizard_starts_with_name_and_no_media_step():
+    async def run_test():
+        user_id = 7654330
+        screen = SimpleNamespace(
+            message_id=994,
+            edit_text=AsyncMock(return_value=SimpleNamespace(message_id=995)),
+        )
+        callback = SimpleNamespace(
+            data="admin:product-add:catalog-1",
+            from_user=SimpleNamespace(id=user_id),
+            message=screen,
+            answer=AsyncMock(),
+        )
+        register_handlers(
+            SimpleNamespace(include_router=Mock()),
+            SimpleNamespace(),
+            SimpleNamespace(user_language=AsyncMock(return_value="en")),
+            SimpleNamespace(),
+            SimpleNamespace(admin_ids={user_id}),
+        )
+        handler = [
+            item.callback
+            for item in bot_module.router.callback_query.handlers
+            if item.callback.__name__ == "add_product_prompt"
+        ][-1]
+
+        await handler(callback)
+
+        assert bot_module.admin_wizards[user_id]["step"] == "name"
+        prompt = screen.edit_text.await_args.args[0]
+        assert "Step 1/4 · Product name" in prompt
+        assert "Product package media" not in prompt
+
+        bot_module.admin_wizards.pop(user_id, None)
+        bot_module.active_screen_messages.pop(user_id, None)
+        bot_module.user_language_cache.pop(user_id, None)
+
+    asyncio.run(run_test())
+
+
+def test_admin_wizard_back_restores_previous_step_from_form_and_review():
+    async def run_test():
+        user_id = 7654332
+        screen = SimpleNamespace(
+            message_id=997,
+            edit_text=AsyncMock(),
+        )
+        screen.edit_text.return_value = screen
+        callback = SimpleNamespace(
+            data="admin:wizard-back:delivery_content",
+            from_user=SimpleNamespace(id=user_id),
+            message=screen,
+            answer=AsyncMock(),
+        )
+        bot_module.admin_wizards[user_id] = {
+            "kind": "category",
+            "action": "category_edit",
+            "target_id": "catalog-1",
+            "edit": True,
+            "step": "delivery_content",
+            "values": {
+                "name": "Catalog",
+                "description": "Catalog details",
+                "delivery_message": "Redeem the code",
+                "delivery_media_url": None,
+            },
+        }
+        register_handlers(
+            SimpleNamespace(include_router=Mock()),
+            SimpleNamespace(),
+            SimpleNamespace(user_language=AsyncMock(return_value="en")),
+            SimpleNamespace(),
+            SimpleNamespace(admin_ids={user_id}),
+        )
+        back_handler = [
+            item.callback
+            for item in bot_module.router.callback_query.handlers
+            if item.callback.__name__ == "back_admin_wizard_step"
+        ][-1]
+        skip_handler = [
+            item.callback
+            for item in bot_module.router.callback_query.handlers
+            if item.callback.__name__ == "skip_admin_wizard_step"
+        ][-1]
+
+        await back_handler(callback)
+
+        wizard = bot_module.admin_wizards[user_id]
+        assert wizard["step"] == "description"
+        assert wizard["values"]["delivery_message"] == "Redeem the code"
+        assert "Step 3/4 · Details" in screen.edit_text.await_args.args[0]
+        back_button = screen.edit_text.await_args.kwargs[
+            "reply_markup"
+        ].inline_keyboard[0][0]
+        assert back_button.callback_data == "admin:wizard-back:description"
+
+        wizard["step"] = "delivery_content"
+        callback.data = "admin:wizard-skip:delivery_content"
+        await skip_handler(callback)
+        assert wizard["step"] is None
+        review_markup = screen.edit_text.await_args.kwargs["reply_markup"]
+        assert review_markup.inline_keyboard[0][0].callback_data == (
+            "admin:wizard-back:review"
+        )
+
+        callback.data = "admin:wizard-back:review"
+        await back_handler(callback)
+        assert wizard["step"] == "delivery_content"
+        assert wizard["values"]["delivery_message"] == "Redeem the code"
+
+        bot_module.admin_wizards.pop(user_id, None)
+        bot_module.active_screen_messages.pop(user_id, None)
+        bot_module.user_language_cache.pop(user_id, None)
+
+    asyncio.run(run_test())
+
+
+def test_admin_catalog_summary_shows_one_after_order_content_status():
+    async def run_test():
+        user_id = 7654331
+        screen = SimpleNamespace(
+            edit_text=AsyncMock(return_value=SimpleNamespace(message_id=996))
+        )
+        callback = SimpleNamespace(
+            data="ac:catalog-1",
+            from_user=SimpleNamespace(id=user_id),
+            message=screen,
+            answer=AsyncMock(),
+        )
+        query = Mock()
+        query.select.return_value = query
+        query.eq.return_value = query
+        query.order.return_value = query
+        query.execute = AsyncMock(return_value=SimpleNamespace(data=[]))
+        store = SimpleNamespace(
+            user_language=AsyncMock(return_value="en"),
+            category=AsyncMock(
+                return_value={
+                    "name": "Catalog",
+                    "description": "",
+                    "media_url": "https://example.com/catalog.png",
+                    "delivery_message": "",
+                    "delivery_media_url": None,
+                }
+            ),
+            client=SimpleNamespace(table=Mock(return_value=query)),
+        )
+        register_handlers(
+            SimpleNamespace(include_router=Mock()),
+            SimpleNamespace(),
+            store,
+            SimpleNamespace(),
+            SimpleNamespace(admin_ids={user_id}),
+        )
+        handler = [
+            item.callback
+            for item in bot_module.router.callback_query.handlers
+            if item.callback.__name__ == "admin_category"
+        ][-1]
+
+        await handler(callback)
+
+        text = screen.edit_text.await_args.args[0]
+        assert "After-order content: —" in text
+        assert "After-order message:" not in text
+        assert "After-order media:" not in text
+
+        bot_module.active_screen_messages.pop(user_id, None)
+        bot_module.user_language_cache.pop(user_id, None)
+
+    asyncio.run(run_test())
+
+
+def test_catalog_after_order_text_and_gif_share_one_wizard_step(monkeypatch):
+    async def run_test():
+        user_id = 7654329
+        cloudinary_url = "https://res.cloudinary.com/cloud/video/upload/instructions.gif"
+        upload = AsyncMock(return_value=cloudinary_url)
+        monkeypatch.setattr(bot_module, "upload_cloudinary_file", upload)
+        store = SimpleNamespace(user_language=AsyncMock(return_value="en"))
+        settings = SimpleNamespace(
+            admin_ids={user_id},
+            cloudinary_cloud_name="cloud",
+            cloudinary_api_key="key",
+            cloudinary_api_secret="secret",
+        )
+        bot_module.admin_wizards[user_id] = {
+            "kind": "category",
+            "action": "category_edit",
+            "target_id": "category-123",
+            "edit": True,
+            "step": "delivery_content",
+            "values": {"name": "Catalog", "delivery_message": ""},
+        }
+        screen = SimpleNamespace(
+            message_id=500,
+            reply_markup=None,
+            edit_text=AsyncMock(return_value=SimpleNamespace(message_id=501)),
+        )
+
+        register_handlers(
+            SimpleNamespace(include_router=Mock()),
+            SimpleNamespace(),
+            store,
+            SimpleNamespace(),
+            settings,
+        )
+        text_handler = [
+            handler.callback
+            for handler in bot_module.router.message.handlers
+            if handler.callback.__name__ == "receive_admin_input"
+        ][-1]
+        text_message = SimpleNamespace(
+            from_user=SimpleNamespace(id=user_id),
+            chat=SimpleNamespace(id=user_id),
+            message_id=204,
+            text="Redeem the code after ordering",
+            answer=AsyncMock(return_value=screen),
+        )
+        await text_handler(text_message)
+
+        wizard = bot_module.admin_wizards[user_id]
+        assert wizard["step"] == "delivery_content"
+        assert wizard["values"]["delivery_message"] == "Redeem the code after ordering"
+
+        media_handler = [
+            handler.callback
+            for handler in bot_module.router.message.handlers
+            if handler.callback.__name__ == "receive_wizard_media"
+        ][-1]
+        await media_handler(
+            SimpleNamespace(
+                from_user=SimpleNamespace(id=user_id),
+                message_id=205,
+                chat=SimpleNamespace(id=user_id),
+                text=None,
+                caption=None,
+                photo=None,
+                video=None,
+                animation=SimpleNamespace(file_id="instructions-gif"),
+                media_group_id=None,
+                answer=AsyncMock(return_value=screen),
+            )
+        )
+        assert wizard["telegram_media_items"][0]["media_type"] == "animation"
+
+        callback = SimpleNamespace(
+            data="admin:wizard-media-save",
+            from_user=SimpleNamespace(id=user_id),
+            message=screen,
+            answer=AsyncMock(),
+        )
+        save_handler = [
+            handler.callback
+            for handler in bot_module.router.callback_query.handlers
+            if handler.callback.__name__ == "save_wizard_telegram_media"
+        ][-1]
+        await save_handler(callback)
+
+        assert wizard["step"] is None
+        assert wizard["values"]["delivery_message"] == "Redeem the code after ordering"
+        assert wizard["values"]["delivery_media_url"] == cloudinary_url
+        upload.assert_awaited_once()
+
+        bot_module.admin_wizards.pop(user_id, None)
+        bot_module.active_screen_messages.pop(user_id, None)
+        bot_module.user_language_cache.pop(user_id, None)
+
+    asyncio.run(run_test())
+
+
+def test_set_product_media_command_updates_shared_catalog_media(monkeypatch):
     async def run_test():
         user_id = 7654326
         store = SimpleNamespace(
             user_language=AsyncMock(return_value="en"),
-            update_product_image=AsyncMock(return_value=True),
+            product=AsyncMock(return_value={"category_id": "catalog-1"}),
+            update_category_media=AsyncMock(return_value=True),
         )
         settings = SimpleNamespace(
             admin_ids={user_id},
@@ -2138,13 +2539,13 @@ def test_set_product_media_uploads_to_cloudinary_and_stores_url(monkeypatch):
             bot,
             settings,
             "photo-file-id",
-            "products",
+            "categories",
             resource_type="auto",
             file_name="image-202",
         )
-        product_id, media_url = store.update_product_image.await_args.args
-        assert product_id == "product-1"
-        assert media_url == cloudinary_url
+        store.update_category_media.assert_awaited_once_with(
+            "catalog-1", cloudinary_url
+        )
 
         bot_module.active_screen_messages.pop(user_id, None)
         bot_module.user_language_cache.pop(user_id, None)
@@ -2582,7 +2983,7 @@ def test_product_creation_persists_a_reseller_price():
     asyncio.run(run_test())
 
 
-def test_category_creation_saves_catalog_wide_after_order_content():
+def test_category_creation_saves_catalog_media_and_after_order_content():
     async def run_test():
         query = Mock()
         query.insert.return_value = query
@@ -2594,16 +2995,41 @@ def test_category_creation_saves_catalog_wide_after_order_content():
             "Description",
             "Redeem at example.com",
             "telegram:media-reference",
+            media_url="https://res.cloudinary.com/example/image/upload/catalog.png",
         )
 
         query.insert.assert_called_once_with(
             {
                 "name": "Catalog",
                 "description": "Description",
+                "media_url": "https://res.cloudinary.com/example/image/upload/catalog.png",
                 "delivery_message": "Redeem at example.com",
                 "delivery_media_url": "telegram:media-reference",
             }
         )
+
+    asyncio.run(run_test())
+
+
+def test_category_media_update_saves_shared_media_url():
+    async def run_test():
+        query = Mock()
+        query.update.return_value = query
+        query.eq.return_value = query
+        query.select.return_value = query
+        query.execute = AsyncMock(return_value=SimpleNamespace(data=[{"id": "catalog-1"}]))
+        client = SimpleNamespace(table=Mock(return_value=query))
+
+        updated = await Store(client).update_category_media(
+            "catalog-1", "https://example.com/catalog.png"
+        )
+
+        assert updated
+        query.update.assert_called_once_with(
+            {"media_url": "https://example.com/catalog.png"}
+        )
+        query.eq.assert_called_once_with("id", "catalog-1")
+        query.select.assert_called_once_with("id")
 
     asyncio.run(run_test())
 
@@ -2655,12 +3081,14 @@ def test_category_update_can_replace_and_clear_after_order_content():
             "Updated details",
             "",
             None,
+            media_url="https://res.cloudinary.com/example/image/upload/catalog.png",
         )
 
         query.update.assert_called_once_with(
             {
                 "name": "Catalog",
                 "description": "Updated details",
+                "media_url": "https://res.cloudinary.com/example/image/upload/catalog.png",
                 "delivery_message": "",
                 "delivery_media_url": None,
             }
@@ -3222,7 +3650,7 @@ def test_delivery_deletes_payment_qr_before_fulfilling_and_sending_credentials()
     asyncio.run(run_test())
 
 
-def test_delivery_sends_catalog_message_and_media_before_stock_codes():
+def test_delivery_combines_catalog_message_with_media_before_stock_codes():
     async def run_test():
         events = []
         key = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
@@ -3234,7 +3662,7 @@ def test_delivery_sends_catalog_message_and_media_before_stock_codes():
             events.append(("photo", photo))
 
         async def send_video(chat_id, video, **kwargs):
-            events.append(("video", video))
+            events.append(("video", video, kwargs))
 
         bot = SimpleNamespace(
             send_message=AsyncMock(side_effect=send_message),
@@ -3256,13 +3684,13 @@ def test_delivery_sends_catalog_message_and_media_before_stock_codes():
 
         await deliver_order(bot, store, settings, "order-123", 123)
 
-        assert events[0] == ("message", "Redeem &lt;now&gt;")
-        assert events[1] == (
+        assert events[0] == (
             "video",
             "https://res.cloudinary.com/example/video/upload/guide.mp4",
+            {"caption": "Redeem &lt;now&gt;", "parse_mode": "HTML"},
         )
-        assert events[2][0] == "message"
-        assert "CODE-001" in events[2][1]
+        assert events[1][0] == "message"
+        assert "CODE-001" in events[1][1]
         store.mark_delivered.assert_awaited_once_with("order-123")
 
     asyncio.run(run_test())
@@ -3312,6 +3740,45 @@ def test_delivery_copies_telegram_media_reference_without_downloading():
             from_chat_id=999,
             message_ids=[45, 46],
         )
+
+    asyncio.run(run_test())
+
+
+def test_delivery_attaches_short_instructions_to_single_telegram_media_post():
+    async def run_test():
+        key = Fernet.generate_key().decode()
+        reference = encode_telegram_content_reference(
+            [{"message_id": 45, "source_chat_id": 999}]
+        )
+        bot = SimpleNamespace(
+            send_message=AsyncMock(),
+            copy_message=AsyncMock(return_value=SimpleNamespace(message_id=101)),
+        )
+        store = SimpleNamespace(
+            payment_message=AsyncMock(return_value=None),
+            order_delivery_details=AsyncMock(
+                return_value={
+                    "delivery_message": "Redeem <now>",
+                    "delivery_media_url": reference,
+                }
+            ),
+            fulfill_order=AsyncMock(return_value=[encrypt_stock("CODE-001", key)]),
+            mark_delivered=AsyncMock(),
+        )
+
+        await deliver_order(
+            bot, store, SimpleNamespace(stock_encryption_key=key), "order-123", 123
+        )
+
+        bot.copy_message.assert_awaited_once_with(
+            chat_id=123,
+            from_chat_id=999,
+            message_id=45,
+            caption="Redeem &lt;now&gt;",
+            parse_mode="HTML",
+        )
+        assert bot.send_message.await_count == 1
+        assert "CODE-001" in bot.send_message.await_args.args[1]
 
     asyncio.run(run_test())
 

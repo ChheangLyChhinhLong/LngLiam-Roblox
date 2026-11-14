@@ -65,6 +65,7 @@ create table if not exists public.categories (
     id uuid primary key default gen_random_uuid(),
     name text not null,
     description text not null default '',
+    media_url text,
     delivery_message text not null default '',
     delivery_media_url text,
     active boolean not null default true,
@@ -117,6 +118,8 @@ begin
     v_catalog_delivery_columns_missing :=
         v_delivery_message_missing or v_delivery_media_missing;
 
+    alter table public.categories
+        add column if not exists media_url text;
     alter table public.categories
         add column if not exists delivery_message text not null default '';
     alter table public.categories

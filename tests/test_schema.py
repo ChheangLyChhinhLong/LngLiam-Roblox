@@ -16,8 +16,17 @@ def test_schema_stores_after_order_content_on_catalogs_and_migrates_consistent_v
     schema = (Path(__file__).parents[1] / "schema.sql").read_text(
         encoding="utf-8"
     )
+    migration = (
+        Path(__file__).parents[1] / "scripts" / "fix_catalog_delivery_columns.sql"
+    ).read_text(encoding="utf-8")
 
     assert "delivery_message text not null default ''" in schema
+    assert re.search(
+        r"alter table public\.categories\s+add column if not exists media_url text",
+        schema,
+    )
+    assert "add column if not exists media_url text" in migration
+    assert "notify pgrst, 'reload schema';" in migration
     assert re.search(
         r"alter table public\.categories\s+add column if not exists delivery_media_url text",
         schema,

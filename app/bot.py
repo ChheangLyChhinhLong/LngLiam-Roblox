@@ -88,17 +88,16 @@ PHNOM_PENH_TIMEZONE = timezone(timedelta(hours=7), "Asia/Phnom_Penh")
 CATALOG_PAGE_SIZE = 8
 ADMIN_WIZARD_STEPS = {
     "product": (
-        "media",
         "name",
         "description",
         "price",
         "reseller_price",
     ),
     "category": (
+        "media",
         "name",
         "description",
-        "delivery_message",
-        "delivery_media",
+        "delivery_content",
     ),
 }
 BOT_SETTING_LABELS = {
@@ -2189,7 +2188,6 @@ async def finish_immediate_welcome(
     message: Message,
     welcome_message: Message,
     store: Store,
-    settings: Settings,
     initial_language: str,
     previous_message: Message | None,
     previous_menu_message: Message | None,
@@ -2258,7 +2256,6 @@ async def finish_immediate_welcome(
                     welcome_message,
                     welcome_text(user, language),
                     parse_mode="HTML",
-                    reply_markup=welcome_keyboard(user.id, settings),
                 )
             except Exception:
                 logger.exception(
@@ -2330,7 +2327,6 @@ async def send_welcome(
                 message,
                 welcome_message,
                 store,
-                settings,
                 language,
                 previous_message,
                 previous_menu_message,
@@ -2477,10 +2473,10 @@ async def deliver_order(
         decrypt_stock(value, settings.stock_encryption_key) for value in credentials
     ]
     delivery_message = (delivery or {}).get("delivery_message", "").strip()
-    if delivery_message:
-        await bot.send_message(
-            chat_id, html.escape(delivery_message), parse_mode="HTML"
-        )
+    delivery_caption = (
+        html.escape(delivery_message) if delivery_message and len(delivery_message) <= 1024 else None
+    )
+    caption_sent = False
     delivery_media_reference = (delivery or {}).get("delivery_media_url")
     if delivery_media_reference:
         stored_reference = stored_telegram_content_reference(
@@ -2488,23 +2484,56 @@ async def deliver_order(
         )
         if stored_reference:
             try:
-                await copy_telegram_content_reference(
-                    bot, chat_id, stored_reference
+                decoded_reference = decode_telegram_content_reference(
+                    stored_reference
                 )
+                if delivery_caption and decoded_reference:
+                    source_chat_id, message_ids = decoded_reference
+                    if len(message_ids) == 1:
+                        await bot.copy_message(
+                            chat_id=chat_id,
+                            from_chat_id=source_chat_id,
+                            message_id=message_ids[0],
+                            caption=delivery_caption,
+                            parse_mode="HTML",
+                        )
+                        caption_sent = True
+                    else:
+                        await copy_telegram_content_reference(
+                            bot, chat_id, stored_reference
+                        )
+                else:
+                    await copy_telegram_content_reference(
+                        bot, chat_id, stored_reference
+                    )
             except TelegramBadRequest:
                 logger.exception(
                     "Could not copy after-order media for order %s", order_id
                 )
         else:
             try:
-                await send_cloudinary_media(
-                    bot, delivery_media_reference, chat_id=chat_id
+                media_options: dict[str, str] = {}
+                if delivery_caption:
+                    media_options = {
+                        "caption": delivery_caption,
+                        "parse_mode": "HTML",
+                    }
+                sent_media = await send_cloudinary_media(
+                    bot,
+                    delivery_media_reference,
+                    chat_id=chat_id,
+                    **media_options,
                 )
+                caption_sent = bool(delivery_caption and sent_media)
             except TelegramAPIError:
                 logger.exception(
                     "Could not send after-order Cloudinary media for order %s",
                     order_id,
                 )
+    if delivery_message and not caption_sent:
+        await bot.send_message(
+            chat_id, html.escape(delivery_message), parse_mode="HTML"
+        )
     key_lines = "\n".join(f"- <code>{html.escape(value)}</code>" for value in keys)
     text = (
         "✅ ទំនិញបានជោគជ័យ\n\n"
@@ -2998,6 +3027,28 @@ def register_handlers(
             "───────────────────\n"
             f"{intro + chr(10) if intro else ''}Choose a product package below:",
         )
+        catalog_media = category_data.get("media_url")
+        if catalog_media:
+            media_reference = stored_telegram_content_reference(catalog_media)
+            if media_reference:
+                sent_media = await copy_telegram_content_reference(
+                    bot,
+                    message.chat.id if message.chat else message.from_user.id,
+                    media_reference,
+                )
+            else:
+                sent_media = await send_cloudinary_media(
+                    message, catalog_media, fallback="photo"
+                )
+            sent_text = await message.answer(
+                text, parse_mode="HTML", reply_markup=keyboard(rows)
+            )
+            if message.from_user:
+                await switch_active_screen(message.from_user.id, sent_text)
+                active_screen_auxiliary_message_ids[message.from_user.id] = [
+                    item.message_id for item in sent_media
+                ]
+            return
         await edit_text_message(
             message, text, parse_mode="HTML", reply_markup=keyboard(rows)
         )
@@ -3538,6 +3589,16 @@ def register_handlers(
             rows = [
                 [
                     InlineKeyboardButton(
+                        text=copy(
+                            language,
+                            "⬅️ កែជំហានមុន",
+                            "⬅️ Edit previous step",
+                        ),
+                        callback_data="admin:wizard-back:review",
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
                         text=copy(language, "💾 បញ្ជាក់ការរក្សាទុក", "💾 Confirm save"),
                         callback_data="admin:wizard-save",
                     )
@@ -3554,18 +3615,16 @@ def register_handlers(
                     f"📦 <b>{html.escape(values['name'])}</b>\n"
                     f"{copy(language, 'ព័ត៌មានលម្អិត៖', 'Details:')} {html.escape(values.get('description') or '-')}\n"
                     f"{copy(language, 'តម្លៃអតិថិជន៖', 'Customer price:')} {money(values['price'])}\n"
-                    f"{copy(language, 'តម្លៃ Reseller៖', 'Reseller price:')} {money(values['reseller_price'])}\n"
-                    f"{copy(language, 'Media៖', 'Media:')} "
-                    f"{'✅' if values.get('image_url') or values.get('video_url') or values.get('media_url') or values.get('media_content_ref') else '—'}"
+                    f"{copy(language, 'តម្លៃ Reseller៖', 'Reseller price:')} {money(values['reseller_price'])}"
                 )
             else:
                 summary = (
                     f"🗂 <b>{html.escape(values['name'])}</b>\n"
                     f"{copy(language, 'ព័ត៌មានលម្អិត៖', 'Details:')} {html.escape(values.get('description') or '-')}\n"
-                    f"{copy(language, 'សារក្រោយ Order៖', 'After-order message:')} "
-                    f"{'✅' if values.get('delivery_message') else '—'}\n"
-                    f"{copy(language, 'Media ក្រោយ Order៖', 'After-order media:')} "
-                    f"{'✅' if values.get('delivery_media_url') else '—'}"
+                    f"{copy(language, 'Media បញ្ជីមុខទំនិញ៖', 'Catalog media:')} "
+                    f"{'✅' if values.get('media_url') else '—'}\n"
+                    f"{copy(language, 'មាតិកាក្រោយ Order៖', 'After-order content:')} "
+                    f"{'✅' if values.get('delivery_message') or values.get('delivery_media_url') else '—'}"
                 )
             await render(
                 notice_text + f"{title}\n───────────────────\n{summary}",
@@ -3576,27 +3635,36 @@ def register_handlers(
 
         step_number = steps.index(step) + 1
         step_labels = {
-            "media": copy(
-                language, "មេឌៀកញ្ចប់ទំនិញ", "Product package media"
+            "media": copy(language, "មេឌៀ Catalog", "Catalog media"),
+            "name": copy(
+                language,
+                "ឈ្មោះ Catalog" if kind == "category" else "ឈ្មោះកញ្ចប់ទំនិញ",
+                "Catalog name" if kind == "category" else "Product name",
             ),
-            "name": copy(language, "ឈ្មោះ", "Name"),
             "description": copy(language, "ព័ត៌មានលម្អិត", "Details"),
             "price": copy(language, "តម្លៃទូទៅ", "Customer price"),
             "reseller_price": copy(language, "តម្លៃ Reseller", "Reseller price"),
-            "delivery_message": copy(
-                language, "សារ/របៀបប្រើក្រោយទិញ", "After-order message/instructions"
-            ),
-            "delivery_media": copy(
-                language, "Media ក្រោយទិញ", "After-order media"
+            "delivery_content": copy(
+                language,
+                "មាតិកាក្រោយ Order",
+                "After-order text and media",
             ),
         }
         prompts = {
             "media": copy(
                 language,
-                "សូមផ្ញើរូបភាព ឬវីដេអូសម្រាប់កញ្ចប់ទំនិញ។",
-                "Send a photo or video for the product package.",
+                "ផ្ញើមេឌៀសម្រាប់ Catalog នេះ។",
+                "Send media for this Catalog.",
             ),
-            "name": copy(language, "សូមបញ្ចូលឈ្មោះផលិតផល។", "Enter the product name."),
+            "name": copy(
+                language,
+                "សូមបញ្ចូលឈ្មោះ Catalog។"
+                if kind == "category"
+                else "សូមបញ្ចូលឈ្មោះកញ្ចប់ទំនិញ។",
+                "Enter the Catalog name."
+                if kind == "category"
+                else "Enter the product package name.",
+            ),
             "description": copy(
                 language, "សូមបញ្ចូលព័ត៌មានលម្អិត។", "Enter the details."
             ),
@@ -3610,32 +3678,41 @@ def register_handlers(
                 "សូមបញ្ចូលតម្លៃ Reseller (USD)។",
                 "Enter a reseller price (USD).",
             ),
-            "delivery_message": copy(
+            "delivery_content": copy(
                 language,
-                "ផ្ញើសារ ឬរបៀបប្រើដែលអតិថិជនទាំងអស់ក្នុងបញ្ជីមុខទំនិញនេះនឹងទទួលក្រោយបញ្ជាទិញ។ ផ្ញើ - ដើម្បីលុប។",
-                "Send the message or instructions all customers in this product list should receive after ordering. Send - to clear.",
-            ),
-            "delivery_media": copy(
-                language,
-                "ផ្ញើមេឌៀមួយ ឬអាល់ប៊ុមដែលអតិថិជនទាំងអស់ក្នុងបញ្ជីមុខទំនិញនេះនឹងទទួលក្រោយបញ្ជាទិញ។",
-                "Send one media item or album all customers in this product list should receive after ordering.",
+                "ផ្ញើអត្ថបទ ឬរូបភាព/វីដេអូ/GIF/ឯកសារដែលអតិថិជននឹងទទួលក្រោយ Order។ ដាក់អត្ថបទក្នុង Caption ដើម្បីភ្ជាប់ជាមួយមេឌៀ ឬផ្ញើអត្ថបទធម្មតា រួចចុច Save content។",
+                "Send the text or image/video/GIF/file customers should receive after ordering. Add text as the media caption to attach it, or send plain text, then choose Save content.",
             ),
         }
-        telegram_media_steps = {"media", "delivery_media"}
-        if step in telegram_media_steps:
+        telegram_media_steps = {"media", "delivery_content"}
+        if step == "media":
             prompts[step] = copy(
                 language,
                 "ផ្ញើរូបភាព, វីដេអូ, GIF ឬឯកសារ។ Bot នឹង upload ទៅ Cloudinary ហើយរក្សាទុក URL។ អាចផ្ញើ Telegram post link ជំនួសបាន។ ចុច Save media ពេលរួច។",
-                "Send an image, video, GIF, or file. The bot uploads files to Cloudinary and saves the URL. You may send a Telegram post link instead. Choose Save media when done.",
+                "Send an image, video, GIF, or file. The bot uploads it to Cloudinary and saves the URL. You may send a Telegram post link instead. Choose Save media when done.",
+            )
+        if kind == "product" and step == "name":
+            prompts[step] += copy(
+                language,
+                "\n\nមេឌៀត្រូវបានកំណត់រួមនៅ Catalog សម្រាប់កញ្ចប់ទំនិញទាំងអស់។",
+                "\n\nMedia is shared from the Catalog across all product packages.",
             )
         wizard["step_index"] = step_number - 1
         rows: list[list[InlineKeyboardButton]] = []
+        if step_number > 1:
+            rows.append(
+                [
+                    InlineKeyboardButton(
+                        text=copy(language, "⬅️ ត្រឡប់ក្រោយ", "⬅️ Back"),
+                        callback_data=f"admin:wizard-back:{step}",
+                    )
+                ]
+            )
         optional = step in {
             "media",
             "description",
             "reseller_price",
-            "delivery_message",
-            "delivery_media",
+            "delivery_content",
         }
         can_skip = wizard["edit"] or optional
         if can_skip:
@@ -3649,27 +3726,48 @@ def register_handlers(
                     )
                 ]
             )
-        if step in telegram_media_steps and wizard.get("telegram_media_items"):
-            rows.append(
-                [
-                    InlineKeyboardButton(
-                        text=copy(language, "✅ រក្សាទុក Media", "✅ Save media"),
-                        callback_data="admin:wizard-media-save",
-                    )
-                ]
-            )
-        has_delivery_media = bool(
-            values.get("delivery_media_url")
+        has_delivery_content = bool(
+            values.get("delivery_message") or values.get("delivery_media_url")
         )
         if (
-            wizard["edit"]
-            and step == "delivery_media"
-            and has_delivery_media
+            step in telegram_media_steps
+            and (
+                wizard.get("telegram_media_items")
+                or (
+                    step == "delivery_content"
+                    and (values.get("delivery_message") or wizard["edit"])
+                )
+            )
         ):
             rows.append(
                 [
                     InlineKeyboardButton(
-                        text=copy(language, "🗑 លុប Media នេះ", "🗑 Clear this media"),
+                        text=copy(
+                            language,
+                            "✅ រក្សាទុកមាតិកា" if step == "delivery_content" else "✅ រក្សាទុក Media",
+                            "✅ Save content" if step == "delivery_content" else "✅ Save media",
+                        ),
+                        callback_data="admin:wizard-media-save",
+                    )
+                ]
+            )
+        if (
+            wizard["edit"]
+            and step in {"media", "delivery_content"}
+            and (
+                values.get("media_url")
+                if step == "media"
+                else has_delivery_content
+            )
+        ):
+            rows.append(
+                [
+                    InlineKeyboardButton(
+                        text=copy(
+                            language,
+                            "🗑 លុបមាតិកានេះ" if step == "delivery_content" else "🗑 លុប Media នេះ",
+                            "🗑 Clear this content" if step == "delivery_content" else "🗑 Clear this media",
+                        ),
                         callback_data=f"admin:wizard-clear:{step}",
                     )
                 ]
@@ -3700,7 +3798,7 @@ def register_handlers(
         wizard = admin_wizards.get(user_id)
         if not wizard or wizard.get("step") not in {
             "media",
-            "delivery_media",
+            "delivery_content",
         }:
             return False
         items = wizard.setdefault("telegram_media_items", [])
@@ -3720,10 +3818,32 @@ def register_handlers(
             return True
         file_item = telegram_media_upload_item(message)
         if file_item:
+            if (
+                wizard.get("step") == "delivery_content"
+                and message.caption
+                and len(message.caption) > 4096
+            ):
+                await show_admin_wizard(
+                    message,
+                    user_id,
+                    language,
+                    edit_message=False,
+                    notice=copy(
+                        language,
+                        "សារក្រោយ Order មិនអាចលើស 4096 តួអក្សរបានទេ។",
+                        "After-order messages cannot exceed 4096 characters.",
+                    ),
+                    preserve_input=True,
+                )
+                return True
+            if wizard.get("step") == "delivery_content" and message.caption:
+                wizard["values"]["delivery_message"] = message.caption
             items.append(file_item)
         else:
             post_link = parse_telegram_post_link(message.text or "")
             if not post_link:
+                if wizard.get("step") == "delivery_content":
+                    return False
                 await show_admin_wizard(
                     message,
                     user_id,
@@ -3855,9 +3975,6 @@ def register_handlers(
                     )
                 )
 
-            media_content_ref = values.get("media_content_ref")
-            media_url = media_content_ref or values.get("media_url")
-            media_type = "telegram" if media_content_ref else values.get("media_type")
             if wizard["action"] == "product_add":
                 if wizard.get("category_id") is None:
                     raise InputValidationError(
@@ -3872,8 +3989,6 @@ def register_handlers(
                     values["name"],
                     str(price),
                     values.get("description", ""),
-                    image_url=media_url if media_type != "video" else None,
-                    video_url=media_url if media_type == "video" else None,
                     reseller_price=str(reseller_price),
                 )
                 return f"ac:{wizard['category_id']}"
@@ -3884,9 +3999,6 @@ def register_handlers(
                 str(price),
                 str(reseller_price),
                 values.get("description", ""),
-                image_url=media_url if media_type != "video" else None,
-                video_url=media_url if media_type == "video" else None,
-                update_media=media_type is not None,
             )
             return f"ap:{wizard['target_id']}"
 
@@ -3902,6 +4014,7 @@ def register_handlers(
             "name": values["name"],
             "description": values.get("description", ""),
             "delivery_message": values.get("delivery_message", ""),
+            "media_url": values.get("media_url"),
             "delivery_media_url": values.get("delivery_media_url"),
         }
         if wizard["action"] == "category_add":
@@ -4402,7 +4515,9 @@ def register_handlers(
         markup = keyboard(rows)
         video_url = product_data.get("video_url")
         image_url = product_data.get("image_url")
-        media_url = video_url or image_url
+        catalog_media_url = category_data.get("media_url") if category_data else None
+        media_url = catalog_media_url or video_url or image_url
+        media_is_video = bool(not catalog_media_url and video_url)
         sent_message: Message | None = None
         if media_url:
             reference = stored_telegram_content_reference(media_url)
@@ -4428,7 +4543,7 @@ def register_handlers(
             media_urls = cloudinary_media_urls(media_url)
             media_method = (
                 cloudinary_media_method(
-                    media_urls[0], "video" if video_url else "photo"
+                    media_urls[0], "video" if media_is_video else "photo"
                 )
                 if media_urls
                 else "document"
@@ -4454,7 +4569,7 @@ def register_handlers(
                 sent_media = await send_cloudinary_media(
                     message,
                     media_url,
-                    fallback="video" if video_url else "photo",
+                    fallback="video" if media_is_video else "photo",
                     caption=text,
                     parse_mode="HTML",
                     reply_markup=markup,
@@ -5661,7 +5776,7 @@ def register_handlers(
             "action": "category_add",
             "target_id": None,
             "edit": False,
-            "step": "name",
+            "step": "media",
             "values": {"description": ""},
         }
         await show_admin_wizard(callback.message, callback.from_user.id, language)
@@ -5719,10 +5834,10 @@ def register_handlers(
         await callback.message.edit_text(
             f"🗂 <b>{html.escape(category_data['name'])}</b>\n"
             f"{html.escape(category_data.get('description') or '')}\n\n"
-            f"{copy(language, 'សារក្រោយ Order៖', 'After-order message:')} "
-            f"{'✅' if category_data.get('delivery_message') else '—'} · "
-            f"{copy(language, 'Media ក្រោយ Order៖', 'After-order media:')} "
-            f"{'✅' if category_data.get('delivery_media_url') else '—'}\n\n"
+            f"{copy(language, 'Media បញ្ជីមុខទំនិញ៖', 'Catalog media:')} "
+            f"{'✅' if category_data.get('media_url') else '—'} · "
+            f"{copy(language, 'មាតិកាក្រោយ Order៖', 'After-order content:')} "
+            f"{'✅' if category_data.get('delivery_message') or category_data.get('delivery_media_url') else '—'}\n\n"
             f"{product_summary}",
             parse_mode="HTML",
             reply_markup=keyboard(rows),
@@ -5781,8 +5896,8 @@ def register_handlers(
                 message.from_user.id,
                 copy(
                     language,
-                    "ទម្រង់មិនត្រឹមត្រូវ។ សូមប្រើ setmedia <product_id> ជាមួយរូបភាព ឬវីដេអូ។",
-                    "Invalid format. Use setmedia <product_id> with an image or video.",
+                    "ទម្រង់មិនត្រឹមត្រូវ។ សូមប្រើ setmedia <product_id> ជាមួយរូបភាព ឬវីដេអូ ដើម្បីប្តូរ Catalog media។",
+                    "Invalid format. Use setmedia <product_id> with an image or video to update shared Catalog media.",
                 ),
             )
             return
@@ -5799,33 +5914,23 @@ def register_handlers(
                 ),
             )
             return
-        is_video = media_item["media_type"] == "video"
         try:
-            media_url = await upload_cloudinary_file(
-                bot,
-                settings,
-                media_item["file_id"],
-                "products",
-                resource_type="auto",
-                file_name=media_item["file_name"],
-            )
-            update_media = (
-                store.update_product_video if is_video else store.update_product_image
-            )
-            updated = await update_media(product_id, media_url)
+            product = await store.product(product_id)
         except MEDIA_SAVE_ERRORS:
-            logger.exception("Could not update product media %s", product_id)
+            logger.exception(
+                "Could not load product for catalog media update %s", product_id
+            )
             await send_replacing_screen(
                 message,
                 message.from_user.id,
                 copy(
                     language,
-                    "មិនអាចប្តូររូបភាព/វីដេអូកញ្ចប់ទំនិញបានទេ។",
-                    "Could not update the product package image/video.",
+                    "មិនអាចរកបញ្ជីមុខទំនិញរបស់កញ្ចប់នេះបានទេ។",
+                    "Could not load the product list for this package.",
                 ),
             )
             return
-        if not updated:
+        if not product:
             await send_replacing_screen(
                 message,
                 message.from_user.id,
@@ -5836,18 +5941,55 @@ def register_handlers(
                 ),
             )
             return
+        try:
+            media_url = await upload_cloudinary_file(
+                bot,
+                settings,
+                media_item["file_id"],
+                "categories",
+                resource_type="auto",
+                file_name=media_item["file_name"],
+            )
+            updated = await store.update_category_media(
+                product["category_id"], media_url
+            )
+        except MEDIA_SAVE_ERRORS:
+            logger.exception(
+                "Could not update catalog media for package %s", product_id
+            )
+            await send_replacing_screen(
+                message,
+                message.from_user.id,
+                copy(
+                    language,
+                    "មិនអាចប្តូរមេឌៀ Catalog បានទេ។",
+                    "Could not update the shared Catalog media.",
+                ),
+            )
+            return
+        if not updated:
+            await send_replacing_screen(
+                message,
+                message.from_user.id,
+                copy(
+                    language,
+                    "រកមិនឃើញ Catalog របស់កញ្ចប់នេះទេ។",
+                    "The Catalog for this package was not found.",
+                ),
+            )
+            return
         await send_replacing_screen(
             message,
             message.from_user.id,
             copy(
                 language,
-                f"✅ បានបច្ចុប្បន្នភាព {'វីដេអូ' if is_video else 'រូបភាព'} ជោគជ័យ។",
-                f"✅ {'Video' if is_video else 'Image'} updated successfully.",
+                "✅ បានបច្ចុប្បន្នភាពមេឌៀ Catalog សម្រាប់កញ្ចប់ទាំងអស់ជោគជ័យ។",
+                "✅ Shared Catalog media updated for all packages.",
             ),
             parse_mode="HTML",
         )
 
-    @router.message(F.photo | F.video)
+    @router.message(F.photo | F.video | F.animation)
     async def receive_wizard_media(message: Message) -> None:
         if not message.from_user or message.from_user.id not in settings.admin_ids:
             return
@@ -5872,7 +6014,7 @@ def register_handlers(
             "target_id": None,
             "category_id": category_id,
             "edit": False,
-            "step": "media",
+            "step": "name",
             "values": {"description": ""},
         }
         await show_admin_wizard(callback.message, callback.from_user.id, language)
@@ -5901,10 +6043,11 @@ def register_handlers(
             "action": "category_edit",
             "target_id": category_id,
             "edit": True,
-            "step": "name",
+            "step": "media",
             "values": {
                 "name": category["name"],
                 "description": category.get("description") or "",
+                "media_url": category.get("media_url"),
                 "delivery_message": category.get("delivery_message") or "",
                 "delivery_media_url": category.get("delivery_media_url"),
             },
@@ -5936,7 +6079,7 @@ def register_handlers(
             "target_id": product_id,
             "category_id": product["category_id"],
             "edit": True,
-            "step": "media",
+            "step": "name",
             "values": {
                 "name": product["name"],
                 "description": product.get("description") or "",
@@ -5944,8 +6087,6 @@ def register_handlers(
                 "reseller_price": str(
                     product.get("reseller_price") or product["price"]
                 ),
-                "image_url": product.get("image_url"),
-                "video_url": product.get("video_url"),
             },
         }
         await show_admin_wizard(callback.message, callback.from_user.id, language)
@@ -6058,10 +6199,19 @@ def register_handlers(
         wizard = admin_wizards.get(callback.from_user.id)
         step = wizard.get("step") if wizard else None
         items = wizard.get("telegram_media_items", []) if wizard else []
+        has_delivery_message = bool(
+            wizard and wizard["values"].get("delivery_message")
+        )
         if (
             not wizard
-            or step not in {"media", "delivery_media"}
-            or not items
+            or step not in {"media", "delivery_content"}
+            or (
+                not items
+                and not (
+                    step == "delivery_content"
+                    and (has_delivery_message or wizard["edit"])
+                )
+            )
         ):
             await callback.answer(
                 copy(
@@ -6076,39 +6226,83 @@ def register_handlers(
                     callback.message, callback.from_user.id, language
                 )
             return
-        try:
-            folder = "categories" if step == "delivery_media" else "products"
-            media_urls = await upload_telegram_media_items(
-                bot, settings, items, folder
-            )
-        except MEDIA_UPLOAD_ERRORS:
-            logger.exception(
-                "Could not upload wizard media for admin %s",
-                callback.from_user.id,
-            )
-            await callback.answer(
-                copy(
-                    language,
-                    "មិនអាច upload Media ទៅ Cloudinary បានទេ។ សូមពិនិត្យ Cloudinary settings ហើយព្យាយាមម្ដងទៀត។",
-                    "Could not upload media to Cloudinary. Check Cloudinary settings and try again.",
-                ),
-                show_alert=True,
-            )
-            return
         values = wizard["values"]
-        media_type = items[0].get("media_type", "document")
-        if media_type == "link":
-            media_type = "telegram"
-        if step == "media":
+        media_urls = None
+        if items:
+            try:
+                folder = "products" if wizard["kind"] == "product" else "categories"
+                media_urls = await upload_telegram_media_items(
+                    bot, settings, items, folder
+                )
+            except MEDIA_UPLOAD_ERRORS:
+                logger.exception(
+                    "Could not upload wizard media for admin %s",
+                    callback.from_user.id,
+                )
+                await callback.answer(
+                    copy(
+                        language,
+                        "មិនអាច upload Media ទៅ Cloudinary បានទេ។ សូមពិនិត្យ Cloudinary settings ហើយព្យាយាមម្ដងទៀត។",
+                        "Could not upload media to Cloudinary. Check Cloudinary settings and try again.",
+                    ),
+                    show_alert=True,
+                )
+                return
+        if step == "media" and media_urls:
+            media_type = items[0].get("media_type", "document")
             values["media_url"] = media_urls
-            values["media_type"] = media_type
-        else:
-            values[f"{step}_url"] = media_urls
+            values["media_type"] = "telegram" if media_type == "link" else media_type
+        elif step == "delivery_content" and media_urls:
+            values["delivery_media_url"] = media_urls
         wizard.pop("telegram_media_items", None)
         steps = ADMIN_WIZARD_STEPS[wizard["kind"]]
         step_index = steps.index(step)
         wizard["step"] = steps[step_index + 1] if step_index + 1 < len(steps) else None
-        await callback.answer(copy(language, "បានរក្សាទុក Media។", "Media saved."))
+        await callback.answer(
+            copy(
+                language,
+                "បានរក្សាទុកមាតិកា។" if step == "delivery_content" else "បានរក្សាទុក Media។",
+                "After-order content saved." if step == "delivery_content" else "Media saved.",
+            )
+        )
+        await show_admin_wizard(callback.message, callback.from_user.id, language)
+
+    @router.callback_query(F.data.startswith("admin:wizard-back:"))
+    async def back_admin_wizard_step(callback: CallbackQuery) -> None:
+        language = await safe_user_language(store, callback.from_user.id)
+        if callback.from_user.id not in settings.admin_ids:
+            await callback.answer()
+            return
+        wizard = admin_wizards.get(callback.from_user.id)
+        if not wizard:
+            await callback.answer(
+                copy(language, "Wizard មិនសកម្មទេ។", "No active wizard."),
+                show_alert=True,
+            )
+            return
+        current_step = wizard.get("step")
+        requested_step = callback.data.removeprefix("admin:wizard-back:")
+        expected_step = current_step or "review"
+        if requested_step != expected_step:
+            await callback.answer(
+                copy(
+                    language,
+                    "ទម្រង់បានធ្វើបច្ចុប្បន្នភាពហើយ។ សូមបន្តពីជំហានបច្ចុប្បន្ន។",
+                    "The form was updated. Continue from the current step.",
+                )
+            )
+            await show_admin_wizard(callback.message, callback.from_user.id, language)
+            return
+        steps = ADMIN_WIZARD_STEPS[wizard["kind"]]
+        current_index = steps.index(current_step) if current_step else len(steps)
+        if current_index == 0:
+            await callback.answer(
+                copy(language, "នេះជាជំហានដំបូង។", "This is the first step."),
+                show_alert=True,
+            )
+            return
+        wizard["step"] = steps[current_index - 1]
+        await callback.answer()
         await show_admin_wizard(callback.message, callback.from_user.id, language)
 
     @router.callback_query(F.data.startswith("admin:wizard-skip:"))
@@ -6140,8 +6334,7 @@ def register_handlers(
             "media",
             "description",
             "reseller_price",
-            "delivery_message",
-            "delivery_media",
+            "delivery_content",
         }
         if not step or (step not in optional_steps and not wizard["edit"]):
             await callback.answer(
@@ -6169,12 +6362,11 @@ def register_handlers(
             return
         wizard = admin_wizards.get(callback.from_user.id)
         step = callback.data.removeprefix("admin:wizard-clear:")
-        fields = {"delivery_media": "delivery_media_url"}
         if (
             not wizard
             or wizard["kind"] != "category"
             or not wizard["edit"]
-            or step not in fields
+            or step not in {"media", "delivery_content"}
         ):
             await callback.answer(
                 copy(language, "មិនអាចលុប Media នេះបានទេ។", "This media cannot be cleared."),
@@ -6191,8 +6383,11 @@ def register_handlers(
             )
             await show_admin_wizard(callback.message, callback.from_user.id, language)
             return
-        url_field = fields[step]
-        wizard["values"][url_field] = None
+        if step == "media":
+            wizard["values"]["media_url"] = None
+        else:
+            wizard["values"]["delivery_message"] = ""
+            wizard["values"]["delivery_media_url"] = None
         steps = ADMIN_WIZARD_STEPS[wizard["kind"]]
         current_index = steps.index(step)
         wizard["step"] = (
@@ -6488,7 +6683,7 @@ def register_handlers(
             step = wizard.get("step")
             values = wizard["values"]
             try:
-                if step in {"media", "delivery_media"}:
+                if step == "media":
                     raise ValueError(
                         copy(
                             language,
@@ -6496,6 +6691,24 @@ def register_handlers(
                             "Send a photo/video or use Skip.",
                         )
                     )
+                if step == "delivery_content":
+                    if text != "-" and len(text) > 4096:
+                        raise ValueError(
+                            copy(
+                                language,
+                                "សារក្រោយ Order មិនអាចលើស 4096 តួអក្សរបានទេ។",
+                                "After-order messages cannot exceed 4096 characters.",
+                            )
+                        )
+                    values["delivery_message"] = "" if text == "-" else text
+                    await show_admin_wizard(
+                        message,
+                        message.from_user.id,
+                        language,
+                        edit_message=False,
+                        preserve_input=True,
+                    )
+                    return
                 if step == "name":
                     if not text:
                         raise ValueError(
@@ -6508,16 +6721,6 @@ def register_handlers(
                     values["name"] = text
                 elif step == "description":
                     values["description"] = text
-                elif step == "delivery_message":
-                    if text != "-" and len(text) > 4096:
-                        raise ValueError(
-                            copy(
-                                language,
-                                "សារក្រោយ Order មិនអាចលើស 4096 តួអក្សរបានទេ។",
-                                "After-order messages cannot exceed 4096 characters.",
-                            )
-                        )
-                    values["delivery_message"] = "" if text == "-" else text
                 elif step == "price":
                     try:
                         price = Decimal(text)
