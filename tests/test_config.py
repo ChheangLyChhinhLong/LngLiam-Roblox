@@ -8,7 +8,6 @@ def settings_values(**overrides):
         "bot_token": "bot-token",
         "supabase_url": "https://example.supabase.co",
         "supabase_service_role_key": "service-role-key",
-        "stock_encryption_key": "stock-key",
         "khqrpay_api_key": "",
         "khqrpay_aba_key": "",
         "khqrpay_bakong_key": "",

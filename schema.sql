@@ -207,20 +207,38 @@ $$;
 create table if not exists public.stock_items (
     id uuid primary key default gen_random_uuid(),
     product_id uuid not null references public.products(id),
-    credential_cipher text not null,
-    credential_fingerprint text not null,
+    credential text not null,
+    credential_fingerprint text,
     status text not null default 'available' check (status in ('available', 'reserved', 'sold')),
     order_id uuid references public.orders(id),
-    created_at timestamptz not null default now(),
-    unique(product_id, credential_fingerprint)
+    created_at timestamptz not null default now()
 );
+
+do $$
+begin
+    if exists (
+        select 1 from information_schema.columns
+        where table_schema = 'public' and table_name = 'stock_items' and column_name = 'credential_cipher'
+    ) and not exists (
+        select 1 from information_schema.columns
+        where table_schema = 'public' and table_name = 'stock_items' and column_name = 'credential'
+    ) then
+        alter table public.stock_items rename column credential_cipher to credential;
+    end if;
+end;
+$$;
 
 alter table public.stock_items
     drop constraint if exists stock_items_product_id_credential_fingerprint_key;
+alter table public.stock_items
+    alter column credential_fingerprint drop not null;
 
 create index if not exists stock_available_idx on public.stock_items(product_id) where status = 'available';
 create unique index if not exists stock_active_fingerprint_idx
     on public.stock_items(product_id, credential_fingerprint)
+    where status in ('available', 'reserved') and credential_fingerprint is not null;
+create unique index if not exists stock_active_credential_idx
+    on public.stock_items(product_id, credential)
     where status in ('available', 'reserved');
 create index if not exists orders_pending_idx on public.orders(status, created_at) where status = 'pending';
 
@@ -231,15 +249,12 @@ declare
 begin
     if jsonb_typeof(p_items) is distinct from 'array' then raise exception 'Stock items must be a JSON array'; end if;
 
-    insert into stock_items(product_id, credential_cipher, credential_fingerprint)
-    select p_product_id, item.credential_cipher, item.credential_fingerprint
+    insert into stock_items(product_id, credential)
+    select p_product_id, item.credential
     from jsonb_to_recordset(p_items) as item(
-        credential_cipher text,
-        credential_fingerprint text
+        credential text
     )
-    on conflict (product_id, credential_fingerprint)
-        where status in ('available', 'reserved')
-        do nothing;
+    on conflict do nothing;
 
     get diagnostics v_added = row_count;
     return v_added;
@@ -378,7 +393,13 @@ begin
     if v_delivered_at is not null then return array[]::text[]; end if;
     if v_delivery_claimed_at > now() - interval '5 minutes' then return array[]::text[]; end if;
     update orders set delivery_claimed_at = now() where id = p_order_id;
-    select array_agg(credential_cipher order by created_at) into v_credentials
+    select array_agg(
+        case
+            when credential_fingerprint is not null then 'legacy:' || credential
+            else credential
+        end
+        order by created_at
+    ) into v_credentials
     from stock_items where order_id = p_order_id and status = 'sold';
     return coalesce(v_credentials, array[]::text[]);
 end;

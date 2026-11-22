@@ -73,7 +73,7 @@ notepad .env
 | `TELEGRAM_ADMIN_IDS` | ណែនាំ | Telegram user IDs របស់ admin បំបែកដោយសញ្ញាក្បៀស។ ឧទាហរណ៍ `123456789,987654321`។ |
 | `SUPABASE_URL` | ចាំបាច់ | Project URL ពី Supabase។ |
 | `SUPABASE_SERVICE_ROLE_KEY` | ចាំបាច់ | `service_role` API key; រក្សាសម្ងាត់។ |
-| `STOCK_ENCRYPTION_KEY` | ចាំបាច់ | Fernet key សម្រាប់ encrypt Digital Key/Code។ បង្កើតម្តង ហើយរក្សាទុកឲ្យបានល្អ។ |
+| `STOCK_ENCRYPTION_KEY` | ស្រេចចិត្ត | ប្រើតែសម្រាប់អាន/ដក stock ចាស់ដែលបាន encrypt ដោយ version មុន។ Stock ថ្មីរក្សាទុកជា plaintext ហើយមិនត្រូវការ key នេះទេ។ |
 | `KHQRPAY_ABA_KEY` | ស្រេចចិត្ត | ABA API key ពី [KHQRPay Dashboard](https://khqrpay.site/dashboard)។ ចាំបាច់ប្រសិនបើបង់តាម ABA។ |
 | `KHQRPAY_BAKONG_KEY` | ស្រេចចិត្ត | Bakong API key ពី KHQRPay Dashboard។ ចាំបាច់ប្រសិនបើបង់តាម Bakong។ ត្រូវកំណត់ key យ៉ាងហោចណាស់មួយក្នុង ABA/Bakong។ |
 | `KHQRPAY_BASE_URL` | មាន default | `https://khqrpay.site/api/v1`។ |
@@ -88,13 +88,7 @@ notepad .env
 | `POLL_INTERVAL_SECONDS` | មាន default | ចន្លោះពេលពិនិត្យ payment background; default `20` វិនាទី។ |
 | `PORT` | មាន default | Port របស់ web service; default `10000`។ Render អាចកំណត់ port ផ្ទាល់។ |
 
-បង្កើត encryption key ម្តងដោយប្រើ Python 3.13 ក្នុង virtual environment បន្ទាប់ពីដំឡើង dependencies:
-
-```powershell
-.\.venv313\Scripts\python.exe -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-```
-
-ចម្លងលទ្ធផលទៅ `STOCK_ENCRYPTION_KEY`។ កុំបង្កើត key ថ្មីក្រោយមាន stock encrypted រួច ព្រោះ stock ចាស់មិនអាច decrypt ដោយ key ថ្មីបានទេ។ Backup key ដាច់ដោយឡែកពី database។
+បើ database មាន stock ចាស់ដែលបាន encrypt ដោយ version មុន សូមរក្សា `STOCK_ENCRYPTION_KEY` ចាស់ក្នុង environment រហូតដល់ stock ចាស់ត្រូវបានប្រើ ឬដកចេញអស់។ ការបញ្ចូល stock ថ្មីមិនប្រើ key នេះទេ។
 
 > កុំ commit `.env`។ ពិនិត្យឲ្យប្រាកដថា `.env` មិនត្រូវបានបញ្ចូលក្នុង Git មុន push។
 
@@ -187,7 +181,7 @@ FF-1D-KEY-002
 .\.venv313\Scripts\python.exe -m scripts.import_stock PRODUCT_UUID .\stock.txt
 ```
 
-Script អាន `.env` ពី project root។ វាត្រូវការ `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` និង `STOCK_ENCRYPTION_KEY`។ Key ដែលមានស្រាប់ជា `available` ឬ `reserved` នឹងត្រូវរំលង; Key ដែលបានលក់រួចអាច import វិញជាស្តុកថ្មី។ បន្ទាប់ពី import សូមលុប/ផ្លាស់ទីឯកសារ stock ឲ្យមានសុវត្ថិភាព ព្រោះក្នុងនោះមាន Digital Key/Code ជាអក្សរធម្មតា។
+Script អាន `.env` ពី project root។ វាត្រូវការ `SUPABASE_URL` និង `SUPABASE_SERVICE_ROLE_KEY`។ Key ដែលមានស្រាប់ជា `available` ឬ `reserved` នឹងត្រូវរំលង; Key ដែលបានលក់រួចអាច import វិញជាស្តុកថ្មី។ បន្ទាប់ពី import សូមលុប/ផ្លាស់ទីឯកសារ stock ឲ្យមានសុវត្ថិភាព ព្រោះក្នុងនោះមាន Digital Key/Code ជាអក្សរធម្មតា។
 
 ### កែប្រែ និងបិទបញ្ជីមុខទំនិញ/កញ្ចប់ទំនិញ
 
@@ -262,7 +256,7 @@ git push origin main
 1. ចូល [Render Dashboard](https://dashboard.render.com/) ហើយជ្រើស **New → Blueprint**។
 2. ភ្ជាប់ GitHub account បើមិនទាន់ភ្ជាប់, ជ្រើស repository `PU_MMO169_Sale_Mod` និង branch `main`។ សូមមើល [Render Blueprints guide](https://render.com/docs/infrastructure-as-code) បើត្រូវការជំនួយក្នុងជំហានភ្ជាប់ repository។
 3. Render រកឃើញ `render.yaml` នៅ project root. ពិនិត្យ configuration ហើយចុច **Deploy Blueprint**។ Blueprint កំណត់ Python web service, build/start command, health check `/health` និង `numInstances: 1`។
-4. នៅពេល Render ស្នើ environment variables សូមបញ្ចូល secrets ពិតតាមតារាងក្នុងផ្នែកទី 3។ តម្លៃចាំបាច់យ៉ាងហោចណាស់មាន `BOT_TOKEN`, `TELEGRAM_ADMIN_IDS`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, key មួយក្នុងចំណោម `KHQRPAY_ABA_KEY`/`KHQRPAY_BAKONG_KEY` និង `STOCK_ENCRYPTION_KEY`។ កុំប្រើតម្លៃឧទាហរណ៍ក្នុង `.env.example` ជា production secrets។
+4. នៅពេល Render ស្នើ environment variables សូមបញ្ចូល secrets ពិតតាមតារាងក្នុងផ្នែកទី 3។ តម្លៃចាំបាច់យ៉ាងហោចណាស់មាន `BOT_TOKEN`, `TELEGRAM_ADMIN_IDS`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` និង key មួយក្នុងចំណោម `KHQRPAY_ABA_KEY`/`KHQRPAY_BAKONG_KEY`។ កុំប្រើតម្លៃឧទាហរណ៍ក្នុង `.env.example` ជា production secrets។
 5. កំណែ Python ត្រូវបានកំណត់ដោយ `.python-version` (`3.13`)។ Render អនុវត្តកំណែនេះ ហើយប្រើ patch release ចុងក្រោយដែលមានសម្រាប់ Python 3.13។ មើល [Render Python version guide](https://render.com/docs/python-version)។
 6. កំណត់ Cloudinary credentials ដើម្បីឲ្យ Admin upload រូបភាព/វីដេអូ/ឯកសារបាន។ `PUBLIC_BASE_URL` ត្រូវបញ្ចូលក្រោយទទួលបាន service URL។ Support, Join group និង notification destinations អាចកំណត់ក្នុង Telegram តាម **Admin → Settings**។
 7. រង់ចាំ deploy ជោគជ័យ។ ក្នុង service **Settings/Overview** ចម្លង URL HTTPS ដែល Render ផ្ដល់ឲ្យ (`https://YOUR-SERVICE.onrender.com`)។
@@ -312,17 +306,17 @@ Monitor នេះពិនិត្យតែ web health route។ វាមិន
 4. បន្ទាប់ពី KHQRPay បញ្ជាក់ `Paid` bot ផ្ញើ Digital Key/Code ជា code block (ចុចលើ Key ដើម្បី copy) និងមានប៊ូតុង **📋 Copy Key** សម្រាប់ធាតុនីមួយៗ រួចលុបសារដែលមាន QR។ ករណី expired/failed stock ដែលបាន reserve នឹងត្រឡប់ទៅ available។
 5. អ្នកប្រើអាចមើល Account/Balance, បញ្ចូលប្រាក់, មើល order history និងចាក់វីដេអូ How to Buy។
 
-Admin panel អាចបន្ថែម/កែបញ្ជីមុខទំនិញ និងកញ្ចប់ទំនិញ, បិទធាតុ, បញ្ចូល/ដក stock, upload `.txt`, Broadcast និងមើល sales summary។ អ្នកប្រើដែលមិនមាន ID ក្នុង `TELEGRAM_ADMIN_IDS` មិនអាចគ្រប់គ្រងហាងបានទេ។
+Admin panel អាចបន្ថែម/កែបញ្ជីមុខទំនិញ និងកញ្ចប់ទំនិញ, បិទធាតុ, បញ្ចូល/ដក stock, upload `.txt`, Broadcast និងមើល sales summary។ ដើម្បីមើលឬដក Key/Code សូមចូល **Manage product lists → ជ្រើសកញ្ចប់ → View / remove stock**; បញ្ជីបង្ហាញ 5 ធាតុក្នុងមួយទំព័រ ហើយអាចដកដោយចុចលើធាតុ និងបញ្ជាក់—មិនចាំបាច់វាយ Key/Code ឡើងវិញទេ។ Stock list បើកបានតែក្នុង private chat របស់ admin។ អ្នកប្រើដែលមិនមាន ID ក្នុង `TELEGRAM_ADMIN_IDS` មិនអាចគ្រប់គ្រងហាងបានទេ។
 
 ## សុវត្ថិភាព និងថែទាំ
 
-- រក្សា bot token, Supabase service role key, KHQRPay API key/webhook secret, Cloudinary API secret និង stock encryption key ជាសម្ងាត់។ ប្រសិនបើសង្ស័យថាបែកធ្លាយ សូម rotate/revoke key នោះភ្លាមៗ ហើយ update secret នៅ Render។
-- Backup `STOCK_ENCRYPTION_KEY` នៅកន្លែងសុវត្ថិភាពដាច់ពី database។ បើបាត់ key នេះ Digital Key/Code ដែលបាន encrypt រួចមិនអាចយកមកប្រើបានទេ។
+- រក្សា bot token, Supabase service role key, KHQRPay API key/webhook secret និង Cloudinary API secret ជាសម្ងាត់។ ប្រសិនបើសង្ស័យថាបែកធ្លាយ សូម rotate/revoke key នោះភ្លាមៗ ហើយ update secret នៅ Render។
+- Digital Key/Code ថ្មីក្នុង database រក្សាទុកជា plaintext ដើម្បីឲ្យ stock management ធ្វើជា CRUD ធម្មតា។ បើនៅមាន stock ចាស់ដែលបាន encrypt ត្រូវរក្សា `STOCK_ENCRYPTION_KEY` ចាស់រហូតដល់ប្រើ ឬដក stock ចាស់ទាំងនោះអស់។
 - កុំបិទ Supabase RLS និងកុំបង្កើត public access policies សម្រាប់ orders/stock។ Backend ប្រើ service-role key ដោយផ្ទាល់។
 - ក្នុង **Admin → Settings → Notifications** កំណត់ Stock និង Order notification destinations។ វាគាំទ្រ Telegram user ID, private group/channel chat ID (ឧ. `-1001234567890`) ឬ public `@username`; អាចបញ្ចូលច្រើនដោយបំបែកជាមួយ comma។ បន្ថែម bot ទៅ group ហើយអនុញ្ញាតឲ្យផ្ញើសារ; សម្រាប់ channel ត្រូវបន្ថែម bot ជា admin ដែលអាច post បាន។
 - Stock notification ក៏ផ្ញើទៅ users ដែលបានប្រើ bot រួច។ ប៊ូតុង **View product / មើលកញ្ចប់ទំនិញ** បើក private chat ជាមួយ Bot ហើយបង្ហាញកញ្ចប់ទំនិញដែលមានស្តុកថ្មី។
 - Order notification ផ្ញើ Order Log បន្ទាប់ពីទទួល payment និងប្រគល់ Key ជោគជ័យ ហើយក៏ជូនដំណឹងអំពី Wallet deposit ដែលបានបញ្ចូលសមតុល្យរួចរាល់ផងដែរ។ Log មាន Telegram ID, ចំនួនទឹកប្រាក់ និង transaction reference។
-- Digital Key/Code ក្នុង database ត្រូវបាន encrypt។ ឯកសារ `.txt` មុន import និងសារ stock ក្នុង Telegram នៅតែជា plaintext ដូច្នេះកុំទុក/បញ្ជូនវាក្នុងកន្លែងមិនមានសុវត្ថិភាព។
+- `service_role` key និងព័ត៌មានចូលប្រើ database ត្រូវរក្សាជាសម្ងាត់; កុំបង្ហោះជាសាធារណៈ។
 - កុំ run bot local និង Render instance ច្រើនក្នុងពេលតែមួយដោយប្រើ bot token ដូចគ្នា ពេល long polling កំពុងដំណើរការ។
 - ការបង្កើត payment មាន idempotency key ដោយប្រើ order ID។ ការបញ្ជូន order កើតឡើងតែបន្ទាប់ពី KHQRPay API បញ្ជាក់ការទូទាត់ប៉ុណ្ណោះ។
 
@@ -337,7 +331,7 @@ Admin panel អាចបន្ថែម/កែបញ្ជីមុខទំន�
 | Supabase request បរាជ័យ | ពិនិត្យ `SUPABASE_URL`, service-role key និងថា `schema.sql` បាន run ជោគជ័យ។ កុំបិទ RLS ដើម្បីជៀសបញ្ហា។ |
 | Supabase បង្ហាញថា `categories.media_url` ឬ `categories.delivery_media_url` មិនមាន ឬ PostgreSQL error `42703` | បើក Supabase SQL Editor របស់ project ដែល URL ត្រូវគ្នានឹង `SUPABASE_URL` ក្នុង Render ហើយ run [`scripts/fix_catalog_delivery_columns.sql`](scripts/fix_catalog_delivery_columns.sql) ដើម្បីបន្ថែម columns និង reload PostgREST schema cache។ បន្ទាប់មករង់ចាំបន្តិច ហើយសាកល្បងម្តងទៀត។ |
 | `PGRST205` រកមិនឃើញ table ដូចជា `categories`, `users`, `orders`, `user_wallets` ឬ `broadcast_jobs` | បើក Supabase SQL Editor របស់ project ដែល URL ត្រូវគ្នានឹង `SUPABASE_URL` ក្នុង Render ហើយ run `schema.sql` ចុងក្រោយទាំងមូល ដោយពិនិត្យឲ្យប្រាកដថា query បញ្ចប់ដោយគ្មាន SQL error។ Script នឹង reload PostgREST schema cache នៅចុងក្រោយ។ បន្ទាប់មករង់ចាំបន្តិច ហើយសាកល្បងម្តងទៀត។ |
-| Import stock មិនជោគជ័យ | ពិនិត្យ Product UUID, file UTF-8, format មួយ Digital Key/Code ក្នុងមួយបន្ទាត់ និង encryption key។ |
+| Import stock មិនជោគជ័យ | ពិនិត្យ Product UUID, file UTF-8 និង format មួយ Digital Key/Code ក្នុងមួយបន្ទាត់។ |
 | Media មិនបង្ហាញ | ពិនិត្យ URL ដែលបានរក្សាទុកក្នុង Supabase និងសិទ្ធិ/ការកំណត់ delivery របស់ Cloudinary។ សម្រាប់ Telegram post links ឬ Telegram references ចាស់ សូមប្រាកដថា Bot អាចចូល source chat/channel និងសារដើមនៅមាន។ ពិនិត្យ schema ចុងក្រោយដែលមាន `products.video_url` ផងដែរ។ |
 | KHQRPay checkout បរាជ័យ | ពិនិត្យ ABA API key, `KHQRPAY_BASE_URL`, ABA static PayWay link ក្នុង Dashboard និង Render Logs។ |
 | Webhook បាន `401` | ពិនិត្យថា webhook secret សម្រាប់ ABA/Bakong key ត្រូវនឹង secret ក្នុង KHQRPay Dashboard ហើយ redeploy បន្ទាប់ពី update។ |

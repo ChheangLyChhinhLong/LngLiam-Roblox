@@ -45,7 +45,7 @@ from app.payments import (
     aba_mobile_deeplink,
     aba_mobile_redirect_url,
 )
-from app.security import decrypt_stock
+from app.security import decode_legacy_stock
 from app.store import Store
 
 logger = logging.getLogger(__name__)
@@ -86,6 +86,7 @@ welcome_setup_tasks: set[asyncio.Task[None]] = set()
 payment_message_ids: dict[str, tuple[int, int]] = {}
 PHNOM_PENH_TIMEZONE = timezone(timedelta(hours=7), "Asia/Phnom_Penh")
 CATALOG_PAGE_SIZE = 8
+ADMIN_STOCK_PAGE_SIZE = 5
 ADMIN_WIZARD_STEPS = {
     "product": (
         "name",
@@ -1654,9 +1655,8 @@ def admin_product_actions(
                 style="success",
             ),
             InlineKeyboardButton(
-                text=copy(language, "➖ ដកស្តុក", "➖ Remove stock"),
-                callback_data=f"admin:stock-remove:{product_id}",
-                style="danger",
+                text=copy(language, "📋 មើល/ដកស្តុក", "📋 View / remove stock"),
+                callback_data=f"admin:stock-view:{product_id}:0",
             ),
         ],
         [
@@ -2104,7 +2104,7 @@ async def notify_order_success(
     product = order.get("product") or {}
     customer = order.get("customer") or {}
     credentials = [
-        decrypt_stock(value, settings.stock_encryption_key)
+        decode_legacy_stock(value, settings.stock_encryption_key)
         for value in order.get("credentials", [])
     ]
     username = customer.get("username")
@@ -2470,7 +2470,8 @@ async def deliver_order(
     if not credentials:
         return
     keys = [
-        decrypt_stock(value, settings.stock_encryption_key) for value in credentials
+        decode_legacy_stock(value, settings.stock_encryption_key)
+        for value in credentials
     ]
     delivery_message = (delivery or {}).get("delivery_message", "").strip()
     delivery_caption = (
@@ -6495,6 +6496,216 @@ def register_handlers(
             keyboard([back_button(target, language)]),
         )
 
+    async def show_stock_inventory(
+        message: Message, product_id: str, page: int, language: str
+    ) -> None:
+        product = await store.product(product_id)
+        if not product:
+            await message.edit_text(
+                copy(language, "រកមិនឃើញកញ្ចប់ទំនិញទេ។", "Product package not found."),
+                reply_markup=keyboard([back_button("admin:catalogs", language)]),
+            )
+            return
+
+        total = await store.available_stock(product_id)
+        page_count = max(
+            1, (total + ADMIN_STOCK_PAGE_SIZE - 1) // ADMIN_STOCK_PAGE_SIZE
+        )
+        page = max(0, min(page, page_count - 1))
+        stock_items = await store.available_stock_items_page(
+            product_id, page, ADMIN_STOCK_PAGE_SIZE
+        )
+        rows = [
+            [
+                InlineKeyboardButton(
+                    text=copy(
+                        language,
+                        f"🗑 ដក #{page * ADMIN_STOCK_PAGE_SIZE + index}",
+                        f"🗑 Remove #{page * ADMIN_STOCK_PAGE_SIZE + index}",
+                    ),
+                    callback_data=f"admin:stock-item:{item['id']}:{page}",
+                    style="danger",
+                )
+            ]
+            for index, item in enumerate(stock_items, start=1)
+        ]
+        if page_count > 1:
+            rows.append(
+                pagination_row(
+                    page,
+                    page_count,
+                    f"admin:stock-view:{product_id}",
+                    language,
+                )
+            )
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=copy(language, "➕ បន្ថែមស្តុក", "➕ Add stock"),
+                    callback_data=f"admin:stock-add:{product_id}",
+                    style="success",
+                )
+            ]
+        )
+        rows.append(back_button(f"ap:{product_id}", language))
+
+        if stock_items:
+            entries = "\n".join(
+                f"{page * ADMIN_STOCK_PAGE_SIZE + index}. "
+                f"<code>{html.escape(str(item['credential']))}</code>"
+                for index, item in enumerate(stock_items, start=1)
+            )
+        else:
+            entries = copy(
+                language,
+                "មិនមានស្តុកនៅសល់ទេ។ ចុច «បន្ថែមស្តុក» ដើម្បីបញ្ចូល Key/Code ថ្មី។",
+                "No stock is available. Choose “Add stock” to add new keys or codes.",
+            )
+        await message.edit_text(
+            f"📦 <b>{html.escape(product['name'])}</b>\n"
+            f"{copy(language, 'ស្តុកនៅសល់៖', 'Available stock:')} {total}\n\n"
+            f"{entries}",
+            parse_mode="HTML",
+            reply_markup=keyboard(rows),
+        )
+
+    @router.callback_query(F.data.startswith("admin:stock-view:"))
+    async def view_stock_page(callback: CallbackQuery) -> None:
+        language = await safe_user_language(store, callback.from_user.id)
+        if callback.from_user.id not in settings.admin_ids:
+            await callback.answer(
+                copy(language, "អ្នកមិនមានសិទ្ធិប្រើប្រាស់ទេ។", "Not authorized."),
+                show_alert=True,
+            )
+            return
+        if callback.message.chat.type != "private":
+            await callback.answer(
+                copy(
+                    language,
+                    "សូមបើក Bot ក្នុង Private Chat ដើម្បីមើល Key/Code។",
+                    "Open the bot in a private chat to view keys and codes.",
+                ),
+                show_alert=True,
+            )
+            return
+        product_id, page_text = callback.data.removeprefix(
+            "admin:stock-view:"
+        ).split(":", 1)
+        await callback.answer()
+        await show_stock_inventory(
+            callback.message, product_id, int(page_text), language
+        )
+
+    @router.callback_query(F.data.startswith("admin:stock-item:"))
+    async def confirm_stock_item_removal(callback: CallbackQuery) -> None:
+        language = await safe_user_language(store, callback.from_user.id)
+        if callback.from_user.id not in settings.admin_ids:
+            await callback.answer(
+                copy(language, "អ្នកមិនមានសិទ្ធិប្រើប្រាស់ទេ។", "Not authorized."),
+                show_alert=True,
+            )
+            return
+        if callback.message.chat.type != "private":
+            await callback.answer(
+                copy(
+                    language,
+                    "សូមបើក Bot ក្នុង Private Chat ដើម្បីគ្រប់គ្រង Key/Code។",
+                    "Open the bot in a private chat to manage keys and codes.",
+                ),
+                show_alert=True,
+            )
+            return
+        stock_item_id, page_text = callback.data.removeprefix(
+            "admin:stock-item:"
+        ).split(":", 1)
+        stock_item = await store.available_stock_item(stock_item_id)
+        if not stock_item:
+            await callback.answer(
+                copy(
+                    language,
+                    "ស្តុកនេះមិនមាន ឬត្រូវបានប្រើរួចហើយ។",
+                    "This stock item is no longer available.",
+                ),
+                show_alert=True,
+            )
+            return
+        await callback.answer()
+        await callback.message.edit_text(
+            copy(
+                language,
+                f"តើអ្នកចង់ដក Key/Code នេះមែនទេ?\n\n<code>{html.escape(stock_item['credential'])}</code>",
+                f"Remove this key or code?\n\n<code>{html.escape(stock_item['credential'])}</code>",
+            ),
+            parse_mode="HTML",
+            reply_markup=keyboard(
+                [
+                    [
+                        InlineKeyboardButton(
+                            text=copy(language, "✅ បញ្ជាក់ការដក", "✅ Confirm removal"),
+                            callback_data=f"admin:stock-delete:{stock_item_id}:{page_text}",
+                            style="danger",
+                        )
+                    ],
+                    back_button(
+                        f"admin:stock-view:{stock_item['product_id']}:{page_text}",
+                        language,
+                    ),
+                ]
+            ),
+        )
+
+    @router.callback_query(F.data.startswith("admin:stock-delete:"))
+    async def remove_selected_stock_item(callback: CallbackQuery) -> None:
+        language = await safe_user_language(store, callback.from_user.id)
+        if callback.from_user.id not in settings.admin_ids:
+            await callback.answer(
+                copy(language, "អ្នកមិនមានសិទ្ធិប្រើប្រាស់ទេ។", "Not authorized."),
+                show_alert=True,
+            )
+            return
+        if callback.message.chat.type != "private":
+            await callback.answer(
+                copy(
+                    language,
+                    "សូមបើក Bot ក្នុង Private Chat ដើម្បីគ្រប់គ្រង Key/Code។",
+                    "Open the bot in a private chat to manage keys and codes.",
+                ),
+                show_alert=True,
+            )
+            return
+        stock_item_id, page_text = callback.data.removeprefix(
+            "admin:stock-delete:"
+        ).split(":", 1)
+        stock_item = await store.available_stock_item(stock_item_id)
+        if not stock_item:
+            await callback.answer(
+                copy(
+                    language,
+                    "ស្តុកនេះមិនមាន ឬត្រូវបានប្រើរួចហើយ។",
+                    "This stock item is no longer available.",
+                ),
+                show_alert=True,
+            )
+            return
+        removed = await store.remove_stock_item(stock_item_id)
+        if not removed:
+            await callback.answer(
+                copy(
+                    language,
+                    "ស្តុកនេះត្រូវបានកក់ ឬដករួចហើយ។",
+                    "This item was reserved or removed already.",
+                ),
+                show_alert=True,
+            )
+            return
+        await callback.answer(copy(language, "បានដកស្តុក។", "Stock removed."))
+        await show_stock_inventory(
+            callback.message,
+            stock_item["product_id"],
+            int(page_text),
+            language,
+        )
+
     @router.callback_query(F.data.startswith("admin:stock-add:"))
     async def add_stock_prompt(callback: CallbackQuery) -> None:
         await callback.answer()
@@ -6515,20 +6726,27 @@ def register_handlers(
 
     @router.callback_query(F.data.startswith("admin:stock-remove:"))
     async def remove_stock_prompt(callback: CallbackQuery) -> None:
-        await callback.answer()
         language = await safe_user_language(store, callback.from_user.id)
         if callback.from_user.id not in settings.admin_ids:
+            await callback.answer(
+                copy(language, "អ្នកមិនមានសិទ្ធិប្រើប្រាស់ទេ។", "Not authorized."),
+                show_alert=True,
+            )
+            return
+        if callback.message.chat.type != "private":
+            await callback.answer(
+                copy(
+                    language,
+                    "សូមបើក Bot ក្នុង Private Chat ដើម្បីមើល Key/Code។",
+                    "Open the bot in a private chat to view keys and codes.",
+                ),
+                show_alert=True,
+            )
             return
         product_id = callback.data.removeprefix("admin:stock-remove:")
-        pending_admin_input[callback.from_user.id] = ("stock_remove", product_id)
-        await replace_callback_screen(
-            callback,
-            copy(
-                language,
-                "ផ្ញើ Digital Key ឬ Code ដែលចង់ដក មួយក្នុងមួយបន្ទាត់។ ដកបានតែធាតុដែលមិនទាន់កក់ ឬលក់៖",
-                "Send the exact digital keys or codes to remove, one per line. Only items that are neither reserved nor sold can be removed.",
-            ),
-            keyboard([back_button("admin:cancel-input", language)]),
+        await callback.answer()
+        await show_stock_inventory(
+            callback.message, product_id, 0, language
         )
 
     @router.message(F.text)
@@ -6789,9 +7007,7 @@ def register_handlers(
             stock_add = parse_stock_add(text, language)
             if stock_add:
                 product_id, credentials = stock_add
-                added = await store.import_stock(
-                    product_id, credentials, settings.stock_encryption_key
-                )
+                added = await store.import_stock(product_id, credentials)
                 await notify_stock_added(bot, store, product_id, added)
                 await send_replacing_screen(
                     message,
@@ -6944,9 +7160,7 @@ def register_handlers(
                             "Enter at least one digital key or code.",
                         )
                     )
-                added = await store.import_stock(
-                    target_id, credentials, settings.stock_encryption_key
-                )
+                added = await store.import_stock(target_id, credentials)
                 await notify_stock_added(bot, store, target_id, added)
             elif action == "stock_remove":
                 credentials = [
@@ -7181,9 +7395,7 @@ def register_handlers(
                         "The file must contain at least one digital key or code.",
                     )
                 )
-            added = await store.import_stock(
-                product_id, credentials, settings.stock_encryption_key
-            )
+            added = await store.import_stock(product_id, credentials)
         except (UnicodeDecodeError, InputValidationError):
             await update_active_screen(
                 message.from_user.id,

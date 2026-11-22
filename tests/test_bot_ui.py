@@ -3,7 +3,6 @@ from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, call
 
-from cryptography.fernet import Fernet
 import pytest
 from aiogram.exceptions import TelegramBadRequest, TelegramServerError
 
@@ -72,7 +71,6 @@ from app.bot import (
 import app.bot as bot_module
 
 bot_module.bot_full_name = "Test Telegram Bot"
-from app.security import decrypt_stock, encrypt_stock, stock_fingerprint
 from app.store import Store
 
 
@@ -1574,15 +1572,14 @@ def test_admin_package_actions_group_editing_and_stock_controls():
 
     assert [[button.callback_data for button in row] for row in rows] == [
         ["admin:product-edit:product-123", "admin:product-disable:product-123"],
-        ["admin:stock-add:product-123", "admin:stock-remove:product-123"],
+        [
+            "admin:stock-add:product-123",
+            "admin:stock-view:product-123:0",
+        ],
         ["au:product-123"],
         ["ac:category-123"],
     ]
-    assert [rows[0][1].style, rows[1][0].style, rows[1][1].style] == [
-        "danger",
-        "success",
-        "danger",
-    ]
+    assert [rows[0][1].style, rows[1][0].style] == ["danger", "success"]
 
 
 def test_stock_import_selects_catalog_before_package():
@@ -1688,7 +1685,7 @@ def test_admin_actions_are_translated_for_english_users():
         "✏️ Edit product package",
         "🗑 Disable product package",
         "➕ Add stock",
-        "➖ Remove stock",
+        "📋 View / remove stock",
         "📥 Import stock (.txt)",
         "⬅️ Back",
     ]
@@ -3158,8 +3155,8 @@ def test_order_notification_details_loads_order_product_and_customer_profile():
             "categories": {"name": "VPN"},
             "users": {"username": "buyer", "first_name": "Buyer"},
             "stock_items": [
-                {"credential_cipher": "cipher-1"},
-                {"credential_cipher": "cipher-2"},
+                {"credential": "KEY-1"},
+                {"credential": "KEY-2"},
             ],
         }
         queries = {}
@@ -3177,7 +3174,7 @@ def test_order_notification_details_loads_order_product_and_customer_profile():
 
         assert details["product"] == {**results["products"], "category_name": "VPN"}
         assert details["customer"] == results["users"]
-        assert details["credentials"] == ["cipher-1", "cipher-2"]
+        assert details["credentials"] == ["KEY-1", "KEY-2"]
         queries["orders"].eq.assert_called_once_with("id", "order-123")
         queries["products"].eq.assert_called_once_with("id", "product-123")
         queries["categories"].eq.assert_called_once_with("id", "category-123")
@@ -3361,7 +3358,6 @@ def test_stock_removal_matches_only_available_stock_for_the_selected_product():
     async def run_test():
         product_id = "product-123"
         credential = "FF-KEY-REMOVE"
-        key = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
         query = Mock()
         query.delete.return_value = query
         query.eq.return_value = query
@@ -3372,16 +3368,13 @@ def test_stock_removal_matches_only_available_stock_for_the_selected_product():
         )
         client = SimpleNamespace(table=Mock(return_value=query))
 
-        removed = await Store(client).remove_stock(product_id, [credential], key)
+        removed = await Store(client).remove_stock(product_id, [credential])
 
         assert removed == 1
         client.table.assert_called_once_with("stock_items")
         query.eq.assert_any_call("product_id", product_id)
         query.eq.assert_any_call("status", "available")
-        query.in_.assert_called_once_with(
-            "credential_fingerprint",
-            [stock_fingerprint(credential, key)],
-        )
+        query.in_.assert_called_once_with("credential", [credential])
 
     asyncio.run(run_test())
 
@@ -3390,23 +3383,167 @@ def test_stock_import_uses_database_deduplication_function_and_returns_added_cou
     async def run_test():
         product_id = "product-123"
         credential = "FF-KEY-REISSUE"
-        key = Fernet.generate_key().decode("ascii")
         query = Mock()
         query.execute = AsyncMock(return_value=SimpleNamespace(data=1))
         client = SimpleNamespace(rpc=Mock(return_value=query))
 
-        added = await Store(client).import_stock(product_id, [credential], key)
+        added = await Store(client).import_stock(product_id, [credential])
 
         assert added == 1
         client.rpc.assert_called_once()
         function_name, arguments = client.rpc.call_args.args
         assert function_name == "import_stock_items"
         assert arguments["p_product_id"] == product_id
-        stock_item = arguments["p_items"][0]
-        assert decrypt_stock(stock_item["credential_cipher"], key) == credential
-        assert stock_item["credential_fingerprint"] == stock_fingerprint(
-            credential, key
+        assert arguments["p_items"] == [{"credential": credential}]
+
+    asyncio.run(run_test())
+
+
+def test_available_stock_items_page_lists_only_selected_product_stock():
+    async def run_test():
+        product_id = "product-123"
+        query = Mock()
+        for method in ("select", "eq", "order", "range"):
+            getattr(query, method).return_value = query
+        query.execute = AsyncMock(
+            return_value=SimpleNamespace(
+                data=[{"id": "stock-3", "credential": "KEY-3"}]
+            )
         )
+        client = SimpleNamespace(table=Mock(return_value=query))
+
+        items = await Store(client).available_stock_items_page(
+            product_id, page=1, page_size=2
+        )
+
+        assert items == [{"id": "stock-3", "credential": "KEY-3"}]
+        client.table.assert_called_once_with("stock_items")
+        query.select.assert_called_once_with("id,credential")
+        query.eq.assert_has_calls(
+            [call("product_id", product_id), call("status", "available")]
+        )
+        query.order.assert_has_calls(
+            [call("created_at", desc=True), call("id", desc=True)]
+        )
+        query.range.assert_called_once_with(2, 3)
+
+    asyncio.run(run_test())
+
+
+def test_stock_item_removal_uses_id_and_only_deletes_available_items():
+    async def run_test():
+        query = Mock()
+        for method in ("delete", "eq", "select"):
+            getattr(query, method).return_value = query
+        query.execute = AsyncMock(
+            return_value=SimpleNamespace(data=[{"id": "stock-3"}])
+        )
+        client = SimpleNamespace(table=Mock(return_value=query))
+
+        removed = await Store(client).remove_stock_item("stock-3")
+
+        assert removed
+        client.table.assert_called_once_with("stock_items")
+        query.eq.assert_has_calls(
+            [call("id", "stock-3"), call("status", "available")]
+        )
+        query.select.assert_called_once_with("id")
+
+    asyncio.run(run_test())
+
+
+def test_admin_can_view_stock_and_confirm_removal_without_retyping_keys():
+    async def run_test():
+        user_id = 7654329
+        product_id = "product-123"
+        stock_item = {
+            "id": "stock-123",
+            "product_id": product_id,
+            "credential": "KEY&123",
+        }
+        store = SimpleNamespace(
+            user_language=AsyncMock(return_value="en"),
+            product=AsyncMock(
+                return_value={
+                    "id": product_id,
+                    "name": "Test package",
+                }
+            ),
+            available_stock=AsyncMock(side_effect=[1, 0]),
+            available_stock_items_page=AsyncMock(side_effect=[[stock_item], []]),
+            available_stock_item=AsyncMock(return_value=stock_item),
+            remove_stock_item=AsyncMock(return_value=True),
+        )
+        callbacks_before = list(bot_module.router.callback_query.handlers)
+        messages_before = list(bot_module.router.message.handlers)
+        register_handlers(
+            SimpleNamespace(include_router=Mock()),
+            SimpleNamespace(),
+            store,
+            SimpleNamespace(),
+            SimpleNamespace(admin_ids={user_id}),
+        )
+        try:
+            handlers = {
+                handler.callback.__name__: handler.callback
+                for handler in bot_module.router.callback_query.handlers
+            }
+            message = SimpleNamespace(
+                chat=SimpleNamespace(type="private"),
+                edit_text=AsyncMock(),
+            )
+            view_callback = SimpleNamespace(
+                data=f"admin:stock-view:{product_id}:0",
+                from_user=SimpleNamespace(id=user_id),
+                message=message,
+                answer=AsyncMock(),
+            )
+
+            await handlers["view_stock_page"](view_callback)
+
+            assert "KEY&amp;123" in message.edit_text.await_args.args[0]
+            item_button = message.edit_text.await_args.kwargs[
+                "reply_markup"
+            ].inline_keyboard[0][0]
+            assert item_button.callback_data == "admin:stock-item:stock-123:0"
+
+            confirm_callback = SimpleNamespace(
+                data=item_button.callback_data,
+                from_user=SimpleNamespace(id=user_id),
+                message=message,
+                answer=AsyncMock(),
+            )
+            await handlers["confirm_stock_item_removal"](confirm_callback)
+            confirm_button = message.edit_text.await_args.kwargs[
+                "reply_markup"
+            ].inline_keyboard[0][0]
+            assert "KEY&amp;123" in message.edit_text.await_args.args[0]
+            assert confirm_button.callback_data == "admin:stock-delete:stock-123:0"
+
+            delete_callback = SimpleNamespace(
+                data=confirm_button.callback_data,
+                from_user=SimpleNamespace(id=user_id),
+                message=message,
+                answer=AsyncMock(),
+            )
+            await handlers["remove_selected_stock_item"](delete_callback)
+
+            store.remove_stock_item.assert_awaited_once_with("stock-123")
+            assert "No stock is available" in message.edit_text.await_args.args[0]
+
+            group_callback = SimpleNamespace(
+                data=f"admin:stock-view:{product_id}:0",
+                from_user=SimpleNamespace(id=user_id),
+                message=SimpleNamespace(chat=SimpleNamespace(type="group")),
+                answer=AsyncMock(),
+            )
+            await handlers["view_stock_page"](group_callback)
+            group_callback.answer.assert_awaited_once()
+            assert group_callback.answer.await_args.kwargs["show_alert"]
+            assert store.available_stock.await_count == 2
+        finally:
+            bot_module.router.callback_query.handlers[:] = callbacks_before
+            bot_module.router.message.handlers[:] = messages_before
 
     asyncio.run(run_test())
 
@@ -3592,7 +3729,6 @@ def test_product_video_creation_and_update_store_video_url():
 def test_delivery_deletes_payment_qr_before_fulfilling_and_sending_credentials():
     async def run_test():
         events = []
-        key = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
 
         async def delete_message(**kwargs):
             events.append("delete")
@@ -3603,8 +3739,8 @@ def test_delivery_deletes_payment_qr_before_fulfilling_and_sending_credentials()
         async def fulfill_order(order_id):
             events.append("fulfill")
             return [
-                encrypt_stock("FF-1H-KEY-001", key),
-                encrypt_stock("FF-1D-KEY-002", key),
+                "FF-1H-KEY-001",
+                "FF-1D-KEY-002",
             ]
 
         async def send_message(*args, **kwargs):
@@ -3625,7 +3761,7 @@ def test_delivery_deletes_payment_qr_before_fulfilling_and_sending_credentials()
             fulfill_order=AsyncMock(side_effect=fulfill_order),
             mark_delivered=AsyncMock(side_effect=mark_delivered),
         )
-        settings = SimpleNamespace(stock_encryption_key=key)
+        settings = SimpleNamespace(stock_encryption_key="")
 
         await deliver_order(bot, store, settings, "order-123", 123)
 
@@ -3653,7 +3789,6 @@ def test_delivery_deletes_payment_qr_before_fulfilling_and_sending_credentials()
 def test_delivery_combines_catalog_message_with_media_before_stock_codes():
     async def run_test():
         events = []
-        key = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
 
         async def send_message(chat_id, text, **kwargs):
             events.append(("message", text))
@@ -3677,10 +3812,10 @@ def test_delivery_combines_catalog_message_with_media_before_stock_codes():
                     "delivery_media_url": "https://res.cloudinary.com/example/video/upload/guide.mp4",
                 }
             ),
-            fulfill_order=AsyncMock(return_value=[encrypt_stock("CODE-001", key)]),
+            fulfill_order=AsyncMock(return_value=["CODE-001"]),
             mark_delivered=AsyncMock(),
         )
-        settings = SimpleNamespace(stock_encryption_key=key)
+        settings = SimpleNamespace(stock_encryption_key="")
 
         await deliver_order(bot, store, settings, "order-123", 123)
 
@@ -3698,7 +3833,6 @@ def test_delivery_combines_catalog_message_with_media_before_stock_codes():
 
 def test_delivery_copies_telegram_media_reference_without_downloading():
     async def run_test():
-        key = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
         reference = encode_telegram_content_reference(
             [
                 {
@@ -3727,12 +3861,12 @@ def test_delivery_copies_telegram_media_reference_without_downloading():
             order_delivery_details=AsyncMock(
                 return_value={"delivery_media_url": reference}
             ),
-            fulfill_order=AsyncMock(return_value=[encrypt_stock("CODE-001", key)]),
+            fulfill_order=AsyncMock(return_value=["CODE-001"]),
             mark_delivered=AsyncMock(),
         )
 
         await deliver_order(
-            bot, store, SimpleNamespace(stock_encryption_key=key), "order-123", 123
+            bot, store, SimpleNamespace(stock_encryption_key=""), "order-123", 123
         )
 
         bot.copy_messages.assert_awaited_once_with(
@@ -3746,7 +3880,6 @@ def test_delivery_copies_telegram_media_reference_without_downloading():
 
 def test_delivery_attaches_short_instructions_to_single_telegram_media_post():
     async def run_test():
-        key = Fernet.generate_key().decode()
         reference = encode_telegram_content_reference(
             [{"message_id": 45, "source_chat_id": 999}]
         )
@@ -3762,12 +3895,12 @@ def test_delivery_attaches_short_instructions_to_single_telegram_media_post():
                     "delivery_media_url": reference,
                 }
             ),
-            fulfill_order=AsyncMock(return_value=[encrypt_stock("CODE-001", key)]),
+            fulfill_order=AsyncMock(return_value=["CODE-001"]),
             mark_delivered=AsyncMock(),
         )
 
         await deliver_order(
-            bot, store, SimpleNamespace(stock_encryption_key=key), "order-123", 123
+            bot, store, SimpleNamespace(stock_encryption_key=""), "order-123", 123
         )
 
         bot.copy_message.assert_awaited_once_with(
@@ -3785,7 +3918,6 @@ def test_delivery_attaches_short_instructions_to_single_telegram_media_post():
 
 def test_delivery_uses_one_unified_after_order_media_instead_of_legacy_fields():
     async def run_test():
-        key = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
         reference = encode_telegram_content_reference(
             [{"message_id": 45, "source_chat_id": 999}]
         )
@@ -3804,12 +3936,12 @@ def test_delivery_uses_one_unified_after_order_media_instead_of_legacy_fields():
                     "delivery_video_url": "https://example.com/old.mp4",
                 }
             ),
-            fulfill_order=AsyncMock(return_value=[encrypt_stock("CODE-001", key)]),
+            fulfill_order=AsyncMock(return_value=["CODE-001"]),
             mark_delivered=AsyncMock(),
         )
 
         await deliver_order(
-            bot, store, SimpleNamespace(stock_encryption_key=key), "order-123", 123
+            bot, store, SimpleNamespace(stock_encryption_key=""), "order-123", 123
         )
 
         bot.copy_messages.assert_awaited_once_with(
@@ -3825,7 +3957,6 @@ def test_delivery_uses_one_unified_after_order_media_instead_of_legacy_fields():
 
 def test_delivery_sends_cloudinary_document_url_after_order():
     async def run_test():
-        key = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
         media_url = "https://res.cloudinary.com/cloud/raw/upload/instructions.txt"
         bot = SimpleNamespace(
             send_message=AsyncMock(),
@@ -3836,12 +3967,12 @@ def test_delivery_sends_cloudinary_document_url_after_order():
             order_delivery_details=AsyncMock(
                 return_value={"delivery_media_url": media_url}
             ),
-            fulfill_order=AsyncMock(return_value=[encrypt_stock("CODE-001", key)]),
+            fulfill_order=AsyncMock(return_value=["CODE-001"]),
             mark_delivered=AsyncMock(),
         )
 
         await deliver_order(
-            bot, store, SimpleNamespace(stock_encryption_key=key), "order-123", 123
+            bot, store, SimpleNamespace(stock_encryption_key=""), "order-123", 123
         )
 
         bot.send_document.assert_awaited_once_with(chat_id=123, document=media_url)
@@ -3851,7 +3982,6 @@ def test_delivery_sends_cloudinary_document_url_after_order():
 
 def test_delivery_continues_with_stock_codes_when_telegram_media_copy_fails():
     async def run_test():
-        key = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
         reference = encode_telegram_content_reference(
             [{"message_id": 45, "source_chat_id": 999}]
         )
@@ -3866,12 +3996,12 @@ def test_delivery_continues_with_stock_codes_when_telegram_media_copy_fails():
             order_delivery_details=AsyncMock(
                 return_value={"delivery_media_url": reference}
             ),
-            fulfill_order=AsyncMock(return_value=[encrypt_stock("CODE-001", key)]),
+            fulfill_order=AsyncMock(return_value=["CODE-001"]),
             mark_delivered=AsyncMock(),
         )
 
         await deliver_order(
-            bot, store, SimpleNamespace(stock_encryption_key=key), "order-123", 123
+            bot, store, SimpleNamespace(stock_encryption_key=""), "order-123", 123
         )
 
         assert any(
@@ -3883,7 +4013,6 @@ def test_delivery_continues_with_stock_codes_when_telegram_media_copy_fails():
 
 def test_order_success_notification_sends_order_details_to_configured_group_and_channel():
     async def run_test():
-        key = Fernet.generate_key().decode()
         order = {
             "id": "order-123",
             "chat_id": 123456789,
@@ -3898,10 +4027,7 @@ def test_order_success_notification_sends_order_details_to_configured_group_and_
                 "category_name": "☠️𝙑𝙋𝙉 𝙍𝙀𝙕𝙕𝙓",
             },
             "customer": {"first_name": "ChhinhLong", "username": "chhinhlong"},
-            "credentials": [
-                encrypt_stock("CODE-001", key),
-                encrypt_stock("CODE&002", key),
-            ],
+            "credentials": ["CODE-001", "CODE&002"],
         }
         bot = SimpleNamespace(send_message=AsyncMock())
         store = SimpleNamespace(
@@ -3914,7 +4040,7 @@ def test_order_success_notification_sends_order_details_to_configured_group_and_
         )
 
         await notify_order_success(
-            bot, store, SimpleNamespace(stock_encryption_key=key), "order-123"
+            bot, store, SimpleNamespace(stock_encryption_key=""), "order-123"
         )
 
         assert [call.args[0] for call in bot.send_message.await_args_list] == [
@@ -4090,7 +4216,7 @@ def test_order_notification_retries_temporary_telegram_failure(monkeypatch):
         await notify_order_success(
             bot,
             store,
-            SimpleNamespace(stock_encryption_key=Fernet.generate_key().decode()),
+            SimpleNamespace(stock_encryption_key=""),
             "order-123",
         )
 

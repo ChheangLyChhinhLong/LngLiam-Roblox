@@ -5,15 +5,17 @@ import hmac
 from cryptography.fernet import Fernet, InvalidToken
 
 
-def encrypt_stock(value: str, key: str) -> str:
-    return Fernet(key.encode("ascii")).encrypt(value.encode("utf-8")).decode("ascii")
-
-
-def decrypt_stock(value: str, key: str) -> str:
+def decode_legacy_stock(value: str, key: str = "") -> str:
+    legacy_prefix = "legacy:"
+    if not value.startswith(legacy_prefix):
+        return value
+    if not key:
+        raise ValueError("STOCK_ENCRYPTION_KEY is required for legacy encrypted stock")
     try:
-        return Fernet(key.encode("ascii")).decrypt(value.encode("ascii")).decode("utf-8")
+        token = value.removeprefix(legacy_prefix)
+        return Fernet(key.encode("ascii")).decrypt(token.encode("ascii")).decode("utf-8")
     except (InvalidToken, UnicodeDecodeError) as exc:
-        raise ValueError("Cannot decrypt stock; verify STOCK_ENCRYPTION_KEY") from exc
+        raise ValueError("Cannot decrypt legacy stock; verify STOCK_ENCRYPTION_KEY") from exc
 
 
 def stock_fingerprint(value: str, key: str) -> str:

@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     khqrpay_bakong_webhook_secret: str = ""
     khqrpay_webhook_url: str = ""
     public_base_url: str = ""
-    stock_encryption_key: str
+    stock_encryption_key: str = ""
     poll_interval_seconds: int = 20
     port: int = 10000
 

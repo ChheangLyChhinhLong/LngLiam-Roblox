@@ -5,7 +5,7 @@ from typing import Any
 import httpx
 from supabase import AsyncClient
 
-from app.security import encrypt_stock, stock_fingerprint
+from app.security import stock_fingerprint
 
 
 class _RetryingRequestBuilder:
@@ -568,6 +568,46 @@ class Store:
         ).execute()
         return int(result.data or 0)
 
+    async def available_stock_items_page(
+        self, product_id: str, page: int = 0, page_size: int = 5
+    ) -> list[dict[str, Any]]:
+        if page < 0 or page_size <= 0:
+            raise ValueError("Stock page and page size must be valid")
+        offset = page * page_size
+        result = await (
+            self.client.table("stock_items")
+            .select("id,credential")
+            .eq("product_id", product_id)
+            .eq("status", "available")
+            .order("created_at", desc=True)
+            .order("id", desc=True)
+            .range(offset, offset + page_size - 1)
+            .execute()
+        )
+        return result.data or []
+
+    async def available_stock_item(self, stock_item_id: str) -> dict[str, Any] | None:
+        result = await (
+            self.client.table("stock_items")
+            .select("id,product_id,credential")
+            .eq("id", stock_item_id)
+            .eq("status", "available")
+            .maybe_single()
+            .execute()
+        )
+        return result.data
+
+    async def remove_stock_item(self, stock_item_id: str) -> bool:
+        result = await (
+            self.client.table("stock_items")
+            .delete()
+            .eq("id", stock_item_id)
+            .eq("status", "available")
+            .select("id")
+            .execute()
+        )
+        return bool(result.data)
+
     async def reserve_order(self, chat_id: int, product_id: str, quantity: int) -> dict[str, Any]:
         result = await self.client.rpc(
             "reserve_order",
@@ -747,7 +787,7 @@ class Store:
         )
         stock_result = await (
             self.client.table("stock_items")
-            .select("credential_cipher")
+            .select("credential,credential_fingerprint")
             .eq("order_id", order_id)
             .eq("status", "sold")
             .order("created_at")
@@ -758,7 +798,10 @@ class Store:
             "product": product,
             "customer": user_result.data or {},
             "credentials": [
-                item["credential_cipher"] for item in (stock_result.data or [])
+                f"legacy:{item['credential']}"
+                if item.get("credential_fingerprint")
+                else item["credential"]
+                for item in (stock_result.data or [])
             ],
         }
 
@@ -802,34 +845,47 @@ class Store:
         orders, _ = await self.order_history_page(chat_id)
         return orders
 
-    async def import_stock(self, product_id: str, credentials: list[str], key: str) -> int:
-        rows = [
-            {
-                "credential_cipher": encrypt_stock(value, key),
-                "credential_fingerprint": stock_fingerprint(value, key),
-            }
-            for value in credentials
-        ]
+    async def import_stock(self, product_id: str, credentials: list[str]) -> int:
+        rows = [{"credential": value} for value in credentials]
         result = await self.client.rpc(
             "import_stock_items",
             {"p_product_id": product_id, "p_items": rows},
         ).execute()
         return int(result.data or 0)
 
-    async def remove_stock(self, product_id: str, credentials: list[str], key: str) -> int:
-        fingerprints = list(dict.fromkeys(stock_fingerprint(value, key) for value in credentials))
-        if not fingerprints:
+    async def remove_stock(
+        self, product_id: str, credentials: list[str], legacy_key: str = ""
+    ) -> int:
+        unique_credentials = list(dict.fromkeys(credentials))
+        if not unique_credentials:
             return 0
-        result = await (
+        plain_result = await (
             self.client.table("stock_items")
             .delete()
             .eq("product_id", product_id)
             .eq("status", "available")
-            .in_("credential_fingerprint", fingerprints)
+            .in_("credential", unique_credentials)
             .select("id")
             .execute()
         )
-        return len(result.data or [])
+        removed = len(plain_result.data or [])
+        if legacy_key:
+            fingerprints = list(
+                dict.fromkeys(
+                    stock_fingerprint(value, legacy_key) for value in unique_credentials
+                )
+            )
+            legacy_result = await (
+                self.client.table("stock_items")
+                .delete()
+                .eq("product_id", product_id)
+                .eq("status", "available")
+                .in_("credential_fingerprint", fingerprints)
+                .select("id")
+                .execute()
+            )
+            removed += len(legacy_result.data or [])
+        return removed
 
     async def sales_summary(self) -> dict[str, Any]:
         result = await self.client.rpc("sales_summary").execute()
