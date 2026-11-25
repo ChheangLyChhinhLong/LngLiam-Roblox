@@ -535,3 +535,15 @@ grant execute on function public.close_wallet_deposit(uuid, text) to service_rol
 grant execute on function public.cancel_wallet_deposit(uuid) to service_role;
 
 notify pgrst, 'reload schema';
+
+
+
+grant all on table public.users to service_role;
+grant all on table public.bot_settings to service_role;
+grant all on table public.user_wallets to service_role;
+grant all on table public.wallet_deposits to service_role;
+grant all on table public.resellers to service_role;
+grant all on table public.categories to service_role;
+grant all on table public.products to service_role;
+grant all on table public.orders to service_role;
+grant all on table public.stock_items to service_role;
