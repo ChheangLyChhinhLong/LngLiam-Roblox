@@ -37,3 +37,30 @@ def test_store_retries_transient_supabase_timeouts():
         assert await store.user_language(42) == "en"
 
     asyncio.run(run_test())
+
+
+class EmptyBuilder:
+    def select(self, *_args, **_kwargs):
+        return self
+
+    def eq(self, *_args, **_kwargs):
+        return self
+
+    def maybe_single(self, *_args, **_kwargs):
+        return self
+
+    async def execute(self):
+        return None
+
+
+class EmptyClient:
+    def table(self, _name):
+        return EmptyBuilder()
+
+
+def test_store_user_language_handles_empty_supabase_response():
+    async def run_test():
+        store = Store(EmptyClient())
+        assert await store.user_language(42) is None
+
+    asyncio.run(run_test())

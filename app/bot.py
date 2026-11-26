@@ -556,6 +556,7 @@ async def switch_active_screen(
 ) -> Message:
     previous = active_screen_messages.pop(user_id, None)
     menu_message = menu_keyboard_messages.get(user_id)
+    previous_deleted = False
     if (
         previous
         and previous.message_id != sent.message_id
@@ -564,12 +565,18 @@ async def switch_active_screen(
         if active_screen_auxiliary_message_ids.get(user_id):
             await delete_active_screen_auxiliary_messages(previous.bot, user_id)
         await delete_replaced_message(previous)
+        previous_deleted = True
         if welcome_message_ids.get(user_id) == previous.message_id:
             welcome_message_ids.pop(user_id, None)
     if (
         input_message
         and input_message.from_user
         and input_message.from_user.id == user_id
+        and not (
+            previous_deleted
+            and previous
+            and previous.message_id == input_message.message_id
+        )
     ):
         await delete_replaced_message(input_message)
     active_screen_messages[user_id] = sent
@@ -2292,7 +2299,6 @@ async def send_welcome(
             language or await safe_user_language(store, user.id)
         )
     if immediate:
-        await delete_active_screen_auxiliary_messages(message.bot, user.id)
         previous_message = active_screen_messages.get(user.id)
         previous_menu_message = menu_keyboard_messages.get(user.id)
         previous_message_id = welcome_message_ids.get(user.id)
@@ -2311,6 +2317,7 @@ async def send_welcome(
             "video" if media_settings.get("welcome_video_url") else "photo",
             reply_markup,
         )
+        await delete_active_screen_auxiliary_messages(message.bot, user.id)
         if active_screen_messages.get(user.id) is previous_message:
             active_screen_messages.pop(user.id, None)
         if menu_keyboard_messages.get(user.id) is previous_menu_message:
@@ -2338,33 +2345,9 @@ async def send_welcome(
         return
 
     await safe_upsert_user(store, user.id, user.username, user.first_name, language)
-    await delete_active_screen_auxiliary_messages(message.bot, user.id)
-    previous_message = active_screen_messages.pop(user.id, None)
-    previous_menu_message = menu_keyboard_messages.pop(user.id, None)
-    previous_message_id = welcome_message_ids.pop(user.id, None)
-    if previous_message:
-        await delete_replaced_message(previous_message)
-    if previous_menu_message and (
-        previous_message is None
-        or previous_menu_message.message_id != previous_message.message_id
-    ):
-        await delete_replaced_message(previous_menu_message)
-    elif (
-        not previous_menu_message
-        and previous_message_id
-        and (
-            previous_message is None
-            or previous_message_id != previous_message.message_id
-        )
-    ):
-        try:
-            await message.bot.delete_message(
-                chat_id=user.id, message_id=previous_message_id
-            )
-        except TelegramBadRequest:
-            logger.debug(
-                "Could not delete previous welcome message %s", previous_message_id
-            )
+    previous_message = active_screen_messages.get(user.id)
+    previous_menu_message = menu_keyboard_messages.get(user.id)
+    previous_message_id = welcome_message_ids.get(user.id)
     settings_data: dict[str, str] = {}
     load_settings = getattr(store, "bot_settings", None)
     if load_settings:
@@ -2389,6 +2372,30 @@ async def send_welcome(
         "video" if settings_data.get("welcome_video_url") else "photo",
         reply_markup,
     )
+    await delete_active_screen_auxiliary_messages(message.bot, user.id)
+    if previous_message:
+        await delete_replaced_message(previous_message)
+    if previous_menu_message and (
+        previous_message is None
+        or previous_menu_message.message_id != previous_message.message_id
+    ):
+        await delete_replaced_message(previous_menu_message)
+    elif (
+        not previous_menu_message
+        and previous_message_id
+        and (
+            previous_message is None
+            or previous_message_id != previous_message.message_id
+        )
+    ):
+        try:
+            await message.bot.delete_message(
+                chat_id=user.id, message_id=previous_message_id
+            )
+        except TelegramBadRequest:
+            logger.debug(
+                "Could not delete previous welcome message %s", previous_message_id
+            )
     if welcome_media_message_ids:
         active_screen_auxiliary_message_ids[user.id] = welcome_media_message_ids
     await delete_replaced_message(message)
@@ -2406,31 +2413,9 @@ async def send_home_screen(
 ) -> Message:
     global welcome_media_cache
     language = normalize_language(language or await safe_user_language(store, user.id))
-    await delete_active_screen_auxiliary_messages(bot, user.id)
-    previous_message = active_screen_messages.pop(user.id, None)
-    previous_menu_message = menu_keyboard_messages.pop(user.id, None)
-    previous_message_id = welcome_message_ids.pop(user.id, None)
-    if previous_message:
-        await delete_replaced_message(previous_message)
-    if previous_menu_message and (
-        previous_message is None
-        or previous_menu_message.message_id != previous_message.message_id
-    ):
-        await delete_replaced_message(previous_menu_message)
-    elif (
-        not previous_menu_message
-        and previous_message_id
-        and (
-            previous_message is None
-            or previous_message_id != previous_message.message_id
-        )
-    ):
-        try:
-            await bot.delete_message(chat_id=user.id, message_id=previous_message_id)
-        except TelegramBadRequest:
-            logger.debug(
-                "Could not delete previous welcome message %s", previous_message_id
-            )
+    previous_message = active_screen_messages.get(user.id)
+    previous_menu_message = menu_keyboard_messages.get(user.id)
+    previous_message_id = welcome_message_ids.get(user.id)
     text = welcome_text(user, language)
     settings_data: dict[str, str] = {}
     try:
@@ -2453,6 +2438,28 @@ async def send_home_screen(
         reply_markup,
         via_bot=True,
     )
+    await delete_active_screen_auxiliary_messages(bot, user.id)
+    if previous_message:
+        await delete_replaced_message(previous_message)
+    if previous_menu_message and (
+        previous_message is None
+        or previous_menu_message.message_id != previous_message.message_id
+    ):
+        await delete_replaced_message(previous_menu_message)
+    elif (
+        not previous_menu_message
+        and previous_message_id
+        and (
+            previous_message is None
+            or previous_message_id != previous_message.message_id
+        )
+    ):
+        try:
+            await bot.delete_message(chat_id=user.id, message_id=previous_message_id)
+        except TelegramBadRequest:
+            logger.debug(
+                "Could not delete previous welcome message %s", previous_message_id
+            )
     if media_message_ids:
         active_screen_auxiliary_message_ids[user.id] = media_message_ids
     active_screen_messages[user.id] = sent
@@ -3032,11 +3039,19 @@ def register_handlers(
         if catalog_media:
             media_reference = stored_telegram_content_reference(catalog_media)
             if media_reference:
-                sent_media = await copy_telegram_content_reference(
-                    bot,
-                    message.chat.id if message.chat else message.from_user.id,
-                    media_reference,
-                )
+                try:
+                    sent_media = await copy_telegram_content_reference(
+                        bot,
+                        message.chat.id if message.chat else message.from_user.id,
+                        media_reference,
+                    )
+                except TelegramAPIError as exc:
+                    logger.warning(
+                        "Could not copy category media for category %s: %s",
+                        category_id,
+                        exc,
+                    )
+                    sent_media = []
             else:
                 sent_media = await send_cloudinary_media(
                     message, catalog_media, fallback="photo"
@@ -3335,7 +3350,7 @@ def register_handlers(
         amount_text: str,
         language: str,
         payment_method: PaymentMethod,
-    ) -> None:
+    ) -> Message:
         amount = parse_wallet_deposit_amount(amount_text, language)
 
         deposit = await store.create_wallet_deposit(user.id, f"{amount:.2f}")
@@ -3374,6 +3389,7 @@ def register_handlers(
             ),
         )
         await store.set_wallet_deposit_message(deposit_id, sent.message_id)
+        return sent
 
     async def show_order_history(
         message: Message,
@@ -4138,10 +4154,8 @@ def register_handlers(
                 ),
             )
             return
-        await clear_active_screen(callback.from_user.id)
-        await delete_replaced_message(callback.message)
         try:
-            await start_wallet_deposit(
+            sent = await start_wallet_deposit(
                 callback.from_user, amount, language, payments.default_method()
             )
         except Exception:
@@ -4149,10 +4163,15 @@ def register_handlers(
                 "Could not start wallet deposit for Telegram user %s",
                 callback.from_user.id,
             )
-            await bot.send_message(
+            await send_replacing_screen(
+                callback.message,
                 callback.from_user.id,
                 wallet_error_message(language),
                 reply_markup=welcome_keyboard(callback.from_user.id, settings),
+            )
+        else:
+            await switch_active_screen(
+                callback.from_user.id, sent, callback.message
             )
 
     @router.callback_query(F.data.startswith("wallet:method:"))
@@ -4175,10 +4194,8 @@ def register_handlers(
             )
             return
         await callback.answer()
-        await clear_active_screen(callback.from_user.id)
-        await delete_replaced_message(callback.message)
         try:
-            await start_wallet_deposit(
+            sent = await start_wallet_deposit(
                 callback.from_user, amount, language, payment_method
             )
         except Exception:
@@ -4186,10 +4203,15 @@ def register_handlers(
                 "Could not start wallet deposit for Telegram user %s",
                 callback.from_user.id,
             )
-            await bot.send_message(
+            await send_replacing_screen(
+                callback.message,
                 callback.from_user.id,
                 wallet_error_message(language),
                 reply_markup=welcome_keyboard(callback.from_user.id, settings),
+            )
+        else:
+            await switch_active_screen(
+                callback.from_user.id, sent, callback.message
             )
 
     @router.callback_query(F.data.startswith("wallet:check:"))
@@ -6861,7 +6883,7 @@ def register_handlers(
                 await delete_replaced_message(message)
                 return
             try:
-                await start_wallet_deposit(
+                sent = await start_wallet_deposit(
                     message.from_user,
                     text,
                     language,
@@ -6879,8 +6901,9 @@ def register_handlers(
                 )
                 return
             pending_wallet_amount.discard(message.from_user.id)
-            await clear_active_screen(message.from_user.id)
-            await delete_replaced_message(message)
+            await switch_active_screen(
+                message.from_user.id, sent, message
+            )
             return
         pending_wallet_amount.discard(message.from_user.id)
         pending_setting = pending_admin_input.get(message.from_user.id)

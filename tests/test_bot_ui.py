@@ -53,6 +53,7 @@ from app.bot import (
     quantity_limit,
     register_handlers,
     safe_user_language,
+    send_home_screen,
     send_replacing_screen,
     send_welcome,
     stock_button_style,
@@ -603,6 +604,84 @@ def test_welcome_sends_the_new_shop_keyboard_and_saves_profile():
         assert isinstance(sent_markup, bot_module.ReplyKeyboardMarkup)
         assert bot_module.welcome_message_ids[user.id] == sent_message.message_id
         assert bot_module.menu_keyboard_messages[user.id] is sent_message
+
+    asyncio.run(run_test())
+
+
+def test_welcome_sends_new_screen_before_deleting_previous_screen():
+    async def run_test():
+        user_id = 12346
+        events = []
+        previous = SimpleNamespace(
+            message_id=788,
+            delete=AsyncMock(side_effect=lambda: events.append("delete_old")),
+        )
+        sent = SimpleNamespace(message_id=789)
+        user = SimpleNamespace(id=user_id, first_name="Jing", username="jing")
+
+        async def send_new(*_args, **_kwargs):
+            events.append("send_new")
+            return sent
+
+        message = SimpleNamespace(
+            from_user=user,
+            answer=AsyncMock(side_effect=send_new),
+            delete=AsyncMock(side_effect=lambda: events.append("delete_command")),
+            bot=SimpleNamespace(),
+        )
+        store = SimpleNamespace(
+            user_language=AsyncMock(return_value="en"),
+            upsert_user=AsyncMock(),
+        )
+        bot_module.active_screen_messages[user_id] = previous
+        bot_module.menu_keyboard_messages[user_id] = previous
+        bot_module.welcome_message_ids[user_id] = previous.message_id
+
+        await send_welcome(message, store, SimpleNamespace(admin_ids=set()), "en")
+
+        assert events == ["send_new", "delete_old", "delete_command"]
+        assert bot_module.active_screen_messages[user_id] is sent
+        bot_module.active_screen_messages.pop(user_id, None)
+        bot_module.menu_keyboard_messages.pop(user_id, None)
+        bot_module.welcome_message_ids.pop(user_id, None)
+
+    asyncio.run(run_test())
+
+
+def test_home_screen_sends_new_screen_before_deleting_previous_screen():
+    async def run_test():
+        user_id = 12347
+        events = []
+        previous = SimpleNamespace(
+            message_id=788,
+            delete=AsyncMock(side_effect=lambda: events.append("delete_old")),
+        )
+        sent = SimpleNamespace(message_id=789)
+
+        async def send_new(*_args, **_kwargs):
+            events.append("send_new")
+            return sent
+
+        bot = SimpleNamespace(send_message=AsyncMock(side_effect=send_new))
+        store = SimpleNamespace(
+            user_language=AsyncMock(return_value="en"),
+            bot_settings=AsyncMock(return_value={}),
+        )
+        user = SimpleNamespace(id=user_id, first_name="Jing")
+        bot_module.active_screen_messages[user_id] = previous
+        bot_module.menu_keyboard_messages[user_id] = previous
+        bot_module.welcome_message_ids[user_id] = previous.message_id
+
+        result = await send_home_screen(
+            bot, user, store, SimpleNamespace(admin_ids=set()), "en"
+        )
+
+        assert result is sent
+        assert events == ["send_new", "delete_old"]
+        assert bot_module.active_screen_messages[user_id] is sent
+        bot_module.active_screen_messages.pop(user_id, None)
+        bot_module.menu_keyboard_messages.pop(user_id, None)
+        bot_module.welcome_message_ids.pop(user_id, None)
 
     asyncio.run(run_test())
 
@@ -1168,6 +1247,66 @@ def test_wallet_payment_keyboard_has_cancel_instead_of_back():
     assert markup.inline_keyboard[2][0].callback_data == "wallet:cancel:deposit-123"
 
 
+def test_wallet_deposit_sends_new_prompt_before_deleting_previous_screen(monkeypatch):
+    async def run_test():
+        user_id = 23460
+        events = []
+        previous = SimpleNamespace(
+            message_id=15,
+            from_user=SimpleNamespace(id=user_id),
+            delete=AsyncMock(side_effect=lambda: events.append("delete_old")),
+        )
+        sent = SimpleNamespace(message_id=16)
+
+        async def send_new(*_args, **_kwargs):
+            events.append("send_new")
+            return sent
+
+        bot = SimpleNamespace(send_photo=AsyncMock(side_effect=send_new))
+        store = SimpleNamespace(
+            user_language=AsyncMock(return_value="en"),
+            create_wallet_deposit=AsyncMock(return_value={"id": "deposit-1"}),
+            set_wallet_deposit_payment=AsyncMock(),
+            set_wallet_deposit_message=AsyncMock(),
+        )
+        payments = SimpleNamespace(
+            available_methods=("aba",),
+            default_method=Mock(return_value="aba"),
+            create_payment=AsyncMock(
+                return_value={"transaction_id": "tx-1", "qr_string": "qr"}
+            ),
+        )
+        settings = SimpleNamespace(admin_ids=set(), app_base_url="https://shop.example")
+        callback = SimpleNamespace(
+            data="wallet:amount:5",
+            from_user=SimpleNamespace(id=user_id),
+            message=previous,
+            answer=AsyncMock(),
+        )
+        bot_module.active_screen_messages[user_id] = previous
+        monkeypatch.setattr(bot_module, "payment_qr", lambda _payment: "qr-file")
+        register_handlers(
+            SimpleNamespace(include_router=Mock()),
+            bot,
+            store,
+            payments,
+            settings,
+        )
+        handler = [
+            handler.callback
+            for handler in bot_module.router.callback_query.handlers
+            if handler.callback.__name__ == "wallet_selected_amount"
+        ][-1]
+
+        await handler(callback)
+
+        assert events == ["send_new", "delete_old"]
+        assert bot_module.active_screen_messages[user_id] is sent
+        bot_module.active_screen_messages.pop(user_id, None)
+
+    asyncio.run(run_test())
+
+
 def test_custom_wallet_amount_is_parsed_to_the_exact_supported_amount():
     assert parse_wallet_deposit_amount("12.5") == Decimal("12.5")
     assert parse_wallet_deposit_amount("500.00") == Decimal("500.00")
@@ -1520,6 +1659,26 @@ def test_switch_active_screen_keeps_menu_keyboard_message_and_replaces_only_scre
         bot_module.active_screen_messages.pop(user_id, None)
         bot_module.menu_keyboard_messages.pop(user_id, None)
         bot_module.welcome_message_ids.pop(user_id, None)
+
+    asyncio.run(run_test())
+
+
+def test_switch_active_screen_deletes_same_old_screen_only_once():
+    async def run_test():
+        user_id = 23459
+        previous = SimpleNamespace(
+            message_id=13,
+            from_user=SimpleNamespace(id=user_id),
+            delete=AsyncMock(),
+        )
+        sent = SimpleNamespace(message_id=14)
+        bot_module.active_screen_messages[user_id] = previous
+
+        await bot_module.switch_active_screen(user_id, sent, previous)
+
+        previous.delete.assert_awaited_once_with()
+        assert bot_module.active_screen_messages[user_id] is sent
+        bot_module.active_screen_messages.pop(user_id, None)
 
     asyncio.run(run_test())
 

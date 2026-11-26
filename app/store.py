@@ -82,7 +82,12 @@ class Store:
             .maybe_single()
             .execute()
         )
-        return (result.data or {}).get("language")
+        if result is None:
+            return None
+        data = getattr(result, "data", None)
+        if not isinstance(data, dict):
+            return None
+        return data.get("language")
 
     async def stock_notification_users(self) -> list[dict[str, Any]]:
         page_size = 1000
