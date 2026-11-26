@@ -86,3 +86,18 @@ def test_wallet_deposits_allow_cancellation_and_restrict_cancel_rpc():
         "grant execute on function public.cancel_wallet_deposit(uuid) to service_role;"
         in schema
     )
+
+
+def test_payment_table_permission_repair_grants_service_role_access():
+    migration = (
+        Path(__file__).parents[1]
+        / "scripts"
+        / "fix_payment_table_permissions.sql"
+    ).read_text(encoding="utf-8")
+
+    normalized = " ".join(migration.lower().split())
+    assert (
+        "grant all privileges on table public.orders, public.wallet_deposits "
+        "to service_role;"
+        in normalized
+    )
