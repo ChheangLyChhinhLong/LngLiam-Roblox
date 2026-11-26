@@ -860,9 +860,13 @@ def test_shop_catalog_buttons_reflect_stock_across_all_packages():
             available_stock=AsyncMock(side_effect=stock_by_product.__getitem__),
             user_language=AsyncMock(return_value="en"),
         )
+        sent = SimpleNamespace(message_id=889)
         message = SimpleNamespace(
-            text="Shop",
-            edit_text=AsyncMock(),
+            message_id=888,
+            chat=SimpleNamespace(id=user_id, type="private"),
+            from_user=SimpleNamespace(id=99999, is_bot=True),
+            answer=AsyncMock(return_value=sent),
+            delete=AsyncMock(),
         )
         callback = SimpleNamespace(
             from_user=SimpleNamespace(id=user_id),
@@ -871,6 +875,8 @@ def test_shop_catalog_buttons_reflect_stock_across_all_packages():
         )
         original_callback_handlers = list(bot_module.router.callback_query.handlers)
         original_message_handlers = list(bot_module.router.message.handlers)
+        bot_module.active_screen_messages.pop(user_id, None)
+        bot_module.menu_keyboard_messages.pop(user_id, None)
         try:
             register_handlers(
                 SimpleNamespace(include_router=Mock()),
@@ -887,17 +893,20 @@ def test_shop_catalog_buttons_reflect_stock_across_all_packages():
 
             await handler(callback)
 
-            markup = message.edit_text.await_args.kwargs["reply_markup"]
-            screen_text = message.edit_text.await_args.args[0]
+            markup = message.answer.await_args.kwargs["reply_markup"]
+            screen_text = message.answer.await_args.args[0]
             assert "Choose a product list" in screen_text
             assert "product packages" in screen_text
             assert [
                 row[0].style for row in markup.inline_keyboard[:3]
             ] == ["success", "danger", "danger"]
             assert store.available_stock.await_count == 3
+            message.delete.assert_awaited_once()
+            assert bot_module.active_screen_messages[user_id] is sent
         finally:
             bot_module.router.callback_query.handlers[:] = original_callback_handlers
             bot_module.router.message.handlers[:] = original_message_handlers
+            bot_module.active_screen_messages.pop(user_id, None)
             bot_module.user_language_cache.pop(user_id, None)
 
     asyncio.run(run_test())
@@ -939,7 +948,7 @@ def test_catalog_media_is_shown_before_the_package_list(monkeypatch):
             available_stock=AsyncMock(return_value=3),
         )
         callback = SimpleNamespace(
-            data="c:catalog-1",
+            data="c:catalog-1:3",
             from_user=SimpleNamespace(id=user_id),
             message=screen_message,
             answer=AsyncMock(),
@@ -972,7 +981,8 @@ def test_catalog_media_is_shown_before_the_package_list(monkeypatch):
             screen_message.answer.assert_awaited_once()
             screen_message.edit_text.assert_not_awaited()
             markup = screen_message.answer.await_args.kwargs["reply_markup"]
-            assert markup.inline_keyboard[0][0].callback_data == "p:package-1"
+            assert markup.inline_keyboard[0][0].callback_data == "p:package-1:0:3"
+            assert markup.inline_keyboard[-1][0].callback_data == "shop:catalogs:3"
             assert bot_module.active_screen_auxiliary_message_ids[user_id] == [1201]
         finally:
             bot_module.router.callback_query.handlers[:] = callback_handlers
@@ -1019,7 +1029,7 @@ def test_product_details_use_shared_catalog_media(monkeypatch):
             ),
         )
         callback = SimpleNamespace(
-            data="p:package-1",
+            data="p:package-1:2:3",
             from_user=SimpleNamespace(id=user_id),
             message=message,
             answer=AsyncMock(),
@@ -1045,9 +1055,104 @@ def test_product_details_use_shared_catalog_media(monkeypatch):
             assert send_media.await_args.args[:2] == (message, catalog_media)
             assert send_media.await_args.kwargs["fallback"] == "photo"
             assert "Package" in send_media.await_args.kwargs["caption"]
+            markup = send_media.await_args.kwargs["reply_markup"]
+            assert markup.inline_keyboard[-1][0].callback_data == (
+                "shop:packages:catalog-1:3:2"
+            )
         finally:
             bot_module.router.callback_query.handlers[:] = callback_handlers
             bot_module.router.message.handlers[:] = message_handlers
+            bot_module.active_screen_messages.pop(user_id, None)
+            bot_module.user_language_cache.pop(user_id, None)
+
+    asyncio.run(run_test())
+
+
+def test_product_uses_fallback_media_when_category_reference_is_unavailable(
+    monkeypatch,
+):
+    async def run_test():
+        user_id = 7654382
+        fallback_media = (
+            "https://res.cloudinary.com/example/video/upload/product.mp4"
+        )
+        stale_reference = encode_telegram_content_reference(
+            [{"message_id": 45, "source_chat_id": "@catalog_channel"}]
+        )
+        message = SimpleNamespace(
+            message_id=1206,
+            chat=SimpleNamespace(id=user_id),
+            from_user=SimpleNamespace(id=user_id),
+            photo=None,
+            video=None,
+            delete=AsyncMock(),
+        )
+        send_media = AsyncMock(return_value=[SimpleNamespace(message_id=1207)])
+        monkeypatch.setattr(bot_module, "send_cloudinary_media", send_media)
+        store = SimpleNamespace(
+            user_language=AsyncMock(return_value="en"),
+            product=AsyncMock(
+                return_value={
+                    "id": "package-1",
+                    "category_id": "catalog-1",
+                    "name": "Package",
+                    "description": "Details",
+                    "price": "1.00",
+                    "reseller_price": "1.00",
+                    "image_url": None,
+                    "video_url": fallback_media,
+                }
+            ),
+            is_reseller=AsyncMock(return_value=False),
+            available_stock=AsyncMock(return_value=0),
+            category=AsyncMock(
+                return_value={"name": "Catalog", "media_url": stale_reference}
+            ),
+        )
+        bot = SimpleNamespace(
+            copy_messages=AsyncMock(
+                side_effect=TelegramBadRequest(
+                    Mock(), "message to forward not found"
+                )
+            )
+        )
+        callback = SimpleNamespace(
+            data="p:package-1:2:3",
+            from_user=SimpleNamespace(id=user_id),
+            message=message,
+            answer=AsyncMock(),
+        )
+        callback_handlers = list(bot_module.router.callback_query.handlers)
+        message_handlers = list(bot_module.router.message.handlers)
+        bot_module.active_screen_messages.pop(user_id, None)
+        try:
+            register_handlers(
+                SimpleNamespace(include_router=Mock()),
+                bot,
+                store,
+                SimpleNamespace(),
+                SimpleNamespace(admin_ids=set()),
+            )
+            handler = [
+                item.callback
+                for item in bot_module.router.callback_query.handlers
+                if item.callback.__name__ == "product"
+            ][-1]
+
+            await handler(callback)
+
+            bot.copy_messages.assert_awaited_once()
+            send_media.assert_awaited_once()
+            assert send_media.await_args.args[1] == fallback_media
+            markup = send_media.await_args.kwargs["reply_markup"]
+            assert markup.inline_keyboard[-1][0].callback_data == (
+                "shop:packages:catalog-1:3:2"
+            )
+        finally:
+            bot_module.router.callback_query.handlers[:] = callback_handlers
+            bot_module.router.message.handlers[:] = message_handlers
+            bot_module.active_screen_messages.pop(user_id, None)
+            bot_module.active_screen_auxiliary_message_ids.pop(user_id, None)
             bot_module.user_language_cache.pop(user_id, None)
 
     asyncio.run(run_test())
@@ -1599,6 +1704,31 @@ def test_edit_text_message_replaces_video_message_with_text_message():
     asyncio.run(run_test())
 
 
+def test_edit_text_message_sends_before_deleting_when_telegram_rejects_edit():
+    async def run_test():
+        events = []
+        sent = SimpleNamespace(message_id=790)
+        message = SimpleNamespace(
+            text="Old screen",
+            message_id=789,
+            answer=AsyncMock(
+                side_effect=lambda *_args, **_kwargs: events.append("send") or sent
+            ),
+            edit_text=AsyncMock(
+                side_effect=TelegramBadRequest(Mock(), "message can't be edited")
+            ),
+            delete=AsyncMock(side_effect=lambda: events.append("delete")),
+        )
+
+        result = await edit_text_message(message, "New screen")
+
+        assert result is sent
+        assert events == ["send", "delete"]
+        message.edit_text.assert_awaited_once()
+
+    asyncio.run(run_test())
+
+
 def test_delete_replaced_message_removes_previous_screen():
     async def run_test():
         message = SimpleNamespace(message_id=123, delete=AsyncMock())
@@ -1636,7 +1766,7 @@ def test_send_replacing_screen_deletes_previous_bot_screen_and_user_input():
     asyncio.run(run_test())
 
 
-def test_switch_active_screen_keeps_menu_keyboard_message_and_replaces_only_screen():
+def test_switch_active_screen_deletes_menu_and_previous_screen():
     async def run_test():
         user_id = 23458
         menu_message = SimpleNamespace(message_id=10, delete=AsyncMock())
@@ -1647,13 +1777,14 @@ def test_switch_active_screen_keeps_menu_keyboard_message_and_replaces_only_scre
         bot_module.active_screen_messages[user_id] = menu_message
 
         await bot_module.switch_active_screen(user_id, first_screen)
-        assert menu_message.delete.await_count == 0
-        assert bot_module.menu_keyboard_messages[user_id] is menu_message
+        menu_message.delete.assert_awaited_once_with()
+        assert user_id not in bot_module.menu_keyboard_messages
+        assert user_id not in bot_module.welcome_message_ids
         assert bot_module.active_screen_messages[user_id] is first_screen
 
         await bot_module.switch_active_screen(user_id, second_screen)
         first_screen.delete.assert_awaited_once_with()
-        assert bot_module.menu_keyboard_messages[user_id] is menu_message
+        assert user_id not in bot_module.menu_keyboard_messages
         assert bot_module.active_screen_messages[user_id] is second_screen
 
         bot_module.active_screen_messages.pop(user_id, None)

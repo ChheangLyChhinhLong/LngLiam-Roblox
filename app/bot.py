@@ -504,16 +504,32 @@ async def edit_text_message(
             text, parse_mode=parse_mode, reply_markup=reply_markup
         )
     if message.text is None:
-        try:
-            await message.delete()
-        except TelegramBadRequest:
-            logger.debug("Could not delete old photo message %s", message.message_id)
-        return await message.answer(
+        sent = await message.answer(
             text, parse_mode=parse_mode, reply_markup=reply_markup
         )
-    return await message.edit_text(
-        text, parse_mode=parse_mode, reply_markup=reply_markup
-    )
+        await delete_replaced_message(message)
+        return sent
+    try:
+        return await message.edit_text(
+            text, parse_mode=parse_mode, reply_markup=reply_markup
+        )
+    except TelegramBadRequest as exc:
+        error = str(exc).casefold()
+        if "message is not modified" in error:
+            return message
+        if not any(
+            reason in error
+            for reason in (
+                "message can't be edited",
+                "message to edit not found",
+            )
+        ):
+            raise
+        sent = await message.answer(
+            text, parse_mode=parse_mode, reply_markup=reply_markup
+        )
+        await delete_replaced_message(message)
+        return sent
 
 
 async def delete_replaced_message(message: Message) -> None:
@@ -532,6 +548,16 @@ async def delete_active_screen_auxiliary_messages(bot: Bot, user_id: int) -> Non
             await bot.delete_message(user_id, message_id)
         except TelegramBadRequest:
             logger.debug("Could not delete auxiliary screen message %s", message_id)
+
+
+def message_user_id(message: Message) -> int | None:
+    sender = message.from_user
+    if sender and not getattr(sender, "is_bot", False):
+        return sender.id
+    chat = message.chat
+    if chat and getattr(chat, "type", None) == "private":
+        return chat.id
+    return None
 
 
 async def clear_active_screen(user_id: int, keep_message_id: int | None = None) -> None:
@@ -557,26 +583,36 @@ async def switch_active_screen(
     previous = active_screen_messages.pop(user_id, None)
     menu_message = menu_keyboard_messages.get(user_id)
     previous_deleted = False
-    if (
-        previous
-        and previous.message_id != sent.message_id
-        and (menu_message is None or previous.message_id != menu_message.message_id)
-    ):
+    if previous and previous.message_id != sent.message_id:
         if active_screen_auxiliary_message_ids.get(user_id):
             await delete_active_screen_auxiliary_messages(previous.bot, user_id)
         await delete_replaced_message(previous)
         previous_deleted = True
+        if menu_message and menu_message.message_id == previous.message_id:
+            menu_keyboard_messages.pop(user_id, None)
         if welcome_message_ids.get(user_id) == previous.message_id:
             welcome_message_ids.pop(user_id, None)
+    input_sender = input_message.from_user if input_message else None
+    input_is_user_message = bool(input_sender and input_sender.id == user_id)
+    input_is_bot_message = bool(
+        input_sender and getattr(input_sender, "is_bot", False)
+    )
+    keep_menu_message = bool(
+        input_message
+        and menu_message
+        and input_message.message_id == menu_message.message_id
+    )
+    already_deleted = bool(
+        previous_deleted
+        and previous
+        and input_message
+        and previous.message_id == input_message.message_id
+    )
     if (
         input_message
-        and input_message.from_user
-        and input_message.from_user.id == user_id
-        and not (
-            previous_deleted
-            and previous
-            and previous.message_id == input_message.message_id
-        )
+        and (input_is_user_message or input_is_bot_message)
+        and not keep_menu_message
+        and not already_deleted
     ):
         await delete_replaced_message(input_message)
     active_screen_messages[user_id] = sent
@@ -2900,16 +2936,19 @@ def register_handlers(
         return False
 
     async def show_catalogs(
-        message: Message, page: int, language: str, edit_message: bool = True
+        message: Message,
+        page: int,
+        language: str,
+        user_id: int | None = None,
     ) -> None:
         async def render(text: str, **kwargs: Any) -> None:
-            if edit_message:
+            screen_user_id = user_id or message_user_id(message)
+            if screen_user_id is None:
                 await edit_text_message(message, text, **kwargs)
                 return
-            user_id = message.from_user.id if message.from_user else message.chat.id
             await send_replacing_screen(
                 message,
-                user_id,
+                screen_user_id,
                 text,
                 parse_mode=kwargs.get("parse_mode"),
                 reply_markup=kwargs.get("reply_markup"),
@@ -2942,7 +2981,7 @@ def register_handlers(
             [
                 InlineKeyboardButton(
                     text=f"🛍 {item['name']}",
-                    callback_data=f"c:{item['id']}",
+                    callback_data=f"c:{item['id']}:{page}",
                     style=catalog_button_style(stock_counts),
                 )
             ]
@@ -2973,23 +3012,41 @@ def register_handlers(
         page: int,
         language: str,
         is_reseller: bool = False,
+        *,
+        catalog_page: int = 0,
+        user_id: int | None = None,
     ) -> None:
+        screen_user_id = user_id or message_user_id(message)
+        catalog_back_target = f"shop:catalogs:{catalog_page}"
+
+        async def render(text: str, **kwargs: Any) -> None:
+            if screen_user_id is None:
+                await edit_text_message(message, text, **kwargs)
+                return
+            await send_replacing_screen(
+                message,
+                screen_user_id,
+                text,
+                parse_mode=kwargs.get("parse_mode"),
+                reply_markup=kwargs.get("reply_markup"),
+            )
+
         category_data = await store.category(category_id)
         if not category_data:
-            await edit_text_message(
-                message,
+            await render(
                 copy(
                     language,
                     "បញ្ជីមុខទំនិញនេះលែងមានទៀតហើយ។",
                     "This product list is no longer available.",
                 ),
-                reply_markup=keyboard([back_button("shop", language)]),
+                reply_markup=keyboard(
+                    [back_button(catalog_back_target, language)]
+                ),
             )
             return
         products = await store.products(category_id)
         if not products:
-            await edit_text_message(
-                message,
+            await render(
                 f"🛍 <b>{html.escape(category_data['name'])}</b>\n"
                 "───────────────────\n"
                 + copy(
@@ -2998,7 +3055,9 @@ def register_handlers(
                     "This product list has no product packages yet.",
                 ),
                 parse_mode="HTML",
-                reply_markup=keyboard([back_button("shop", language)]),
+                reply_markup=keyboard(
+                    [back_button(catalog_back_target, language)]
+                ),
             )
             return
         visible_products, page, page_count = paginate(products, page)
@@ -3013,17 +3072,22 @@ def register_handlers(
                 [
                     InlineKeyboardButton(
                         text=f"📦 {item['name']} • {money(price)} ({stock_label})",
-                        callback_data=f"p:{item['id']}",
+                        callback_data=(
+                            f"p:{item['id']}:{page}:{catalog_page}"
+                        ),
                         style=stock_button_style(stock),
                     )
                 ]
             )
         navigation = pagination_row(
-            page, page_count, f"shop:packages:{category_id}", language
+            page,
+            page_count,
+            f"shop:packages:{category_id}:{catalog_page}",
+            language,
         )
         if navigation:
             rows.append(navigation)
-        rows.append(back_button("shop", language))
+        rows.append(back_button(catalog_back_target, language))
         description = (category_data.get("description") or "").strip()
         intro = html.escape(description) if description else ""
         text = copy(
@@ -3059,14 +3123,16 @@ def register_handlers(
             sent_text = await message.answer(
                 text, parse_mode="HTML", reply_markup=keyboard(rows)
             )
-            if message.from_user:
-                await switch_active_screen(message.from_user.id, sent_text)
-                active_screen_auxiliary_message_ids[message.from_user.id] = [
+            if screen_user_id is not None:
+                await switch_active_screen(
+                    screen_user_id, sent_text, message
+                )
+                active_screen_auxiliary_message_ids[screen_user_id] = [
                     item.message_id for item in sent_media
                 ]
             return
-        await edit_text_message(
-            message, text, parse_mode="HTML", reply_markup=keyboard(rows)
+        await render(
+            text, parse_mode="HTML", reply_markup=keyboard(rows)
         )
 
     async def show_how_to_buy(
@@ -3467,7 +3533,7 @@ def register_handlers(
             "🎮 games service",
             "games service",
         }:
-            await show_catalogs(message, 0, language, edit_message=False)
+            await show_catalogs(message, 0, language)
         elif action in {"🛒 my orders", "my orders", "orders"}:
             await show_order_history(
                 message, user.id, 0, language, replace_user_screen=True
@@ -4401,52 +4467,100 @@ def register_handlers(
     async def shop(callback: CallbackQuery) -> None:
         await callback.answer()
         language = await safe_user_language(store, callback.from_user.id)
-        await show_catalogs(callback.message, 0, language)
+        await show_catalogs(
+            callback.message, 0, language, user_id=callback.from_user.id
+        )
 
     @router.callback_query(F.data.startswith("shop:catalogs:"))
     async def shop_catalog_page(callback: CallbackQuery) -> None:
         await callback.answer()
         language = await safe_user_language(store, callback.from_user.id)
         await show_catalogs(
-            callback.message, int(callback.data.rsplit(":", 1)[1]), language
+            callback.message,
+            int(callback.data.rsplit(":", 1)[1]),
+            language,
+            user_id=callback.from_user.id,
         )
 
     @router.callback_query(F.data.startswith("shop:packages:"))
     async def shop_package_page(callback: CallbackQuery) -> None:
         await callback.answer()
         language = await safe_user_language(store, callback.from_user.id)
-        category_id, page = callback.data[len("shop:packages:") :].rsplit(":", 1)
+        package_route = callback.data[len("shop:packages:") :].rsplit(":", 2)
+        if len(package_route) == 2:
+            category_id, page = package_route
+            catalog_page = 0
+        else:
+            category_id, catalog_page, page = package_route
         is_reseller = await store.is_reseller(callback.from_user.id)
         await show_packages(
-            callback.message, category_id, int(page), language, is_reseller
+            callback.message,
+            category_id,
+            int(page),
+            language,
+            is_reseller,
+            catalog_page=int(catalog_page),
+            user_id=callback.from_user.id,
         )
 
     @router.callback_query(F.data.startswith("c:"))
     async def category(callback: CallbackQuery) -> None:
         await callback.answer()
         language = await safe_user_language(store, callback.from_user.id)
-        category_id = callback.data[2:]
+        category_route = callback.data[2:].rsplit(":", 1)
+        if len(category_route) == 2:
+            category_id, catalog_page_text = category_route
+            catalog_page = int(catalog_page_text)
+        else:
+            category_id = category_route[0]
+            catalog_page = 0
         is_reseller = await store.is_reseller(callback.from_user.id)
-        await show_packages(callback.message, category_id, 0, language, is_reseller)
+        await show_packages(
+            callback.message,
+            category_id,
+            0,
+            language,
+            is_reseller,
+            catalog_page=catalog_page,
+            user_id=callback.from_user.id,
+        )
 
     @router.callback_query(F.data.startswith("p:"))
     async def product(callback: CallbackQuery) -> None:
         await callback.answer()
         language = await safe_user_language(store, callback.from_user.id)
-        product_data = await store.product(callback.data[2:])
+        product_callback = callback.data[2:].split(":")
+        product_id = product_callback[0]
+        back_page = int(product_callback[1]) if len(product_callback) > 1 else 0
+        back_catalog_page = (
+            int(product_callback[2]) if len(product_callback) > 2 else 0
+        )
+        product_data = await store.product(product_id)
         if not product_data:
-            await callback.message.edit_text(
+            await send_replacing_screen(
+                callback.message,
+                callback.from_user.id,
                 copy(
                     language,
                     "ផលិតផលនេះមិនមានទៀតទេ។",
                     "This product is no longer available.",
                 ),
-                reply_markup=keyboard([back_button("shop", language)]),
+                reply_markup=keyboard(
+                    [back_button(f"shop:catalogs:{back_catalog_page}", language)]
+                ),
             )
             return
         is_reseller = await store.is_reseller(callback.from_user.id)
         await show_product(
-            callback.message, product_data, 1, language, is_reseller=is_reseller
+            callback.message,
+            product_data,
+            1,
+            language,
+            edit_message=False,
+            is_reseller=is_reseller,
+            back_page=back_page,
+            back_catalog_page=back_catalog_page,
+            user_id=callback.from_user.id,
         )
 
     async def show_product(
@@ -4456,7 +4570,11 @@ def register_handlers(
         language: str,
         edit_message: bool = True,
         is_reseller: bool = False,
+        back_page: int = 0,
+        back_catalog_page: int = 0,
+        user_id: int | None = None,
     ) -> Message | None:
+        screen_user_id = user_id or message_user_id(message)
         stock = await store.available_stock(product_data["id"])
         max_quantity = quantity_limit(stock)
         quantity = min(max(quantity, 1), max_quantity) if max_quantity else 0
@@ -4469,7 +4587,8 @@ def register_handlers(
                     InlineKeyboardButton(
                         text="➖" if quantity > 1 else "·",
                         callback_data=(
-                            f"qty:{product_data['id']}:{quantity - 1}"
+                            f"qty:{product_data['id']}:{quantity - 1}:{back_page}"
+                            f":{back_catalog_page}"
                             if quantity > 1
                             else "noop"
                         ),
@@ -4481,7 +4600,8 @@ def register_handlers(
                     InlineKeyboardButton(
                         text="➕" if quantity < max_quantity else "·",
                         callback_data=(
-                            f"qty:{product_data['id']}:{quantity + 1}"
+                            f"qty:{product_data['id']}:{quantity + 1}:{back_page}"
+                            f":{back_catalog_page}"
                             if quantity < max_quantity
                             else "noop"
                         ),
@@ -4512,7 +4632,13 @@ def register_handlers(
                     )
                 ]
             )
-        rows.append(back_button(f"c:{product_data['category_id']}", language))
+        rows.append(
+            back_button(
+                f"shop:packages:{product_data['category_id']}:"
+                f"{back_catalog_page}:{back_page}",
+                language,
+            )
+        )
         category_title = (
             f"🛍 {html.escape(category_data['name'])}\n" if category_data else ""
         )
@@ -4539,30 +4665,49 @@ def register_handlers(
         video_url = product_data.get("video_url")
         image_url = product_data.get("image_url")
         catalog_media_url = category_data.get("media_url") if category_data else None
-        media_url = catalog_media_url or video_url or image_url
-        media_is_video = bool(not catalog_media_url and video_url)
+        media_url: str | None = None
+        media_is_video = False
         sent_message: Message | None = None
-        if media_url:
-            reference = stored_telegram_content_reference(media_url)
+        auxiliary_message_ids: list[int] = []
+        for candidate_url, candidate_is_video in (
+            (catalog_media_url, False),
+            (video_url, True),
+            (image_url, False),
+        ):
+            if not candidate_url:
+                continue
+            reference = stored_telegram_content_reference(candidate_url)
             if reference:
-                copied = await copy_telegram_content_reference(
-                    bot,
-                    message.chat.id if message.chat else message.from_user.id,
-                    reference,
-                )
+                try:
+                    copied = await copy_telegram_content_reference(
+                        bot,
+                        message.chat.id if message.chat else message.from_user.id,
+                        reference,
+                    )
+                except TelegramAPIError as exc:
+                    logger.warning(
+                        "Could not copy media for product %s: %s",
+                        product_data["id"],
+                        exc,
+                    )
+                    continue
                 sent_message = await message.answer(
                     text, parse_mode="HTML", reply_markup=markup
                 )
-                if message.from_user:
+                if screen_user_id is not None:
                     await switch_active_screen(
-                        message.from_user.id,
+                        screen_user_id,
                         sent_message,
                         None if edit_message else message,
                     )
-                    active_screen_auxiliary_message_ids[message.from_user.id] = [
+                    active_screen_auxiliary_message_ids[screen_user_id] = [
                         item.message_id for item in copied
                     ]
                 return sent_message
+            media_url = candidate_url
+            media_is_video = candidate_is_video
+            break
+        if media_url:
             media_urls = cloudinary_media_urls(media_url)
             media_method = (
                 cloudinary_media_method(
@@ -4584,7 +4729,7 @@ def register_handlers(
                         media=media_url, caption=text, parse_mode="HTML"
                     )
                 )
-                await message.edit_media(
+                sent_message = await message.edit_media(
                     media=media,
                     reply_markup=markup,
                 )
@@ -4599,14 +4744,11 @@ def register_handlers(
                 )
                 if sent_media:
                     sent_message = sent_media[0]
-                    if message.from_user and len(sent_media) > 1:
-                        active_screen_auxiliary_message_ids[
-                            message.from_user.id
-                        ] = [item.message_id for item in sent_media[1:]]
-                if edit_message:
-                    await delete_replaced_message(message)
+                    auxiliary_message_ids = [
+                        item.message_id for item in sent_media[1:]
+                    ]
         elif edit_message and (message.photo or message.video):
-            await message.edit_caption(
+            sent_message = await message.edit_caption(
                 caption=text, parse_mode="HTML", reply_markup=markup
             )
         elif not edit_message:
@@ -4614,27 +4756,44 @@ def register_handlers(
                 text, parse_mode="HTML", reply_markup=markup
             )
         else:
-            await message.edit_text(text, parse_mode="HTML", reply_markup=markup)
-        if sent_message and not edit_message and message.from_user:
-            return await switch_active_screen(
-                message.from_user.id, sent_message, message
+            sent_message = await edit_text_message(
+                message, text, parse_mode="HTML", reply_markup=markup
             )
+        if sent_message and screen_user_id is not None:
+            await switch_active_screen(
+                screen_user_id,
+                sent_message,
+                message if not edit_message else None,
+            )
+            if auxiliary_message_ids:
+                active_screen_auxiliary_message_ids[
+                    screen_user_id
+                ] = auxiliary_message_ids
         return sent_message
 
     @router.callback_query(F.data.startswith("qty:"))
     async def change_quantity(callback: CallbackQuery) -> None:
         await callback.answer()
         language = await safe_user_language(store, callback.from_user.id)
-        _, product_id, quantity_text = callback.data.split(":")
+        quantity_parts = callback.data.split(":")
+        _, product_id, quantity_text, *back_page_parts = quantity_parts
+        back_page = int(back_page_parts[0]) if back_page_parts else 0
+        back_catalog_page = (
+            int(back_page_parts[1]) if len(back_page_parts) > 1 else 0
+        )
         product_data = await store.product(product_id)
         if not product_data:
-            await callback.message.edit_text(
+            await send_replacing_screen(
+                callback.message,
+                callback.from_user.id,
                 copy(
                     language,
                     "ផលិតផលនេះមិនមានទៀតទេ។",
                     "This product is no longer available.",
                 ),
-                reply_markup=keyboard([back_button("shop", language)]),
+                reply_markup=keyboard(
+                    [back_button(f"shop:catalogs:{back_catalog_page}", language)]
+                ),
             )
             return
         is_reseller = await store.is_reseller(callback.from_user.id)
@@ -4644,6 +4803,9 @@ def register_handlers(
             int(quantity_text),
             language,
             is_reseller=is_reseller,
+            back_page=back_page,
+            back_catalog_page=back_catalog_page,
+            user_id=callback.from_user.id,
         )
 
     @router.callback_query(F.data == "noop")
@@ -7024,7 +7186,7 @@ def register_handlers(
             )
             return
         if text.casefold() in {"🛍 buy now", "buy now"}:
-            await show_catalogs(message, 0, language, edit_message=False)
+            await show_catalogs(message, 0, language)
             return
         try:
             stock_add = parse_stock_add(text, language)
